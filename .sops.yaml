@@ -1,0 +1,14 @@
+# Managed by internal-app-orchestrator.
+# Informational metadata only.
+# Scripts read encryption recipient from checked-in .sops.yaml.
+creation_rules:
+  - path_regex: ^secrets/shared/[^/]+\.sops\.json$
+    age:
+      - age1cl250e9lznvnsf2lvslyl4msm588z55x98g77k5qxwamf08rtsgslhzguf
+      - age15m86p9ntvtpx40c5l5x76mpn84ltsdvvhk0mylms693ly90adgqqcndrtt
+  - path_regex: ^secrets/preview/[^/]+\.sops\.json$
+    age:
+      - age1cl250e9lznvnsf2lvslyl4msm588z55x98g77k5qxwamf08rtsgslhzguf
+  - path_regex: ^secrets/production/[^/]+\.sops\.json$
+    age:
+      - age15m86p9ntvtpx40c5l5x76mpn84ltsdvvhk0mylms693ly90adgqqcndrtt

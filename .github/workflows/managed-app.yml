@@ -1,0 +1,100 @@
+name: Managed App
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: "Manual deploy target environment"
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - production
+permissions:
+  contents: read
+jobs:
+  resolve-app-manifest:
+    name: resolve-app-manifest
+    runs-on: ubuntu-latest
+    outputs:
+      integrations_json: ${{ steps.app-manifest.outputs.integrations_json }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Resolve app manifest
+        id: app-manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/app-manifest.py --github-output "$GITHUB_OUTPUT"
+  ci-required:
+    name: ci-required
+    uses: internalsphere/internal-app-orchestrator/.github/workflows/ci-reusable.yml@main
+    secrets:
+      GH_APP_ID: ${{ secrets.GH_APP_ID }}
+      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+  secrets-policy:
+    name: secrets-policy
+    uses: internalsphere/internal-app-orchestrator/.github/workflows/secrets-policy-reusable.yml@main
+  deploy-preview:
+    name: deploy-preview
+    needs:
+      - resolve-app-manifest
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.target_env == 'preview')
+    uses: internalsphere/internal-app-orchestrator/.github/workflows/sops-sync-and-deploy-reusable.yml@main
+    with:
+      target_env: preview
+      environment_name: nexus-preview
+      project_name: nexus
+      integrations_json: ${{ needs.resolve-app-manifest.outputs.integrations_json }}
+      sops_age_key_secret_name: NEXUS_SOPS_AGE_KEY_PREVIEW
+    secrets:
+      SOPS_AGE_KEY: ${{ secrets.NEXUS_SOPS_AGE_KEY_PREVIEW }}
+      GH_APP_ID: ${{ secrets.GH_APP_ID }}
+      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+  deploy-production:
+    name: deploy-production
+    needs:
+      - resolve-app-manifest
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.target_env == 'production')
+    uses: internalsphere/internal-app-orchestrator/.github/workflows/sops-sync-and-deploy-reusable.yml@main
+    with:
+      target_env: production
+      environment_name: nexus-production
+      project_name: nexus
+      integrations_json: ${{ needs.resolve-app-manifest.outputs.integrations_json }}
+      sops_age_key_secret_name: NEXUS_SOPS_AGE_KEY_PRODUCTION
+    secrets:
+      SOPS_AGE_KEY: ${{ secrets.NEXUS_SOPS_AGE_KEY_PRODUCTION }}
+      GH_APP_ID: ${{ secrets.GH_APP_ID }}
+      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+  reconcile-inventory:
+    name: reconcile-inventory
+    permissions:
+      contents: write
+      pull-requests: write
+    needs:
+      - resolve-app-manifest
+      - deploy-production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !cancelled()
+    uses: internalsphere/internal-app-orchestrator/.github/workflows/reconcile-secrets-inventory-reusable.yml@main
+    with:
+      default_branch: main
+      source_sha: ${{ github.sha }}
+      project_name: nexus
+      integrations_json: ${{ needs.resolve-app-manifest.outputs.integrations_json }}
+    secrets:
+      GH_APP_ID: ${{ secrets.GH_APP_ID }}
+      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}

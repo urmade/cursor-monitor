@@ -1,0 +1,25 @@
+# Policy-managed files: changes must come from internal-app-orchestrator baseline sync.
+# external-viewers.yml is app-owned but requires security code-owner review on every change.
+/external-viewers.yml @internalsphere/security
+/.github/workflows/* @internalsphere/security
+/.github/CODEOWNERS @internalsphere/security
+/.sops.yaml @internalsphere/security
+/.githooks/pre-commit @internalsphere/security
+/.githooks/pre-push @internalsphere/security
+/scripts/setup-repo.sh @internalsphere/security
+/scripts/install-secrets-tooling.sh @internalsphere/security
+/scripts/app-manifest.py @internalsphere/security
+/scripts/secrets-guard.py @internalsphere/security
+/scripts/secrets.py @internalsphere/security
+/secrets/shared/.gitkeep @internalsphere/security
+/secrets/preview/.gitkeep @internalsphere/security
+/secrets/production/.gitkeep @internalsphere/security
+/secrets/inventory.yaml @internalsphere/security
+/.cursor/skills/secrets-operations/SKILL.md @internalsphere/security
+/.cursor/skills/secrets-operations/references/troubleshooting.md @internalsphere/security
+/.cursor/skills/supabase-database/SKILL.md @internalsphere/security
+/.cursor/skills/upstash-redis/SKILL.md @internalsphere/security
+/.cursor/skills/vercel-blob-store/SKILL.md @internalsphere/security
+/.cursor/skills/internalsphere-setup/SKILL.md @internalsphere/security
+/.cursor/skills/external-viewers/SKILL.md @internalsphere/security
+/QUICKSTART.md @internalsphere/security

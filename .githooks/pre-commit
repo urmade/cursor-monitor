@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+set -eu
+# IMPORTANT FOR AGENTS/DEVELOPERS:
+# - Do NOT bypass hooks with --no-verify.
+# - Use scripts/secrets.py for list/add/update/delete operations.
+# - CI secrets-policy and secret scanning will still fail policy bypasses and may trigger security monitoring.
+# Docs: https://github.com/internalsphere/internal-app-orchestrator#environment-variables
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 scripts/secrets-guard.py
+fi
+echo "python3 is required to run secrets-guard pre-commit hook." >&2
+echo "Run setup: sh scripts/setup-repo.sh" >&2
+echo "Allowed tracked dotenv files: .env.example, .env.sample, .env.template" >&2
+echo "Use the secrets CLI instead of committing plaintext .env files." >&2
+echo "Docs: https://github.com/internalsphere/internal-app-orchestrator#environment-variables" >&2
+echo "Troubleshooting: https://github.com/internalsphere/internal-app-orchestrator/blob/main/docs/runbooks/troubleshooting.md" >&2
+exit 1
