@@ -1,24 +1,19 @@
-           0 (%0)           ane — Vision & Feature Spec (PoC)
-  Go To Top            (<)  
-  Go To Bottom         (>)   built on Cursor for teams where **AI agents execute and h
-                            *. This document is the single source of truth for PoC sco
-  Search For Agentic (C-r)  r implementation planning.
-  Type Agentic       (C-y)  
-  Copy Agentic         (c)  
-  Copy Line            (l)  
-                            
-  Horizontal Split     (h)  
-  Vertical Split       (v)  an is the worker and the tool is the record. In an agentic
-                            n is cheap, parallel, and fast; **human attention is the b
-  Swap Up                   
-  Swap Down                 
-  Swap Marked               with agents." It is a **control plane**:
-                            
-  Kill                 (X)  owns |
-  Respawn              (R)  
-  Mark                 (m)  es, labels | Cloud Agents / Automations (the actual agenti
-  Zoom                      
-                             Agent runtime, models, sandboxes, environments |
+# Agentic Project Control Plane — Vision & Feature Spec (PoC)
+
+A project-management product built on Cursor for teams where **AI agents execute and humans monitor and intervene**. This document is the single source of truth for PoC scope and the starting point for implementation planning.
+
+---
+
+## 1. Product thesis
+
+Jira and Linear assume a human is the worker and the tool is the record. In an agentic SDLC that inverts: execution is cheap, parallel, and fast; **human attention is the bottleneck**.
+
+This product is not "Linear with agents." It is a **control plane**:
+
+| This system owns | Cursor owns |
+|---|---|
+| Work items, Projects, stages, labels | Cloud Agents / Automations (the actual agentic work) |
+| Policies, gates, budgets | Agent runtime, models, sandboxes, environments |
 | Derived state, attention routing | Code review (Bugbot, Cursor Review) |
 | Run tracking, cost, loops | Code intelligence, editor, chat surfaces |
 | Specs and decision memory (in our DB) | Repositories |
