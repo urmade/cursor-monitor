@@ -1,0 +1,4 @@
+{
+  "error": "agent_id_conflict",
+  "message": "Agent id already exists (agent_id_conflict)"
+}

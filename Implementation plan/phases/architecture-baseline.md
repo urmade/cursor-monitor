@@ -2,6 +2,19 @@
 
 Shared technical context for every phase plan. This document describes the platform we are building on, the shape of the codebase, and the conventions each phase assumes. Phase plans reference it rather than repeating it.
 
+### Phase 0 observations (2026-07-26)
+
+> The following deltas replace pre-spike assumptions. Evidence and ADRs live under `docs/decisions/` (see especially `phase-0-report.md`, ADR-0001–0007). They are annotated inline where they change a prior claim.
+
+| Topic | Pre–Phase 0 assumption | After Phase 0 | ADR / evidence |
+|---|---|---|---|
+| Deploy layout | Next.js under `apps/web` with `vercel.root_directory: apps/web` | **Confirmed:** Next.js under `apps/web`; Root Directory reconciliation applies. Interim root-layout deploy is obsolete. | ADR-0001 |
+| Invocation | Cloud Agents API primary; webhook adapter to be proven in Spike B | **API path live-proven** (inject MCP, poll to terminal). Spike B blocked — no Nexus webhook automation (Q4). Keep webhook as a secondary port. | ADR-0002, `evidence/04-spike-a-live.md`, `evidence/06-spike-b-blocker.md` |
+| Observation | Poll-first; cancel available for recovery | Poll + cron confirmed. **Cancel currently returns provider `500`** — do not trust it; deadlines + stuck watchdog are mandatory. | ADR-0003, `evidence/03-api-failure-probes.md` |
+| MCP auth | Injected per-run bearer + protection bypass | **Live proven** against Passport-protected preview (no-repo agent). | ADR-0004, `evidence/04-spike-a-live.md` |
+| Cost | Admin API `filtered-usage-events` for reconciled `chargedCents` | Prefer **`GET /v1/agents/{id}/usage`**, which already returns per-run `chargedCents` / `rawCostCents`. Admin key invalid on our tier — optional later. | ADR-0007, `evidence/01-usage-api.md` |
+| Terminal without report | Design expectation | **Live:** provider `FINISHED` with no MCP write → `completed_without_report`. | ADR-0005, `evidence/05-completed-without-report.md` |
+
 ---
 
 ## 1. The platform we inherit
@@ -31,7 +44,7 @@ vercel:
   root_directory: apps/web
 integrations:
   db:
-    type: supabase        # Phase 0 — Postgres. Sole system of record.
+    type: supabase        # Phase 0 — Postgres. Sole system of record. Proven on preview.
   cache:
     type: upstash-kv      # Phase 2 — distributed locks, rate limits, idempotency, short-lived caches.
 ```
@@ -45,27 +58,30 @@ integrations:
 
 A pnpm + Turborepo monorepo with one deployable app. The package split exists to keep domain logic testable without Next.js and to make the three delivery surfaces (UI, REST, MCP) thin adapters over one service layer.
 
+> **Phase 0 observation (ADR-0001).** The App Router lives under **`apps/web`** with `vercel.root_directory: apps/web`. Domain packages remain under `packages/`.
+
 ```
 .
-├── apps/
-│   └── web/                        # the only deployable: Next.js App Router
-│       ├── app/
-│       │   ├── (app)/              # authenticated human UI (RSC)
-│       │   │   ├── inbox/          # P6
-│       │   │   ├── projects/[projectKey]/
-│       │   │   │   ├── board/      # P1 → P6
-│       │   │   │   ├── items/[key]/# P1 → P7
-│       │   │   │   ├── settings/   # P1 → P7
-│       │   │   │   └── policies/   # P3 (Policy Studio, if chosen)
-│       │   │   └── admin/          # P9
-│       │   ├── api/
-│       │   │   ├── mcp/route.ts    # P2 — MCP streamable HTTP endpoint
-│       │   │   ├── v1/             # P8 — public REST API
-│       │   │   ├── cron/           # P2 — scheduler entry points
-│       │   │   └── health/route.ts # P0
-│       │   └── layout.tsx
-│       ├── vercel.json             # framework preset + cron definitions
-│       └── next.config.ts
+├── apps/web/                       # Next.js App Router (the only deployable)
+│   ├── app/
+│   │   ├── (app)/                  # authenticated human UI (RSC) — P1+
+│   │   │   ├── inbox/              # P6
+│   │   │   ├── projects/[projectKey]/
+│   │   │   │   ├── board/          # P1 → P6
+│   │   │   │   ├── items/[key]/    # P1 → P7
+│   │   │   │   ├── settings/       # P1 → P7
+│   │   │   │   └── policies/       # P3 (Policy Studio, if chosen)
+│   │   │   └── admin/              # P9
+│   │   ├── api/
+│   │   │   ├── mcp/route.ts        # P2 — MCP streamable HTTP endpoint (stub after P0)
+│   │   │   ├── v1/                 # P8 — public REST API
+│   │   │   ├── cron/               # P0+ — scheduler entry points
+│   │   │   └── health/route.ts     # P0 — kept
+│   │   ├── layout.tsx
+│   │   └── page.tsx
+│   ├── src/server/identity.ts      # Passport identity — kept from Phase 0
+│   ├── vercel.json                 # framework preset + cron definitions
+│   └── next.config.ts
 ├── packages/
 │   ├── contracts/                  # zod schemas + inferred types: MCP tools, REST DTOs,
 │   │                               # stage report, events, condition DSL. No runtime deps.
@@ -81,13 +97,13 @@ A pnpm + Turborepo monorepo with one deployable app. The package split exists to
 │   │   ├── events/    webhooks/                         # P1 outbox, P8 delivery
 │   │   ├── estimates/ analytics/                        # P9
 │   │   └── authz/                                       # P1, hardened P9
-│   ├── cursor-client/              # typed client for Cursor Cloud Agents v1 + Admin API
+│   ├── cursor-client/              # typed Cloud Agents v1 client (Admin API optional) — kept from P0
 │   ├── mcp/                        # MCP tool definitions bound to core services
-│   ├── jobs/                       # durable queue, worker registry, scheduler
+│   ├── jobs/                       # durable queue, worker registry, scheduler — scaffolding from P0
 │   ├── ui/                         # shared React components (shadcn/ui based)
 │   └── config/                     # eslint, tsconfig, tailwind, vitest presets
 ├── docs/
-│   ├── decisions/                  # ADRs written during Phase 0 and after
+│   ├── decisions/                  # ADRs from Phase 0 and after (including phase-0-report.md)
 │   ├── mcp-contract.md             # the frozen agent-facing contract (P2)
 │   └── runbook.md                  # on-call/demo runbook (P9)
 └── Implementation plan/            # this planning material
@@ -96,13 +112,13 @@ A pnpm + Turborepo monorepo with one deployable app. The package split exists to
 **Dependency rule (enforced by an ESLint boundaries rule in Phase 1):**
 
 ```
-apps/web  →  mcp, jobs, core, db, contracts, ui, cursor-client
-core      →  db, contracts, cursor-client
-db        →  contracts
-contracts →  (nothing)
+apps/web (Next.js)  →  mcp, jobs, core, db, contracts, ui, cursor-client
+core                →  db, contracts, cursor-client
+db                  →  contracts
+contracts           →  (nothing)
 ```
 
-`packages/core` must never import from `next/*`, `react`, or `apps/web`. If a service needs the current user, it takes an `Actor` argument. This is what makes the same service callable from a React Server Component, a REST handler, an MCP tool, and a background job.
+`packages/core` must never import from `next/*`, `react`, or the Next app tree (`apps/web/app/`, `apps/web/src/server/`). If a service needs the current user, it takes an `Actor` argument. This is what makes the same service callable from a React Server Component, a REST handler, an MCP tool, and a background job.
 
 ### 2.1 Toolchain
 
@@ -129,7 +145,7 @@ Browser (Okta Passport)                Cursor cloud agent                 Extern
         ▼                        ▼                            ▼
   Supabase Postgres        Upstash Redis                api.cursor.com
   (state + outbox +        (locks, rate limits,         (create agent, poll run,
-   job queue)               idempotency)                 usage, cancel)
+   job queue)               idempotency)                 usage; cancel best-effort)
         ▲
         │ every minute
   Vercel Cron ──► /api/cron/tick ──► claims jobs from the queue
@@ -157,7 +173,7 @@ export async function claimJobs(db: Db, workerId: string, limit = 20) {
 }
 ```
 
-- `/api/cron/tick` runs every minute (declared in `apps/web/vercel.json`), claims a batch, and executes handlers until near the function time limit, then returns. Long queues drain over successive ticks.
+- `/api/cron/tick` runs every minute (declared in root `vercel.json`; **Phase 0 observation:** route works when invoked with `CRON_SECRET`; confirm automatic minute cadence in project settings if ≤1m ticks are load-bearing), claims a batch, and executes handlers until near the function time limit, then returns. Long queues drain over successive ticks.
 - Handlers are registered by name in `packages/jobs/src/registry.ts` and must be **idempotent** — a job can run twice.
 - Failures use exponential backoff with jitter and a `max_attempts` cap; exhausted jobs move to `status = 'dead'` and raise an internal event.
 - Latency-sensitive work (launching a run right after a human clicks) is enqueued *and* attempted inline via `waitUntil()` from `@vercel/functions`; the queue is the safety net, not the primary path.
@@ -229,7 +245,7 @@ export async function transitionWorkItem(
 Vercel Passport terminates Okta SSO before our code runs and forwards a Vercel-signed JWT in `x-vercel-oidc-passport-token`. Per the internalsphere skill: read it **server-side only**, use `external_sub` as the stable user id, and treat `email`/`name` as optional.
 
 ```ts
-// apps/web/src/server/identity.ts
+// src/server/identity.ts  — kept from Phase 0 (path updated with root Next layout)
 export async function currentUser(): Promise<AppUser | null> {
   const token = (await headers()).get('x-vercel-oidc-passport-token');
   if (!token) return devFallbackUser();          // local dev only; asserts !process.env.VERCEL
@@ -244,8 +260,10 @@ A missing header is expected locally and never falls back to a user-supplied ide
 
 Cursor cloud agents and external API clients cannot complete Passport. Two headers get them in:
 
-1. `x-vercel-protection-bypass: <PROTECTION_BYPASS_SECRET>` — gets the request past Vercel's deployment protection. This must be requested in `#proj-internalsphere` ("Protection Bypass for Automation"), exactly as the internalsphere skill describes for webhook integrations. **Phase 0 cannot complete without it.**
+1. `x-vercel-protection-bypass: <PROTECTION_BYPASS_SECRET>` — gets the request past Vercel's deployment protection. Synced as `VERCEL_PROTECTION_BYPASS`. **Phase 0 observation (ADR-0004):** without this header, preview `/api/health` returns HTTP 302 (Passport); with it + a run bearer, a cloud agent completed MCP tool calls on `*.internalsphere.com`.
 2. `Authorization: Bearer <nexus token>` — our own authentication, checked in the route handler. Bypass only removes the edge gate; it grants nothing inside the app.
+
+> **Phase 0 observation (egress).** Cloud-agent environments that call Internalsphere hosts need unrestricted egress (`egressMode: allow_all` or equivalent). An earlier restricted VM saw TLS resets to `*.internalsphere.com`; that was network policy, not Passport. See `docs/decisions/evidence/02-egress-blocker.md`.
 
 Two token families:
 
@@ -264,29 +282,33 @@ Both are stored as SHA-256 hashes with a non-secret lookup prefix; the plaintext
 
 ## 7. Verified integration facts
 
-Confirmed against Cursor's public documentation while writing these plans. Re-verify in Phase 0 step 0.4 — the Cloud Agents v1 API is in public beta and *will* change.
+Confirmed against Cursor's public documentation while writing these plans, then **re-verified in Phase 0** (2026-07-26). The Cloud Agents v1 API remains in public beta and *will* change — keep fixture tests + the Phase 2 nightly live smoke.
 
 **Cloud Agents API v1** (`https://api.cursor.com`, Basic or Bearer auth with a user or service-account API key):
 
-| Capability | Endpoint | Why it matters here |
-|---|---|---|
-| Create agent + first run | `POST /v1/agents` | Accepts `prompt.text`, `model`, `repos[]`, `autoCreatePR`, **`mcpServers[]` with per-server `headers`**, and a client-supplied `agentId` (`bc-<uuid>`) that returns `409 agent_id_conflict` on replay |
-| Follow-up run | `POST /v1/agents/{id}/runs` | Resumes the same conversation and workspace; `mcpServers` can be replaced per run. Only one active run per agent — otherwise `409 agent_busy` |
-| Read run | `GET /v1/agents/{id}/runs/{runId}` | `status`, `durationMs`, `result`, `git.branches[]` |
-| Live events | `GET /v1/agents/{id}/runs/{runId}/stream` | SSE with `Last-Event-ID` resume, heartbeats, and a retention window after which it returns `410 stream_expired` |
-| Cancel | `POST /v1/agents/{id}/runs/{runId}/cancel` | Terminal; `409 run_not_cancellable` if already finished |
-| Token usage | `GET /v1/agents/{id}/usage?runId=…` | Per-run `inputTokens`, `outputTokens`, `cacheWriteTokens`, `cacheReadTokens`, and a `usageUuid` |
-| Artifacts | `GET /v1/agents/{id}/artifacts`, `…/artifacts/download` | 15-minute presigned URLs — store the path, mint the URL on demand |
-| Metadata | `GET /v1/me`, `GET /v1/models`, `GET /v1/repositories` | `/v1/repositories` is rate-limited to 1/user/min — cache aggressively |
+| Capability | Endpoint | Why it matters here | Phase 0 status |
+|---|---|---|---|
+| Create agent + first run | `POST /v1/agents` | Accepts `prompt.text`, `model` as **`{ id }`** (string rejected), `repos[]`, `autoCreatePR`, **`mcpServers[]` with per-server `headers`**, and a client-supplied `agentId` (`bc-<uuid>`) that returns `409 agent_id_conflict` on replay | Live: no-repo + `internalsphere/nexus`; MCP injection works |
+| Follow-up run | `POST /v1/agents/{id}/runs` | Resumes the same conversation and workspace; `mcpServers` can be replaced per run. Only one active run per agent — otherwise `409 agent_busy` | `409 agent_busy` confirmed |
+| Read run | `GET /v1/agents/{id}/runs/{runId}` | `status`, `durationMs`, `result`, `git.branches[]` | Durable terminal after finish; cron poll sufficient |
+| Live events | `GET /v1/agents/{id}/runs/{runId}/stream` | SSE (non-JSON body) with retention window → `410 stream_expired` | Fixture-covered; opportunistic UI only (D7) |
+| Cancel | `POST /v1/agents/{id}/runs/{runId}/cancel` | **Do not rely on this for recovery** | **Phase 0 observation:** returns provider `500`; run stayed `RUNNING` |
+| Token usage + cost | `GET /v1/agents/{id}/usage?runId=…` | Per-run tokens, `usageUuid`, and **`cost.chargedCents` / `cost.rawCostCents`** | Prompt at terminal; prefer this over Admin API (ADR-0007) |
+| Artifacts | `GET /v1/agents/{id}/artifacts`, `…/artifacts/download` | 15-minute presigned URLs — store the path, mint the URL on demand | Not re-probed in P0 |
+| Metadata | `GET /v1/me`, `GET /v1/models`, `GET /v1/repositories` | `/v1/repositories` is rate-limited to 1/user/min — cache aggressively | Service-account `/v1/me` OK |
 
-Two documented quirks the design must absorb:
+Two documented quirks the design must absorb (unchanged):
 
 - **`git` is per-agent, not per-run.** Every run on an agent returns the same branch snapshot. Branch/PR attribution to a specific run is best-effort; we record the snapshot at run terminal time and never treat it as authoritative for an individual run. This is the "per-agent git snapshot quirk" in `VISION.md` §F1.
-- **v1 webhooks are "coming soon".** Only the legacy v0 API supports outbound webhooks. The plan therefore assumes **poll-first observation** and treats any webhook as an accelerator (D7).
+- **v1 webhooks are "coming soon".** Only the legacy v0 API supports outbound webhooks. The plan therefore assumes **poll-first observation** and treats any webhook as an accelerator (D7) — **confirmed in Phase 0** (ADR-0003).
 
 **Automations** (`VISION.md`'s primary orchestration concept): created in the Cursor UI or via `/automate`; a webhook trigger exposes a private endpoint that requires `Authorization: Bearer <automation key>`, and the POSTed JSON payload is appended to the agent's instructions. Automations carry their own MCP configuration and run as the author's identity or, when Team Owned, as the team's automations service account.
 
-**Admin API** (Enterprise, team-scoped key): `POST /teams/filtered-usage-events` returns per-event `chargedCents`, `tokenUsage`, `model`, `isHeadless`, `serviceAccountId`, and — decisively for us — **`cloudAgentId` and `automationId`, both of which can be filtered on**. Data is aggregated hourly; poll at most once per hour. This is the reconciliation path in Phase 4, and `cloudAgentId` is the join key back to our `runs` table.
+> **Phase 0 observation (ADR-0002 / Q4).** Spike B could not run — no hand-authored Nexus webhook automation exists. Primary path remains the Cloud Agents API with injected MCP. The webhook adapter stays as a port; companion automations remain a Phase 2 external dependency.
+
+**Admin API** (Enterprise, team-scoped key): `POST /teams/filtered-usage-events` is documented to return per-event `chargedCents` with `cloudAgentId` / `automationId` filters, hourly aggregation.
+
+> **Phase 0 observation (ADR-0007).** Our `CURSOR_ADMIN_API_KEY` returned `401 Invalid Team API Key`. **Do not block Phase 4 on Admin reconciliation.** Prefer per-run `chargedCents` from `GET /v1/agents/{id}/usage`. Treat Admin reconciliation as an optional upgrade if a valid team Admin key appears later.
 
 ---
 

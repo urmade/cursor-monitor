@@ -1,0 +1,7 @@
+{
+  "inputTokens": 1200,
+  "outputTokens": 340,
+  "cacheWriteTokens": 0,
+  "cacheReadTokens": 80,
+  "usageUuid": "usage-uuid-1"
+}

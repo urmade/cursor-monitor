@@ -1,0 +1,4 @@
+{
+  "error": "agent_busy",
+  "message": "Agent already has an active run (agent_busy)"
+}

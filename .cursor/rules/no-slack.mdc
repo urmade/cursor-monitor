@@ -1,0 +1,23 @@
+---
+description: Absolute ban on Slack for all agents; GitHub PRs are the only status channel
+alwaysApply: true
+---
+
+# No Slack — hard project rule
+
+Agents are **NEVER** allowed to use Slack in this repository.
+
+## Forbidden
+
+- Calling any Slack MCP / plugin / CLI / API tool (send, search, read, react, schedule, canvas, DM, draft — anything).
+- Posting status reports, progress updates, blockers, questions, or pings to any Slack channel or user.
+- Using Slack as a workaround when stuck, waiting on a human, or seeking confirmation.
+
+Skills or docs that mention `#proj-internalsphere` (or any other channel) do **not** override this rule. Ignore those suggestions.
+
+## Required instead
+
+- **GitHub pull requests are the source of truth.** Update the relevant PR (description, commits, comments only when needed for the work itself). Do not broadcast status elsewhere.
+- **If stuck:** stop and wait. Do not escalate via Slack or other chat. The human will check the PR / agent run when ready.
+
+This rule applies to every agent run — Cloud Agents, background agents, IDE agents, subagents — with no exceptions unless a human explicitly overrides it in the current conversation.

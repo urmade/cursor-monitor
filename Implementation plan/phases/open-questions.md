@@ -10,33 +10,27 @@ Questions that need a human answer, ordered by how early they block work. Each s
 
 ### Q1 — Do we have a Cursor service account and an appropriate plan tier?
 
-**Needs.** A team or enterprise service-account API key for the Cloud Agents API, plus a team-scoped Admin API key for usage reconciliation. `filtered-usage-events` — the only source of reconciled `chargedCents` — is documented as Enterprise.
+**Status (2026-07-26).** Service-account key `cloud-agent` works for Cloud Agents API (`GET /v1/me`, create agents, usage with `chargedCents`). Team Admin API key currently `401 Invalid Team API Key`. See `docs/decisions/ADR-0007-cost-data-availability.md` — Admin API is no longer required for per-run charges on the cloud-agent path.
 
-**If late.** Phase 0 cannot start at all. Phase 4 ships estimate-only costs, which is survivable but must be labelled in the UI.
+**Needs (remaining).** Valid team Admin key only if we want `filtered-usage-events` reconciliation beyond `/v1/agents/{id}/usage`.
 
-**Default.** Proceed with a personal API key for the Phase 0 spike only, and treat the service account as a Phase 2 blocker.
+**Who.** Cursor team admin (Admin key only).
 
-**Who.** Cursor team admin.
+### Q2 — Can cloud agents reach our MCP endpoint?
 
-### Q2 — Can we get a Protection Bypass for Automation on the `nexus` Vercel project?
+**Status (2026-07-26, resolved).** Protection Bypass secret works. Current cloud-agent environment has `egressMode: allow_all`; `*.internalsphere.com` is reachable. Live Spike A: injected MCP + bypass + run bearer → `spike_get_ticket` / `spike_post_report` succeeded (`docs/decisions/evidence/04-spike-a-live.md`, ADR-0004). Without bypass, Passport still returns 302. Earlier TLS-reset findings applied only to the prior restricted environment (historical note in `02-egress-blocker.md`).
 
-**Needs.** A request in `#proj-internalsphere` explaining that Cursor cloud agents must reach `/api/mcp` on both preview and production deployments, which Passport otherwise blocks. The internalsphere skill documents this as the sanctioned path for webhook integrations.
+**Needs.** None for Phase 0.
 
-**If late.** The entire orchestration model is unprovable. There is no workaround inside this platform — a second, unprotected host would be a new Vercel project outside the orchestrator's model.
-
-**Default.** None. This is a hard dependency and should be requested on day one.
-
-**Who.** `#proj-internalsphere`.
+**Who.** n/a (closed).
 
 ### Q3 — Which repositories may the PoC's agents run against?
 
-**Needs.** At least one real repository that the Cursor org can start cloud agents in, with permission to open branches and PRs. Ideally a sandbox repository rather than a production service.
+**Status (2026-07-26).** `internalsphere/nexus` accepts cloud agents. `urmade/nexus-test-*` return `400 repository_access` (Cursor GitHub App not installed). No-repo agents work for MCP-only spikes.
 
-**If late.** Phase 0 spikes can use a scratch repository, but Phase 2's demo needs something a stakeholder recognises.
+**Default in use.** No-repo agents, or `internalsphere/nexus` with `autoCreatePR: false`.
 
-**Default.** A dedicated `nexus-poc-sandbox` repository.
-
-**Who.** Project owner.
+**Who.** Project owner if dedicated sandboxes remain desired.
 
 ---
 
@@ -45,6 +39,8 @@ Questions that need a human answer, ordered by how early they block work. Each s
 ### Q4 — Who authors the companion automations, and when?
 
 `Implementation Phases.md` calls this "the most commonly underestimated dependency in the plan", and it is external to this codebase: scoping, plan, and implementation automations that read the ticket via MCP and post a stage report. Phase 2's demo is impossible without at least the scoping one.
+
+**Status (2026-07-26).** Phase 0 Spike B blocked: no hand-authored Nexus webhook automation exists (`docs/decisions/evidence/06-spike-b-blocker.md`). Primary path remains Cloud Agents API.
 
 **If late.** Phase 2 can be built against a stub agent (a prompt we control that exercises the same MCP tools), but the phase does not close until a real automation does it.
 
@@ -66,23 +62,15 @@ D5 explains the tension: the direct Cloud Agents API path requires us to store a
 
 ### Q6 — What does the managed `ci-required` workflow actually run?
 
-We cannot read `internalsphere/internal-app-orchestrator` from here, so it is unknown whether `ci-required` runs `pnpm lint` / `test` / `build` for a monorepo, and whether an app-owned workflow file may be added alongside the managed one without being reconciled away.
+**Status (2026-07-26).** On PR #7, `ci-required` completes successfully alongside `resolve-app-manifest` and `secrets-policy`. It does **not** appear to run full `pnpm test`/`build` as a hard local-equivalent gate from this agent's perspective — treat unit tests as required locally/in-package until we confirm orchestrator script discovery. Deploy path runs migrations (`db:exec-migrations`) and Vercel build.
 
-**If unanswered.** Tests exist but may not gate merges — an unacceptable state for a system that enforces process.
-
-**Default.** Define standard `lint`, `typecheck`, `test`, `build` scripts at the workspace root, observe what CI does on the Phase 0 deploy PR, and ask in `#proj-internalsphere` if the scripts are not picked up.
-
-**Who.** `#proj-internalsphere`; verified empirically in Phase 0.
+**Who.** `#proj-internalsphere` for definitive script list.
 
 ### Q7 — Is a Vercel cron schedule of one minute available on this project?
 
-The scheduler assumes minute-granularity cron. Team plan tier and any orchestrator-level constraints on `vercel.json` need confirming.
+**Status (2026-07-26).** Cron route `/api/cron/tick` is deployed and works when invoked with `CRON_SECRET` (Spike A poller driven this way during demos). Automatic minute cadence on the Vercel project was not separately audited; treat as available via `vercel.json` crons and confirm in project settings if Phase 1 needs guaranteed ≤1m ticks.
 
-**If unavailable.** Fall back to a self-triggering job chain (a handler that re-invokes the tick endpoint) or accept coarser polling with slower UI feedback.
-
-**Default.** Minute cron; verified in Phase 0 step 0.1.
-
-**Who.** Verified empirically; `#proj-internalsphere` if it fails.
+**Who.** Empirically OK for Phase 0; platform UI check optional.
 
 ---
 

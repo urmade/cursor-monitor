@@ -6,6 +6,16 @@
 >
 > **Depends on.** Phase 0 decisions on the shape of core objects. Nothing external. **Unblocks.** Every subsequent phase.
 
+### Phase 0 observations that shape this phase (2026-07-26)
+
+> Source: `docs/decisions/phase-0-report.md`, ADR-0001, ADR-0006. These are planning deltas from live spike evidence — they do not change the product outcome above.
+
+- **Deploy layout.** Build UI and API routes under `apps/web` (`apps/web/app/`, `apps/web/src/server/`) with `vercel.root_directory: apps/web` (ADR-0001). Shared packages stay in `packages/`.
+- **Survivors already on disk.** Phase 1 extends `@nexus/db` (migrations + client), `apps/web/src/server/identity.ts` (Passport), `/api/health`, and jobs scaffolding — it does not re-scaffold the monorepo.
+- **Spike rehearsal of agent-facing reads.** The disposable spike used ticket `{ id, title, body, labels }` plus a run nonce. Phase 1's work-item/spec shape should stay rich enough that Phase 2's `get_ticket` / `get_spec` can return what an agent actually needed in that loop (see phase-0-report §"What Phase 1–2 must design around").
+- **Identity.** Passport + `external_sub` is the human principal model (ADR-0006). Role matrix (owner/maintainer/member/viewer) remains a Phase 1 deliverable; machine tokens stay out of product UI until Phase 2/8.
+- **Teardown.** Spike tables/routes/secrets are removed in Phase 0 step 0.9 before Phase 1 merges product schema. Do not resurrect `spike_*` names.
+
 ---
 
 ## 1. Objective and scope
@@ -37,9 +47,9 @@ Organisations and users; projects with pipelines and label taxonomies; work item
 
 ## 2. Preconditions
 
-- Phase 0 complete and torn down: the monorepo deploys, migrations run in CI, Passport identity works, and `main` has no spike artefacts.
-- The object-shape findings from Phase 0 (`docs/decisions/phase-0-report.md`) have been read; in particular, whatever the run/report spike learned about what agents actually need to read.
-- Q6 (what `ci-required` runs) answered or being chased, so tests can gate merges.
+- Phase 0 complete and torn down: the monorepo deploys from **`apps/web`**, migrations run in CI, Passport identity works, and `main` has no spike artefacts (**Phase 0 observation:** teardown via `0002_drop_spike.sql` + removal of `p0.spike` surface).
+- The object-shape findings from Phase 0 (`docs/decisions/phase-0-report.md` and ADRs 0001–0007) have been read; in particular, whatever the run/report spike learned about what agents actually need to read.
+- Q6 (what `ci-required` runs) answered or being chased, so tests can gate merges. **Phase 0 observation:** on PR #7, `ci-required` completed but did not clearly run full `pnpm test`/`build` as a hard gate — keep treating local/in-package tests as required until orchestrator script discovery is confirmed.
 
 ---
 

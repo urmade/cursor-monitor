@@ -1,0 +1,14 @@
+{
+  "agent": {
+    "id": "bc-11111111-1111-1111-1111-111111111111",
+    "name": "spike-agent",
+    "status": "ACTIVE",
+    "latestRunId": "run-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    "url": "https://cursor.com/agents/bc-11111111-1111-1111-1111-111111111111"
+  },
+  "run": {
+    "id": "run-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    "agentId": "bc-11111111-1111-1111-1111-111111111111",
+    "status": "CREATING"
+  }
+}

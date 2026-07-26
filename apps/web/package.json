@@ -1,0 +1,42 @@
+{
+  "name": "@nexus/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "next": "16.2.12",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "@nexus/contracts": "workspace:*",
+    "@nexus/core": "workspace:*",
+    "@nexus/cursor-client": "workspace:*",
+    "@nexus/db": "workspace:*",
+    "@nexus/jobs": "workspace:*",
+    "@nexus/mcp": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "drizzle-orm": "^0.44.2",
+    "jose": "^6.0.11",
+    "zod": "^3.25.67",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.12",
+    "tailwindcss": "^4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4",
+    "@types/uuid": "^10.0.0"
+  }
+}

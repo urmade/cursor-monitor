@@ -6,6 +6,18 @@
 >
 > **Milestone.** M2 — Usable. **Depends on.** Phase 0, Phase 1, and companion automations authored outside this system. **Unblocks.** Gates, cost, loops, attention.
 
+### Phase 0 observations that shape this phase (2026-07-26)
+
+> Source: `docs/decisions/phase-0-report.md`, ADR-0002–0005, evidence `04`–`06`. These change how we implement the outcome — not whether the outcome stands.
+
+- **Primary invocation path is Cloud Agents API + injected MCP** (ADR-0002). Live Spike A: no-repo agent called `spike_get_ticket` / `spike_post_report` on a Passport-protected preview with per-run bearer + bypass (`evidence/04-spike-a-live.md`).
+- **Spike B (automation webhook) deferred on Q4** — no Nexus webhook automation exists (`evidence/06-spike-b-blocker.md`). Keep the `automation_webhook` adapter as a port; do not block launcher/observer work on it. Companion automations remain required to close the phase's binding/demo story (step 2.9); until they exist, demos can use the `cloud_agent` adapter with a thin prompt template (D5).
+- **`completed_without_report` is live-proven** (`evidence/05-completed-without-report.md`). Provider `FINISHED` without an MCP stage report must never be treated as success. (Named `completed_no_report` in the state machine below — same concept.)
+- **Cancel is unreliable.** `POST …/cancel` returned provider `500` and left the run `RUNNING` (`evidence/03-api-failure-probes.md`). Recovery = deadlines + stuck watchdog + poll, not cancel success. UI "Cancel" may still call the API but must surface provider failure honestly.
+- **Usage at terminal includes `chargedCents`.** Observer should persist tokens *and* provider cost fields from `GET /v1/agents/{id}/usage` for Phase 4 (ADR-0007).
+- **Paths.** MCP/cron routes live at `apps/web/app/api/…` (ADR-0001).
+- **Client quirks to absorb.** `model` must be `{ id }`; replay → `409 agent_id_conflict`; busy → `409 agent_busy` — already reflected in `@nexus/cursor-client` from Phase 0.
+
 ---
 
 ## 1. Objective and scope
@@ -38,11 +50,11 @@ The frozen MCP contract; the MCP server; automation bindings and their resolutio
 
 ## 2. Preconditions
 
-- Phase 0's invocation ADR (`docs/decisions/ADR-0002-invocation-path.md`) is merged and its failure matrix is understood.
+- Phase 0's invocation ADR (`docs/decisions/ADR-0002-invocation-path.md`) is merged and its failure matrix is understood (**Phase 0 observation:** matrix in ADR-0005; demo-critical rows live; cancel/SSE rows noted as probes/fixtures).
 - Phase 1 is complete: work items, specs, stage instances, transitions, events, jobs.
-- A Cursor **service account** API key exists in `secrets/` — not a personal key, because runs will be attributed to it (Q1).
-- The protection bypass is in place and proven from Phase 0.
-- **At least one companion automation for scoping exists** (Q4). If it does not, step 2.9 builds a minimal one; the phase cannot close on a stub.
+- A Cursor **service account** API key exists in `secrets/` — not a personal key, because runs will be attributed to it (Q1). **Phase 0 observation:** service-account key `cloud-agent` already worked for Spike A.
+- The protection bypass is in place and proven from Phase 0 (ADR-0004).
+- **At least one companion automation for scoping exists** (Q4), *or* the demo uses the proven `cloud_agent` adapter until Q4 lands. **Phase 0 observation:** Spike B is blocked until a webhook automation exists; step 2.9 still required to close the automation-binding proof, but the invoke→MCP→observe loop is already proven on the API path.
 - Agreement on the minimum stage report content — settled by step 2.1, before anything consumes it.
 
 ---
@@ -141,11 +153,13 @@ pending ──► launched ──► running ──► completed
 
 `completed_no_report` is the state Phase 0 step 0.6 scenario 3 exists to justify: the provider says FINISHED but nothing arrived through MCP. Reporting that as success is the single most dangerous thing this system could do. It is terminal, it is distinct, and in Phase 6 it becomes an inbox item.
 
-A `stuck` watchdog complements it: a run that has been `launched` without provider acknowledgement, or `running` past its deadline, is force-terminated and recorded with the reason.
+> **Phase 0 observation (`evidence/05-completed-without-report.md`).** Live demo with `scenario: "no_mcp"`: provider terminal + no report matching the run nonce → status rewritten to `completed_without_report`, with duration and tokens still recorded. Close-out logic must preserve that distinction.
+
+A `stuck` watchdog complements it: a run that has been `launched` without provider acknowledgement, or `running` past its deadline, is force-terminated and recorded with the reason. **Phase 0 observation:** do not implement "stuck recovery" as "call cancel and trust the provider" — cancel returned `500` while the run stayed `RUNNING` (ADR-0003).
 
 ### 3.5 Observation
 
-Per D7, a job (`poll_run`) per active run, rescheduling itself with adaptive delay: 5 s for the first minute, 15 s to five minutes, then 60 s, with a per-run deadline (default 60 minutes, configurable per binding). On terminal it fetches `GET /v1/agents/{id}/usage?runId=…`, stores token counts and `usageUuid` (the join key Phase 4 needs), records `git.branches[]` as a **best-effort, agent-scoped** snapshot (per the documented quirk), and enqueues the close-out.
+Per D7 (confirmed ADR-0003), a job (`poll_run`) per active run, rescheduling itself with adaptive delay: 5 s for the first minute, 15 s to five minutes, then 60 s, with a per-run deadline (default 60 minutes, configurable per binding). On terminal it fetches `GET /v1/agents/{id}/usage?runId=…`, stores token counts, `usageUuid`, and **provider cost fields (`chargedCents` / `rawCostCents`) when present** (**Phase 0 observation / ADR-0007:** these arrive promptly on the usage endpoint), records `git.branches[]` as a **best-effort, agent-scoped** snapshot (per the documented quirk), and enqueues the close-out.
 
 The SSE stream is used only by the UI, and only while a user watches a run: a route handler proxies it, and any failure — including `410 stream_expired` — degrades silently to polling. No state is ever derived solely from the stream.
 
@@ -337,7 +351,8 @@ launchRun(ctx, { workItemId, bindingId?, trigger }): Result<Run, LaunchError>
    //            | 'provider_busy' | 'provider_error' | 'item_archived'
 pollRun(ctx, runId): Result<Run>          // job handler
 cancelRun(ctx, runId, reason): Result<Run>
-closeOutRun(ctx, runId): Result<Run>      // usage, outcome, events, token revocation
+   // Phase 0 observation: provider cancel may 500; map honestly, keep polling/deadline.
+closeOutRun(ctx, runId): Result<Run>      // usage (+ cost fields), outcome, events, token revocation
 ```
 
 ### 5.3 UI additions to the ticket page
@@ -374,7 +389,7 @@ Runs append; nothing overwrites. A blocking question renders as a prominent answ
 
 **Goal.** The nine tools, backed by Phase 1 services.
 
-**Changes.** `apps/web/app/api/mcp/route.ts` (stateless streamable HTTP); `packages/mcp/src/tools/*` — thin adapters calling core services with `Actor = { kind: 'agent', runId, workItemId }`; token verification with constant-time comparison, expiry, revocation, and scope checks; per-token rate limiting in Redis (default 120 calls/minute, 429 with `retryable: true`); `mcp_call_log` writes; payload caps enforced before parsing.
+**Changes.** `apps/web/app/api/mcp/route.ts` (stateless streamable HTTP; fill the stub left after spike teardown); `packages/mcp/src/tools/*` — thin adapters calling core services with `Actor = { kind: 'agent', runId, workItemId }`; token verification with constant-time comparison, expiry, revocation, and scope checks; per-token rate limiting in Redis (default 120 calls/minute, 429 with `retryable: true`); `mcp_call_log` writes; payload caps enforced before parsing. Inject MCP headers per run as proven in ADR-0004 (`Authorization` + `x-vercel-protection-bypass`).
 
 **Done when.** Contract tests pass for every tool, including refusals: wrong ticket, expired token, revoked token, unknown label, oversize payload, second report. An MCP client outside Vercel completes a full read/write cycle against the preview deployment.
 
@@ -404,9 +419,9 @@ Runs append; nothing overwrites. A blocking question renders as a prominent answ
 
 **Goal.** No run is ever silently lost.
 
-**Changes.** `poll_run` job with adaptive backoff and deadline; terminal handling; usage fetch; `git_snapshot` capture; the stuck watchdog (`sweep_stuck_runs`, hourly); close-out — revoke the token, set `outcome`, decide `completed` vs `completed_no_report`, update the stage instance, emit `run.finished` / `run.failed` / `run.completed_without_report`.
+**Changes.** `poll_run` job with adaptive backoff and deadline; terminal handling; usage fetch (tokens + `chargedCents` when present); `git_snapshot` capture; the stuck watchdog (`sweep_stuck_runs`, hourly) that **does not depend on cancel succeeding**; close-out — revoke the token, set `outcome`, decide `completed` vs `completed_no_report`, update the stage instance, emit `run.finished` / `run.failed` / `run.completed_without_report`.
 
-**Done when.** Every row in the Phase 0 failure matrix reaches a correct terminal state within one poll interval of the truth, including the cron-gap case, and no run remains active past its deadline.
+**Done when.** Every row in the Phase 0 failure matrix (ADR-0005) reaches a correct terminal state within one poll interval of the truth, including the cron-gap case and the live-proven no-MCP case, and no run remains active past its deadline.
 
 ---
 
@@ -424,7 +439,7 @@ Runs append; nothing overwrites. A blocking question renders as a prominent answ
 
 **Goal.** A human can see what the agent did without leaving the ticket, and can get to Cursor in one click.
 
-**Changes.** Run timeline with progressive disclosure; report renderer (sanitised markdown, assumptions and not-verified as distinct callouts); live run indicator via the SSE proxy with polling fallback; question answer form; artifact reference list; board cards showing "AI working" with elapsed time; `Run stage` and `Cancel run` actions with permission checks.
+**Changes.** Run timeline with progressive disclosure; report renderer (sanitised markdown, assumptions and not-verified as distinct callouts); live run indicator via the SSE proxy with polling fallback; question answer form; artifact reference list; board cards showing "AI working" with elapsed time; `Run stage` and `Cancel run` actions with permission checks (**Phase 0 observation:** Cancel must show provider failure if cancel 500s; the run continues to be observed until terminal or deadline).
 
 **Done when.** The Phase 2 proof renders correctly, including two runs on one ticket appending in order, and a failed run reading as failed rather than as an absence.
 
@@ -493,12 +508,13 @@ Runs append; nothing overwrites. A blocking question renders as a prominent answ
 |---|---|---|
 | The contract changes after agents depend on it | A "small tweak" PR to a tool schema | Version the contract, keep golden-file tests, and require an ADR for any breaking change |
 | Companion automations never materialise | Step 2.9 slips repeatedly | Build the minimal scoping automation inside the team; treat richer ones as a stretch |
-| Silent success — a run finishes having done nothing | Tickets advance with empty reports | `completed_no_report` is a first-class terminal state, surfaced on the ticket and, in Phase 6, in the inbox |
+| Silent success — a run finishes having done nothing | Tickets advance with empty reports | `completed_no_report` is a first-class terminal state (**Phase 0 live-proven**), surfaced on the ticket and, in Phase 6, in the inbox |
 | Runaway spend before budgets exist | Daily run count climbs unexpectedly | Concurrency ceiling, daily cap, deadlines, kill switch, and a daily spend digest to the team channel |
 | Cursor beta API drift | Fixture tests pass but live calls fail | Nightly live smoke test with alerting |
 | Agents rewrite specs destructively | A spec version loses content the human wrote | Versions are append-only; `update_spec` supports merge semantics and `base_version` conflict detection; the UI diffs every version |
-| Correlation ambiguity on the webhook adapter | Reports arrive with nonces we cannot match | Nonce is mandatory in that adapter's prompt; unmatched reports are quarantined and surfaced rather than dropped |
-| One active run per agent conflicts with our model | Frequent `409 agent_busy` | The database enforces one active run per work item, so our model cannot exceed the provider's |
+| Correlation ambiguity on the webhook adapter | Reports arrive with nonces we cannot match | Nonce is mandatory in that adapter's prompt; unmatched reports are quarantined and surfaced rather than dropped. **Phase 0:** webhook adapter unproven until Q4 |
+| One active run per agent conflicts with our model | Frequent `409 agent_busy` | The database enforces one active run per work item, so our model cannot exceed the provider's (**Phase 0:** `409 agent_busy` confirmed) |
+| Cancel used as recovery | Operator believes a run stopped when it did not | **Phase 0 observation:** treat cancel as best-effort; deadline + poll are authoritative |
 
 ## 11. Exit criteria
 
@@ -516,7 +532,7 @@ Runs append; nothing overwrites. A blocking question renders as a prominent answ
 
 ## 12. Open questions for this phase
 
-- **Q4** — who owns the companion automations beyond the PoC. Step 2.9 covers the demo; ownership afterwards is unresolved.
-- **Q5** — whether the per-binding prompt template is acceptable, or whether we go webhook-only (D5).
+- **Q4** — who owns the companion automations beyond the PoC. Step 2.9 covers the demo; ownership afterwards is unresolved. **Phase 0 observation:** no Nexus webhook automation exists yet — Q4 also blocks Spike B / webhook-adapter proof.
+- **Q5** — whether the per-binding prompt template is acceptable, or whether we go webhook-only (D5). **Phase 0 observation:** D5 confirmed for the API path with live MCP; webhook-only is not forced. Prefer API + thin prompt; keep webhook as secondary when Q4 lands.
 - **Local:** should a transition into a stage auto-launch its binding, or must a human click Run? Recommendation: manual in Phase 2, add an opt-in `auto_run_on_entry` per binding in Phase 3 once gates can stop a bad auto-launch.
 - **Local:** how long do we retain `mcp_call_log`? Recommendation: 30 days, then aggregate — it grows fastest of any table here.

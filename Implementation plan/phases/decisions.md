@@ -8,7 +8,7 @@ Decisions marked **provisional** are pending Phase 0 evidence or a human answer 
 
 ### D1 — One deployable, not a service split
 
-**Decision.** UI, REST API, MCP server, and background workers all ship inside the single Next.js app in `apps/web`.
+**Decision.** UI, REST API, MCP server, and background workers all ship inside the single Next.js app under `apps/web`.
 
 **Why.** The orchestrator gives this repo exactly one Vercel project (`nexus`). A second service would need its own repo, its own bootstrap, and its own secret plumbing, and would double the preview-deploy surface for a PoC whose whole value is in one coherent state machine. Package boundaries inside the monorepo give us the modularity without the operational cost.
 
@@ -16,15 +16,15 @@ Decisions marked **provisional** are pending Phase 0 evidence or a human answer 
 
 ---
 
-### D2 — pnpm + Turborepo monorepo with `vercel.root_directory: apps/web`
+### D2 — pnpm workspace; Next.js under `apps/web` — **updated from Phase 0 evidence**
 
-**Decision.** Standard monorepo layout with the deployable under `apps/web`, declared to the orchestrator via `app-manifest.yml`.
+**Decision.** Phase 0 ships Next.js under `apps/web` with `vercel.root_directory: apps/web`. Domain packages stay under `packages/`.
 
-**Why.** The user's stated intent is a Next.js monorepo, and `scripts/app-manifest.py` supports `vercel.root_directory` precisely for this. The alternative — Next.js at the repository root — makes the domain packages awkward and blocks a second app later.
+**Why (original).** Intent was `apps/web` via `app-manifest.yml`. **Why (updated).** PR #8 merged `root_directory: apps/web` + Supabase. An interim root-layout deploy unblocked previews before reconciliation applied; once Vercel Root Directory pointed at `apps/web`, deploy failed unless the Next app lived there (`docs/decisions/ADR-0001-stack.md`).
 
-**Risk.** Monorepo root-directory configuration is the single most common cause of "green deploy, 404 page" on this platform (`internalsphere-setup` skill). Phase 0 step 0.1 exists to prove the deploy before any product code is written.
+**Risk.** A second app later needs a root-directory move or a second Vercel project.
 
-**Reversal cost.** Low if caught in Phase 0, high afterwards.
+**Reversal cost.** Moderate once product routes accumulate; low while the tree is still the walking skeleton.
 
 ---
 
@@ -48,7 +48,7 @@ Decisions marked **provisional** are pending Phase 0 evidence or a human answer 
 
 ---
 
-### D5 — Direct Cloud Agents API is the primary invocation path; automation webhooks are a supported adapter — **provisional, Phase 0 decides** (`VISION.md` §17.2)
+### D5 — Direct Cloud Agents API is the primary invocation path; automation webhooks are a supported adapter — **confirmed (MCP E2E live); Spike B deferred on Q4** (`VISION.md` §17.2) → `ADR-0002`
 
 **Decision.** `packages/core/runs` depends on an `AgentInvoker` port with two adapters:
 
@@ -63,11 +63,13 @@ Decisions marked **provisional** are pending Phase 0 evidence or a human answer 
 
 ---
 
-### D6 — MCP configuration is injected per run, not committed to the target repository
+### D6 — MCP configuration is injected per run, not committed to the target repository — **confirmed live** → `ADR-0004`
 
 **Decision.** The run launcher passes `mcpServers: [{ name: 'nexus', type: 'http', url: <deployment>/api/mcp, headers: { Authorization: 'Bearer <run token>', 'x-vercel-protection-bypass': <secret> } }]` on every agent create or follow-up run.
 
 **Why.** It removes a static, long-lived, broadly-scoped token from every participating repository, and it makes revocation trivial: the token dies with the run. It also means a repository needs no Nexus-specific configuration to participate.
+
+**Evidence (Phase 0).** No-repo agent with injected MCP posted a `spike_reports` row on a Passport-protected preview (`docs/decisions/evidence/04-spike-a-live.md`).
 
 **Consequence.** Under the `automation-webhook` adapter this is not possible — automations own their MCP config — so that adapter uses a project-scoped token plus a per-run nonce, and accepts the weaker scoping.
 
@@ -75,11 +77,11 @@ Decisions marked **provisional** are pending Phase 0 evidence or a human answer 
 
 ---
 
-### D7 — Poll first, stream opportunistically, never depend on webhooks
+### D7 — Poll first, stream opportunistically, never depend on webhooks — **confirmed** → `ADR-0003`
 
 **Decision.** Run observation is a cron-driven poller with adaptive intervals (5 s for the first minute, then 15 s, then 60 s, capped by a per-run deadline). The SSE stream is used only to make the UI feel live, and any stream failure — including `410 stream_expired` — falls back to polling.
 
-**Why.** v1 webhooks are documented as "coming soon", SSE needs a long-lived connection that Vercel functions do not provide, and `Implementation Phases.md` flags Cursor's event surface as the top architectural risk. Polling is boring and cannot regress.
+**Why.** v1 webhooks are documented as "coming soon", SSE needs a long-lived connection that Vercel functions do not provide, and `Implementation Phases.md` flags Cursor's event surface as the top architectural risk. Polling is boring and cannot regress. Phase 0 also saw `POST …/cancel` return provider `500` while the run stayed `RUNNING`, so deadlines matter more than cancel success.
 
 **Reversal cost.** Low. Adding a webhook receiver later is additive; the poller stays as the reconciler.
 
@@ -127,11 +129,13 @@ Decisions marked **provisional** are pending Phase 0 evidence or a human answer 
 
 ---
 
-### D12 — Cost is stored as integer micro-dollars with an explicit source
+### D12 — Cost is stored as integer micro-dollars with an explicit source — **updated from Phase 0 observations** → `ADR-0007`
 
-**Decision.** Every cost column is `bigint` micro-dollars alongside a `cost_source ∈ {estimated, reconciled}`. Estimates come from token counts × a versioned price table; reconciliation comes from the Admin API's `chargedCents` joined on `cloudAgentId`. The UI never shows a number without its source.
+**Decision.** Every cost column is `bigint` micro-dollars alongside a `cost_source ∈ {estimated, provider, admin_reconciled}` (rollups may be `mixed`). Estimates come from token counts × a versioned price table. **Primary non-estimate source** is per-run `chargedCents` from `GET /v1/agents/{id}/usage` (`provider`). Optional Admin API `filtered-usage-events` may later upgrade to `admin_reconciled`. The UI never shows a number without its source.
 
-**Why.** Floats accumulate error across run → stage → item → project rollups, and the vision insists estimates be labelled honestly. Cursor reports fractional cents, so cents alone is not precise enough.
+**Why (original).** Floats accumulate error across run → stage → item → project rollups, and the vision insists estimates be labelled honestly. Cursor reports fractional cents, so cents alone is not precise enough.
+
+**Why (updated — Phase 0 observation).** The Cloud Agents usage endpoint already returns per-run `chargedCents` / `rawCostCents`; our Admin key returned `401`. Phase 4 must not block on Enterprise Admin reconciliation (`docs/decisions/ADR-0007-cost-data-availability.md`).
 
 **Reversal cost.** High. Get this right in Phase 4 and it never needs revisiting.
 

@@ -350,8 +350,9 @@ await cursor.createAgent({
 - Update `decisions.md` and `open-questions.md` in this folder to reflect the answers.
 - Delete the spike: `0002_drop_spike.sql`, remove `/api/spike/*`, spike tools, and the `p0.spike` flag. **Keep** the deployment skeleton, `packages/db` plumbing, `packages/jobs` scaffolding, `packages/cursor-client`, the identity module, and the MCP route file (emptied to a stub that Phase 2 fills in).
 - A one-page spike report in `docs/decisions/phase-0-report.md`: what we proved, what surprised us, what Phase 2 must design around.
+- Amend later-phase plans where Phase 0 evidence contradicts them: `architecture-baseline.md`, `phase-01-system-of-record.md`, `phase-02-agent-loop.md`, `phase-04-economics.md` — each with an explicit **Phase 0 observations** annotation.
 
-**Done when.** `main` contains no `spike_*` tables or routes, the ADRs are merged, and the Phase 2 plan has been re-read against the findings and amended where they contradict it.
+**Done when.** `main` contains no `spike_*` tables or routes, the ADRs are merged, and the Phase 1/2/4 plans plus architecture baseline have been re-read against the findings and amended where they contradict it.
 
 ---
 
@@ -410,7 +411,7 @@ Two live runs, roughly fifteen minutes.
 - [ ] Estimated versus reconciled cost has been compared for at least one run, or the absence of reconciled data is documented.
 - [ ] The identity and access model is demonstrated and written down.
 - [ ] The spike is deleted; `main` is clean.
-- [ ] Phase 1 and Phase 2 plans have been reviewed against the findings and amended where contradicted.
+- [x] Phase 1 and Phase 2 plans have been reviewed against the findings and amended where contradicted. (**Phase 0 observation follow-up:** also amended `architecture-baseline.md` and `phase-04-economics.md`; see those docs' "Phase 0 observations" sections.)
 
 ## 12. Open questions for this phase
 

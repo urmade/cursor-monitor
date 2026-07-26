@@ -6,6 +6,15 @@
 >
 > **Milestone.** M3 — Governed. **Depends on.** Phase 2 (run usage data), Phase 3 (the gate engine). **Unblocks.** Phase 9 estimation; safe unattended operation.
 
+### Phase 0 observations that shape this phase (2026-07-26)
+
+> Source: ADR-0007, `docs/decisions/evidence/01-usage-api.md`, `phase-0-report.md`. These change the cost data path — not the budget/gate product outcome.
+
+- **Prefer Cloud Agents usage endpoint for per-run charges.** `GET /v1/agents/{id}/usage?runId=…` already returns `cost.chargedCents` and `cost.rawCostCents` (plus token breakdown and `usageUuid`) promptly after terminal. Phase 0 live Spike A recorded `chargedCents` on a finished run.
+- **Do not block this phase on the Enterprise Admin API.** `POST /teams/filtered-usage-events` with our `CURSOR_ADMIN_API_KEY` returned `401 Invalid Team API Key`. Admin reconciliation is an **optional upgrade**, not a Phase 0/4 gate.
+- **`cost_source` semantics shift.** Treat provider `chargedCents` from the usage endpoint as a first-class source (e.g. `provider` / reconciled-from-usage), distinct from our price-table **estimate**. Keep D12's rule: never show a number without its source.
+- **Price table (Q8) still required** for pre-launch reservations and estimate-vs-provider drift — Phase 0 did not remove that need.
+
 ---
 
 ## 1. Objective and scope
@@ -15,11 +24,11 @@ Phase 4 is what makes it responsible to leave the system running. `Implementatio
 Two properties matter more than the feature list:
 
 1. **Block before spending, not after.** A budget that is checked when a run finishes has already spent the money. The decisive check happens in the launcher, before the provider call, using committed spend plus a reservation for the run about to start.
-2. **Never present an estimate as a fact.** Cursor's Admin API exposes reconciled `chargedCents`, but only hourly and only on a plan tier we must confirm (Phase 0 step 0.7). Until reconciliation arrives — and permanently, if the tier does not expose it — every figure carries its source (D12).
+2. **Never present an estimate as a fact.** **Phase 0 observation (ADR-0007):** per-run `chargedCents` is available from `GET /v1/agents/{id}/usage` without the Admin API. Estimates from the price table and provider-reported charges are both first-class; every figure carries its source (D12). Admin `filtered-usage-events` remains optional if a valid team Admin key appears later.
 
 ### In scope
 
-Money primitives and the versioned price table; per-run cost estimation from token usage; rollups from run to stage instance to work item to project; reconciliation against the Admin API; complexity-derived budgets with per-item override; the project burn cap; the budget gate evaluator and the pre-launch check; cap raises, pauses, and their audit trail; cost surfaces across ticket, board, and project.
+Money primitives and the versioned price table; per-run cost estimation from token usage; ingest of provider `chargedCents` from the Cloud Agents usage endpoint; rollups from run to stage instance to work item to project; optional Admin API reconciliation when a valid key exists; complexity-derived budgets with per-item override; the project burn cap; the budget gate evaluator and the pre-launch check; cap raises, pauses, and their audit trail; cost surfaces across ticket, board, and project.
 
 ### Out of scope
 
@@ -35,9 +44,11 @@ Money primitives and the versioned price table; per-run cost estimation from tok
 
 ## 2. Preconditions
 
-- Phase 0 step 0.7 answered: does our plan tier return `chargedCents` from `POST /teams/filtered-usage-events`, and does `cloudAgentId` join to our recorded agent id? If no, this phase ships estimate-only and says so in the UI.
-- A team-scoped Admin API key in `secrets/` (Q1).
-- Phase 2 records `tokens` and `usage_uuid` on every terminal run.
+- Phase 0 step 0.7 answered (**Phase 0 observation / ADR-0007**):
+  - Usage endpoint: **yes** — `chargedCents` / `rawCostCents` on finished cloud-agent runs.
+  - Admin `filtered-usage-events`: **unavailable** with current key (`401`). Phase 4 ships with usage-endpoint provider charges + estimates; Admin path is optional.
+- Team-scoped Admin API key in `secrets/` only if pursuing optional Admin reconciliation (Q1 residual) — **not** a hard blocker.
+- Phase 2 records `tokens`, `usage_uuid`, and provider cost fields from `GET /v1/agents/{id}/usage` on every terminal run.
 - Phase 3's gate engine with the `budget` evaluator registered as a stub.
 - Q8 (price table ownership) and Q9 (actual budget numbers) answered, or the documented placeholders accepted for the demo.
 
@@ -56,7 +67,9 @@ export const fromCents = (c: number): MicroUsd => BigInt(Math.round(c * 10_000))
 export const toDisplay = (m: MicroUsd, opts?) => …; // "$1.24", "$0.003", "<$0.01"
 ```
 
-Every stored cost is accompanied by `cost_source ∈ { estimated, reconciled, mixed }`. `mixed` exists because a rollup can contain both, and pretending otherwise is how a dashboard starts lying.
+Every stored cost is accompanied by `cost_source ∈ { estimated, provider, admin_reconciled, mixed }`.
+
+> **Phase 0 observation (ADR-0007).** Prefer `provider` when `chargedCents` arrived from `GET /v1/agents/{id}/usage`. Reserve `admin_reconciled` for optional Admin API events. `estimated` is price-table maths only. `mixed` exists because a rollup can contain more than one source — pretending otherwise is how a dashboard starts lying. (Pre–Phase 0 plans used only `{estimated, reconciled}`; rename `reconciled` → distinguish provider vs admin.)
 
 ### 3.2 Price table
 
@@ -75,7 +88,7 @@ create table model_prices (
 );
 ```
 
-Lookup selects the row with the greatest `effective_from` at or before the run's start, so re-estimating an old run does not silently reprice history. An unknown model produces a cost of zero with `cost_source = 'estimated'` and a `price.model_unknown` warning attached to the run — visible, not swallowed. `surcharge_bps` exists because reconciled `chargedCents` includes the Cursor Token Rate for third-party models while a naive token estimate does not; without it, every estimate is systematically low.
+Lookup selects the row with the greatest `effective_from` at or before the run's start, so re-estimating an old run does not silently reprice history. An unknown model produces a cost of zero with `cost_source = 'estimated'` and a `price.model_unknown` warning attached to the run — visible, not swallowed. `surcharge_bps` exists because provider/Admin `chargedCents` includes the Cursor Token Rate for third-party models while a naive token estimate does not; without it, every estimate is systematically low.
 
 ### 3.3 Estimation and rollups
 
@@ -83,6 +96,13 @@ At run close-out (extending Phase 2's `closeOutRun`):
 
 ```
 estimate = Σ over token buckets (tokens_k / 1000) × price_k, then × (1 + surcharge_bps/10_000)
+
+# Phase 0 observation: prefer provider charge when usage endpoint returned cost fields
+if usage.cost.chargedCents present:
+  cost_micro_usd = fromCents(chargedCents); cost_source = 'provider'
+  keep estimate alongside for drift
+else:
+  cost_micro_usd = estimate; cost_source = 'estimated'
 ```
 
 Rollups are maintained incrementally in the same transaction that writes the run cost, and independently recomputed nightly:
@@ -94,20 +114,24 @@ Rollups are maintained incrementally in the same transaction that writes the run
 | Work item | `work_items.spend_micro_usd`, `spend_source` | Incremental |
 | Project | `projects.spend_micro_usd` | Incremental |
 
-The nightly `recompute_cost_rollups` job recalculates every level from `runs` and reports drift as an event rather than silently correcting it — silent self-healing hides the bug that caused the drift. Reconciliation deliberately changes these numbers, so the UI shows "updated from estimate to reconciled" rather than a value that mysteriously moved.
+The nightly `recompute_cost_rollups` job recalculates every level from `runs` and reports drift as an event rather than silently correcting it — silent self-healing hides the bug that caused the drift. When a later Admin pass upgrades `provider` → `admin_reconciled`, the UI shows the source change and delta rather than a value that mysteriously moved.
 
-### 3.4 Reconciliation
+### 3.4 Provider charges (primary) and optional Admin reconciliation
 
-An hourly job (`reconcile_costs`, respecting the documented once-per-hour polling guidance):
+**Primary path (Phase 0 proven).** At close-out, persist `chargedCents` / `rawCostCents` from `GET /v1/agents/{id}/usage` as `cost_source = 'provider'`. Per-run attribution is exact when the usage response includes a matching `runId` / `usageUuid` (**Phase 0 observation:** both present on finished no-repo runs — `evidence/01-usage-api.md`).
 
-1. Find runs terminal in the last 72 hours whose `cost_source = 'estimated'`.
-2. Query `POST /teams/filtered-usage-events` for the window with `cloudAgentId: '*'`, paging to completion.
+**Optional Admin path.** If and only if a valid team Admin key exists, an hourly job (`reconcile_costs_admin`, once-per-hour guidance) may:
+
+1. Find terminal runs in the last 72 hours still on `estimated` or eligible for Admin cross-check.
+2. Query `POST /teams/filtered-usage-events` for the window with `cloudAgentId` filters, paging to completion.
 3. Group events by `cloudAgentId` and match to `runs.provider_agent_id`.
-4. **Allocate across runs.** Usage events attribute to the agent, and an agent can carry several runs (follow-ups, resumes). Where an agent maps to multiple runs, allocate `chargedCents` across them in proportion to each run's `totalTokens` from `GET /v1/agents/{id}/usage`, and mark the allocation method on the run. Exact per-run attribution is used when Phase 0 confirmed `usageUuid` matches an event field.
-5. Write `cost_actual_micro_usd`, flip `cost_source` to `reconciled`, record the estimate alongside so drift can be measured, and re-run the rollups.
-6. Emit `cost.reconciled` with the delta; a delta beyond a configurable threshold (default 30%) raises an internal warning so a wrong price row gets noticed.
+4. **Allocate across runs** when events are agent-scoped: proportional to each run's `totalTokens`, or exact when `usageUuid` joins. Record `allocation_method`.
+5. Write `cost_actual_micro_usd`, set `cost_source` to `admin_reconciled`, keep prior estimate/provider values for drift, re-run rollups.
+6. Emit `cost.reconciled` with the delta; a delta beyond a configurable threshold (default 30%) raises an internal warning.
 
-Estimate-versus-actual drift is stored per run, which gives Phase 9 a free accuracy metric and lets us tune the price table with evidence.
+> **Phase 0 observation:** until Admin works, skip this job entirely — do not show "reconciled costs unavailable" as a failure banner if provider charges are already present. An estimate-only banner applies only when *neither* provider nor Admin charges exist.
+
+Estimate-versus-provider (and optionally Admin) drift is stored per run, which gives Phase 9 a free accuracy metric and lets us tune the price table with evidence.
 
 ### 3.5 Budgets
 
@@ -162,7 +186,8 @@ alter table runs
   add column cost_estimate_micro_usd bigint,
   add column cost_actual_micro_usd bigint,
   add column cost_micro_usd bigint,            -- actual when present, else estimate
-  add column cost_source text check (cost_source in ('estimated','reconciled')),
+  -- Phase 0 observation: 'provider' from usage endpoint; 'admin_reconciled' optional
+  add column cost_source text check (cost_source in ('estimated','provider','admin_reconciled')),
   add column price_row_id uuid references model_prices(id),
   add column reconciled_at timestamptz,
   add column allocation_method text;           -- 'exact' | 'proportional' | 'sole_run'
@@ -221,11 +246,11 @@ pauseItem / resumeItem(ctx, workItemId, { reason }): Result<WorkItem>
 
 **UI.**
 
-- Ticket header: `$1.24 of $10.00` with a progress bar; hovering shows estimated versus reconciled composition; a per-run cost column in the run timeline.
+- Ticket header: `$1.24 of $10.00` with a progress bar; hovering shows estimated versus provider (and optional Admin) composition; a per-run cost column in the run timeline.
 - Board: a subtle spend indicator on cards past the soft threshold; a paused treatment for blocked items.
 - Project settings: complexity budget table, burn cap, reserve, and the blocking toggle.
-- Project header: burn cap progress with the same estimate/reconciled honesty.
-- An **"estimate" badge** wherever any component of a figure is estimated. Not a tooltip — a visible badge.
+- Project header: burn cap progress with the same source honesty.
+- An **"estimate" badge** wherever any component of a figure is estimated. Not a tooltip — a visible badge. Provider charges labelled distinctly from estimates (**Phase 0 observation:** these will be the common case).
 
 ---
 
@@ -239,19 +264,21 @@ pauseItem / resumeItem(ctx, workItemId, { reason }): Result<WorkItem>
 
 ---
 
-### Step 4.2 — Per-run cost and rollups
+### Step 4.2 — Per-run cost and rollups (incl. provider charges)
 
-**Changes.** `closeOutRun` extended to price the run and update the four rollup levels in one transaction; the nightly `recompute_cost_rollups` job with drift recording; backfill of Phase 2 runs that already have token counts; `cost.estimated` events.
+**Changes.** `closeOutRun` extended to (1) compute the price-table estimate, (2) prefer `chargedCents` from Phase 2's usage payload when present → `cost_source = 'provider'`, (3) update the four rollup levels in one transaction; the nightly `recompute_cost_rollups` job with drift recording; backfill of Phase 2 runs that already have token/usage cost fields; `cost.estimated` / `cost.provider` events.
 
-**Done when.** A run's cost appears within a tick of terminal; project total equals the sum of item totals equals the sum of run costs; the nightly job reports zero drift on seeded data and non-zero on deliberately corrupted data.
+**Done when.** A run's cost appears within a tick of terminal with the correct source label; a live cloud-agent run can show `provider` without Admin API (**Phase 0 observation**); project total equals the sum of item totals equals the sum of run costs; the nightly job reports zero drift on seeded data and non-zero on deliberately corrupted data.
 
 ---
 
-### Step 4.3 — Reconciliation
+### Step 4.3 — Optional Admin reconciliation
 
-**Changes.** `packages/cursor-client/src/admin.ts` extended with paging and rate-limit respect; the hourly `reconcile_costs` job with the matching and allocation logic of §3.4; drift storage and threshold alerting; graceful degradation (a 403 or an empty response disables reconciliation, sets a project-visible banner "reconciled costs unavailable on this plan", and leaves estimates in place).
+> **Phase 0 observation (ADR-0007).** This step is **optional**. Do not block Phase 4 exit on Admin API. Prefer completing 4.2 with provider charges first.
 
-**Done when.** At least one real run flips from estimated to reconciled with the delta recorded, and the estimate-only fallback is demonstrated by revoking the admin key in preview.
+**Changes.** `packages/cursor-client/src/admin.ts` extended with paging and rate-limit respect; the hourly `reconcile_costs_admin` job with the matching and allocation logic of §3.4; drift storage and threshold alerting; graceful degradation (401/403/empty disables Admin reconciliation without alarming if `provider` charges exist; only show "provider charges unavailable — estimates only" when neither source exists).
+
+**Done when.** *If* a valid Admin key is available: at least one real run upgrades with a recorded delta. *Otherwise:* document Admin unavailable (already true from Phase 0) and ship on usage-endpoint provider charges + estimates.
 
 ---
 
@@ -300,8 +327,8 @@ pauseItem / resumeItem(ctx, workItemId, { reason }): Result<WorkItem>
 - **Unit.** Estimation maths per model including surcharge and unknown-model; micro-dollar conversions and rounding at boundaries; budget state computation including reservations; threshold crossing detection; allocation across multiple runs of one agent.
 - **Integration.** Rollups after N runs across M stage instances; concurrent close-outs (assert atomic increment); reconciliation flipping source and updating every level; pre-launch refusal leaving no run row and no provider call; budget gate and launcher agreeing under the same state.
 - **Property test.** For random run sequences, project spend always equals the sum of item spends, which always equals the sum of run costs, at every level of `cost_source` mixing.
-- **Contract.** Admin API client against recorded fixtures including paging, 429, and the empty/403 degradation path.
-- **Manual on preview.** One real agent run, priced, then reconciled an hour later, with the delta inspected by hand.
+- **Contract.** Usage-endpoint cost fixtures (chargedCents present/absent); Admin API client fixtures including paging, 429, and 401/403/empty degradation (**Phase 0:** 401 is the live Admin result).
+- **Manual on preview.** One real agent run priced with `provider` source from usage; Admin upgrade only if a valid key exists.
 
 ## 8. Rollout and safety
 
@@ -320,15 +347,16 @@ pauseItem / resumeItem(ctx, workItemId, { reason }): Result<WorkItem>
 5. **Hard threshold.** Attempt the next run: refused **before** anything is launched, with the threshold named and no Cursor agent created. The ticket reads `Paused (budget)`.
 6. **Project burn cap.** On a *different* ticket in the same project, attempt a run: refused because the project cap is exhausted, with the project-level reason.
 7. **Raise and resume.** A maintainer raises the cap with a reason. Both tickets become runnable; run one to prove it. Open the Spend view: block, override with actor and reason, and resumption, all recorded.
-8. **Honesty.** Show a run labelled estimated, then show one that reconciliation has flipped to reconciled with the delta from the original estimate. If the plan tier does not expose reconciled charges, show the banner that says so instead.
+8. **Honesty.** Show a run labelled **provider** (usage-endpoint `chargedCents`, per Phase 0) alongside its estimate and the drift. Optionally show Admin upgrade if a key exists. Only if neither provider nor Admin charges exist, show the estimates-only banner.
 
 ## 10. Risks and mitigations
 
 | Risk | Signal | Mitigation |
 |---|---|---|
-| Reconciled costs unavailable on our tier | Step 4.3 returns 403 or empty | Estimate-only mode with a permanent, honest banner; decided in Phase 0 step 0.7, not discovered here |
-| Price table drifts from reality | Reconciliation deltas trend one way | Store per-run drift; alert past 30%; the Spend view charts estimate versus actual |
-| Agent-to-run cost allocation is wrong | Multi-run agents show implausible splits | Proportional allocation by token counts, method recorded per run; prefer exact matching when Phase 0 confirmed a per-run key |
+| Provider charges missing on a run | Usage payload has tokens but no `cost` | Fall back to estimate with badge; alert if systematic. **Phase 0 observation:** usage endpoint normally includes `chargedCents` |
+| Admin reconciliation unavailable | Step 4.3 returns 401/403 or empty | **Expected after Phase 0** — ship on provider + estimate; Admin is optional, not a phase blocker |
+| Price table drifts from reality | Provider vs estimate deltas trend one way | Store per-run drift; alert past 30%; the Spend view charts estimate versus provider/Admin |
+| Agent-to-run cost allocation is wrong | Multi-run agents show implausible splits | Prefer exact per-run usage cost (**Phase 0:** `usageUuid` + run id present); else proportional by tokens, method recorded |
 | Concurrency defeats the cap | Spend exceeds the cap by roughly one run | Reservations for in-flight runs; the pre-launch check is inside the work item's advisory lock |
 | Budgets block the demo unhelpfully | Everything is paused ten minutes in | Placeholder numbers are chosen to be crossable but generous; `observe` mode and the flag are one click away |
 | Rollup drift from lost updates | Nightly job reports non-zero drift | Atomic increments only; drift is reported rather than silently repaired |
@@ -336,9 +364,9 @@ pauseItem / resumeItem(ctx, workItemId, { reason }): Result<WorkItem>
 
 ## 11. Exit criteria
 
-- [ ] Every terminal run carries a cost with an explicit source.
+- [ ] Every terminal run carries a cost with an explicit source (`estimated` / `provider` / `admin_reconciled`).
 - [ ] Rollups are correct and provably consistent at all four levels.
-- [ ] Reconciliation works, or its unavailability is handled and visibly disclosed.
+- [ ] Provider charges from the usage endpoint are ingested when present (**Phase 0 path**); Admin reconciliation works *or* is documented unavailable without blocking the phase.
 - [ ] Complexity sets item budgets automatically; overrides persist and are recorded.
 - [ ] A hard item threshold refuses a launch **before** the provider is called.
 - [ ] A project burn cap blocks work on an item that has its own headroom.
