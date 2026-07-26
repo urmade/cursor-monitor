@@ -1,2 +1,7 @@
 version: 1
 owner: tobias.urban@anysphere.co
+vercel:
+  root_directory: apps/web
+integrations:
+  db:
+    type: supabase
