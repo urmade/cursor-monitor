@@ -10,7 +10,20 @@ import {
 } from '@nexus/core';
 import { eq, inArray } from 'drizzle-orm';
 import { workItemLabels, labels as labelsTable } from '@nexus/db';
+import {
+  Badge,
+  Button,
+  complexityToTone,
+  EmptyState,
+  Field,
+  Input,
+  Panel,
+  PanelBody,
+  PanelHeader,
+  statusToTone,
+} from '@nexus/ui';
 import { notFound } from 'next/navigation';
+import { TransitionWorkItemMenu } from '../../../../../src/components/TransitionWorkItemMenu';
 import {
   actionCreateWorkItem,
   actionTransitionWorkItem,
@@ -73,74 +86,73 @@ export default async function BoardPage({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {canCreate ? (
-        <form
-          action={actionCreateWorkItem}
-          className="flex flex-wrap items-end gap-3 border border-white/10 bg-white/[0.02] p-4"
-        >
-          <input type="hidden" name="projectId" value={project.value.id} />
-          <input type="hidden" name="projectKey" value={projectKey} />
-          <label className="grid min-w-[16rem] flex-1 gap-1 text-sm">
-            <span className="text-white/55">Quick create</span>
-            <input
-              name="title"
-              required
-              placeholder="New work item title"
-              className="border border-white/15 bg-black/30 px-3 py-2 outline-none focus:border-[var(--accent)]"
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span className="text-white/55">Complexity</span>
-            <select
-              name="complexity"
-              className="border border-white/15 bg-black/30 px-3 py-2"
-              defaultValue=""
+        <Panel>
+          <PanelBody>
+            <form
+              action={actionCreateWorkItem}
+              className="flex flex-wrap items-end gap-3"
             >
-              <option value="">—</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </label>
-          <label className="grid min-w-[12rem] gap-1 text-sm">
-            <span className="text-white/55">Labels (comma keys)</span>
-            <input
-              name="labelKeys"
-              placeholder={labels
-                .slice(0, 2)
-                .map((l) => l.key)
-                .join(', ')}
-              className="border border-white/15 bg-black/30 px-3 py-2 font-mono text-xs"
-            />
-          </label>
-          <button
-            type="submit"
-            className="bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--ink)]"
-          >
-            Create
-          </button>
-        </form>
+              <input type="hidden" name="projectId" value={project.value.id} />
+              <input type="hidden" name="projectKey" value={projectKey} />
+              <Field label="Quick create" className="min-w-[16rem] flex-1">
+                <Input
+                  name="title"
+                  required
+                  placeholder="New work item title"
+                />
+              </Field>
+              <Field label="Complexity">
+                <select
+                  name="complexity"
+                  defaultValue=""
+                  className="flex h-[var(--nx-control-md)] rounded-md border border-border bg-surface px-2.5 text-sm"
+                >
+                  <option value="">—</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </Field>
+              <Field label="Labels (comma keys)" className="min-w-[12rem]">
+                <Input
+                  name="labelKeys"
+                  placeholder={labels
+                    .slice(0, 2)
+                    .map((l) => l.key)
+                    .join(', ')}
+                  className="font-mono text-xs"
+                />
+              </Field>
+              <Button type="submit">Create</Button>
+            </form>
+          </PanelBody>
+        </Panel>
       ) : (
-        <p className="text-sm text-white/45">Read-only access — mutations hidden.</p>
+        <p className="text-sm text-fg-subtle">
+          Read-only access — mutations hidden.
+        </p>
       )}
 
-      <div className="flex gap-3 overflow-x-auto pb-4">
+      <div className="flex gap-3 overflow-x-auto pb-2">
         {stages.map((stage) => {
-          const columnItems = items.filter((i) => i.currentStageId === stage.id);
+          const columnItems = items.filter(
+            (i) => i.currentStageId === stage.id,
+          );
           return (
-            <section
-              key={stage.id}
-              className="min-w-[16rem] flex-1 border border-white/10 bg-black/20"
-            >
-              <header className="border-b border-white/10 px-3 py-2">
-                <div className="text-sm font-medium">{stage.name}</div>
-                <div className="text-xs text-white/40">
-                  {columnItems.length} · {stage.defaultOwnerClass}
-                  {stage.isTerminal ? ' · terminal' : ''}
+            <Panel key={stage.id} className="min-w-[16rem] flex-1 shrink-0">
+              <PanelHeader className="sticky top-0 bg-surface z-10">
+                <div>
+                  <div className="text-sm font-medium">{stage.name}</div>
+                  <div className="text-xs text-fg-subtle">
+                    {columnItems.length} · {stage.defaultOwnerClass}
+                    {stage.isTerminal ? ' · terminal' : ''}
+                  </div>
                 </div>
-              </header>
-              <div className="space-y-2 p-2">
+                <Badge tone="neutral">{columnItems.length}</Badge>
+              </PanelHeader>
+              <PanelBody className="space-y-2 p-2">
                 {columnItems.map((item) => {
                   const status = deriveStatus({
                     archivedAt: item.archivedAt,
@@ -148,84 +160,50 @@ export default async function BoardPage({
                   });
                   const itemLabels = labelsByItem.get(item.id) ?? [];
                   return (
-                    <article
-                      key={item.id}
-                      className="border border-white/10 bg-white/[0.03] p-3"
-                    >
-                      <Link
-                        href={`/projects/${projectKey}/items/${item.key}`}
-                        className="block"
-                      >
-                        <div className="font-mono text-[11px] text-[var(--accent)]">
-                          {item.key}
-                        </div>
-                        <div className="mt-1 text-sm leading-snug">{item.title}</div>
-                      </Link>
-                      <div className="mt-2 flex flex-wrap gap-1 text-[10px] uppercase tracking-wide text-white/50">
-                        {item.complexity ? (
-                          <span className="border border-white/15 px-1.5 py-0.5">
-                            {item.complexity}
-                          </span>
-                        ) : null}
-                        <span className="border border-white/15 px-1.5 py-0.5">
-                          {status}
-                        </span>
-                        {itemLabels.map((l) => (
-                          <span
-                            key={l.key}
-                            className="border border-white/15 px-1.5 py-0.5"
-                          >
-                            {l.key}
-                          </span>
-                        ))}
-                      </div>
-                      {canMove ? (
-                        <form
-                          action={actionTransitionWorkItem}
-                          className="mt-3 flex gap-1"
+                    <Panel key={item.id} className="bg-surface-sunken">
+                      <PanelBody className="p-3">
+                        <Link
+                          href={`/projects/${projectKey}/items/${item.key}`}
+                          className="block"
                         >
-                          <input type="hidden" name="workItemId" value={item.id} />
-                          <input
-                            type="hidden"
-                            name="expectedVersion"
-                            value={item.version}
+                          <div className="font-mono text-[11px] text-fg-muted">
+                            {item.key}
+                          </div>
+                          <div className="mt-1 text-sm leading-snug text-fg">
+                            {item.title}
+                          </div>
+                        </Link>
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {item.complexity ? (
+                            <Badge tone={complexityToTone(item.complexity)}>
+                              {item.complexity}
+                            </Badge>
+                          ) : null}
+                          <Badge tone={statusToTone(status)}>{status}</Badge>
+                          {itemLabels.map((l) => (
+                            <Badge key={l.key} tone="neutral">{l.key}</Badge>
+                          ))}
+                        </div>
+                        {canMove ? (
+                          <TransitionWorkItemMenu
+                            workItemId={item.id}
+                            expectedVersion={item.version}
+                            projectKey={projectKey}
+                            itemKey={item.key}
+                            currentStageId={stage.id}
+                            stages={stages}
+                            action={actionTransitionWorkItem}
                           />
-                          <input type="hidden" name="projectKey" value={projectKey} />
-                          <input type="hidden" name="itemKey" value={item.key} />
-                          <select
-                            name="toStageId"
-                            defaultValue=""
-                            className="min-w-0 flex-1 border border-white/15 bg-black/40 px-2 py-1 text-xs"
-                          >
-                            <option value="" disabled>
-                              Move to…
-                            </option>
-                            {stages
-                              .filter((s) => s.id !== stage.id)
-                              .map((s) => (
-                                <option key={s.id} value={s.id}>
-                                  {s.name}
-                                </option>
-                              ))}
-                          </select>
-                          <button
-                            type="submit"
-                            className="border border-white/20 px-2 py-1 text-xs hover:border-[var(--accent)]"
-                          >
-                            Go
-                          </button>
-                        </form>
-                      ) : null}
-                    </article>
+                        ) : null}
+                      </PanelBody>
+                    </Panel>
                   );
                 })}
                 {columnItems.length === 0 ? (
-                  <p className="px-2 py-6 text-center text-xs text-white/30">
-                    Empty
-                  </p>
+                  <EmptyState title="Empty" className="py-6" />
                 ) : null}
-              </div>
-            </section>
+              </PanelBody>
+            </Panel>
           );
         })}
       </div>

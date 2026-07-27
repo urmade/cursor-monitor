@@ -1,14 +1,15 @@
 import type { Metadata } from 'next';
-import { Fraunces, DM_Sans } from 'next/font/google';
+import { Inter, JetBrains_Mono } from 'next/font/google';
+import { ThemeProvider, ThemeScript } from '@nexus/ui';
 import './globals.css';
 
-const display = Fraunces({
-  variable: '--font-display',
+const sans = Inter({
+  variable: '--font-sans',
   subsets: ['latin'],
 });
 
-const sans = DM_Sans({
-  variable: '--font-sans',
+const mono = JetBrains_Mono({
+  variable: '--font-mono',
   subsets: ['latin'],
 });
 
@@ -23,9 +24,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${display.variable} ${sans.variable} antialiased`}>
-        {children}
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <ThemeScript />
+      </head>
+      <body className={`${sans.variable} ${mono.variable} antialiased`}>
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );

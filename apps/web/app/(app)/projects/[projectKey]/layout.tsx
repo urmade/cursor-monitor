@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { getProjectByKey } from '@nexus/core';
+import { PageHeader } from '@nexus/ui';
 import { notFound } from 'next/navigation';
 import { requireSession } from '../../../../src/server/session';
 
@@ -15,36 +16,33 @@ export default async function ProjectLayout({
   const project = await getProjectByKey(ctx, projectKey);
   if (!project.ok) notFound();
 
-  const links = [
-    ['board', 'Board'],
-    ['settings', 'Settings'],
-    ['audit', 'Audit'],
+  const tabs = [
+    { slug: 'board', label: 'Board', href: `/projects/${projectKey}/board` },
+    { slug: 'settings', label: 'Settings', href: `/projects/${projectKey}/settings` },
+    { slug: 'audit', label: 'Audit', href: `/projects/${projectKey}/audit` },
   ] as const;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="text-xs font-mono text-[var(--accent)]">
-            {project.value.key}
-          </div>
-          <h1 className="font-[family-name:var(--font-display)] text-3xl tracking-tight">
-            {project.value.name}
-          </h1>
-        </div>
-        <nav className="flex gap-1 text-sm">
-          {links.map(([slug, label]) => (
+    <div className="flex h-full flex-col">
+      <div className="border-b border-border bg-surface px-4 py-3">
+        <PageHeader
+          meta={project.value.key}
+          title={project.value.name}
+          subtitle={project.value.description}
+        />
+        <nav className="mt-3 flex gap-1">
+          {tabs.map((tab) => (
             <Link
-              key={slug}
-              href={`/projects/${projectKey}/${slug}`}
-              className="px-3 py-1.5 text-white/65 hover:bg-white/5 hover:text-white"
+              key={tab.slug}
+              href={tab.href}
+              className="rounded-md px-3 py-1.5 text-sm text-fg-muted hover:bg-[var(--nx-hover)] hover:text-fg"
             >
-              {label}
+              {tab.label}
             </Link>
           ))}
         </nav>
       </div>
-      {children}
+      <div className="flex-1 overflow-auto p-4">{children}</div>
     </div>
   );
 }

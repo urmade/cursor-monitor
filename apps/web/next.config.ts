@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
     '@nexus/db',
     '@nexus/jobs',
     '@nexus/mcp',
+    '@nexus/ui',
   ],
   serverExternalPackages: ['postgres'],
 };

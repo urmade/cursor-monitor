@@ -1,72 +1,16 @@
 @import "tailwindcss";
-
-:root {
-  --background: #0e1412;
-  --foreground: #e8efe9;
-  --accent: #c4f082;
-  --accent-dim: #7fa84a;
-  --mist: rgba(196, 240, 130, 0.08);
-  --ink: #1a2420;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-accent: var(--accent);
-  --font-sans: var(--font-sans);
-  --font-display: var(--font-display);
-}
+@source "../../../packages/ui/src";
+@import "@nexus/ui/tokens.css";
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--nx-canvas);
+  color: var(--nx-fg);
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: var(--nx-text-sm);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes drift {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(2%, -3%, 0) scale(1.04);
-  }
-}
-
-@keyframes pulse-line {
-  0%,
-  100% {
-    opacity: 0.35;
-  }
-  50% {
-    opacity: 0.9;
-  }
-}
-
-.anim-rise {
-  animation: rise 0.9s ease-out both;
-}
-
-.anim-rise-delay {
-  animation: rise 1s ease-out 0.15s both;
-}
-
-.anim-drift {
-  animation: drift 14s ease-in-out infinite;
-}
-
-.anim-pulse-line {
-  animation: pulse-line 3.2s ease-in-out infinite;
+.font-mono {
+  font-family: var(--font-mono), ui-monospace, monospace;
 }

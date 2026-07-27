@@ -423,6 +423,8 @@ Mutations are server actions calling core services; lists are React Server Compo
 
 **Done when.** Someone outside the team completes "create a project, create a ticket, spec it, move it to Deploy" unaided.
 
+**Status (2026-07-27).** `@nexus/ui` design system with Cursor-app shell, light/dark theme, and Phase 1 surface restyle landed on branch `cursor/cursor-app-design-system-b2a8` (stacked on Phase 1). Drag-and-drop board moves remain a follow-up; transitions use dropdown forms.
+
 ---
 
 ### Step 1.9 — Test harness and seed data

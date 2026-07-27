@@ -5,6 +5,16 @@ import {
   listLabels,
   listStages,
 } from '@nexus/core';
+import {
+  Badge,
+  Button,
+  Field,
+  Input,
+  Panel,
+  PanelBody,
+  PanelHeader,
+  Textarea,
+} from '@nexus/ui';
 import { notFound } from 'next/navigation';
 import {
   actionAddStage,
@@ -50,178 +60,145 @@ export default async function SettingsPage({
   const stages = stagesR.ok ? stagesR.value : [];
   const labels = labelsR.ok ? labelsR.value : [];
 
+  const inputClass =
+    'flex h-[var(--nx-control-md)] w-full rounded-md border border-border bg-surface px-2.5 text-sm';
+
   return (
-    <div className="grid gap-8 lg:grid-cols-2">
-      <section className="border border-white/10 p-4">
-        <h2 className="text-lg font-medium">Project</h2>
-        {canUpdate ? (
-          <form action={actionUpdateProject} className="mt-3 grid gap-3">
-            <input type="hidden" name="projectId" value={project.value.id} />
-            <input type="hidden" name="projectKey" value={projectKey} />
-            <label className="grid gap-1 text-sm">
-              <span className="text-white/55">Name</span>
-              <input
-                name="name"
-                defaultValue={project.value.name}
-                className="border border-white/15 bg-black/30 px-3 py-2"
-              />
-            </label>
-            <label className="grid gap-1 text-sm">
-              <span className="text-white/55">Description</span>
-              <textarea
-                name="description"
-                rows={2}
-                defaultValue={project.value.description}
-                className="border border-white/15 bg-black/30 px-3 py-2"
-              />
-            </label>
-            <button
-              type="submit"
-              className="w-fit bg-[var(--accent)] px-3 py-1.5 text-sm text-[var(--ink)]"
-            >
-              Save
-            </button>
-          </form>
-        ) : (
-          <p className="mt-2 text-sm text-white/50">{project.value.description}</p>
-        )}
-        <p className="mt-4 text-xs text-white/40">Your role: {role ?? 'none'}</p>
-      </section>
+    <div className="grid gap-6 lg:grid-cols-2">
+      <Panel>
+        <PanelHeader>
+          <span className="text-sm font-medium">Project</span>
+        </PanelHeader>
+        <PanelBody>
+          {canUpdate ? (
+            <form action={actionUpdateProject} className="grid gap-3">
+              <input type="hidden" name="projectId" value={project.value.id} />
+              <input type="hidden" name="projectKey" value={projectKey} />
+              <Field label="Name">
+                <Input name="name" defaultValue={project.value.name} />
+              </Field>
+              <Field label="Description">
+                <Textarea
+                  name="description"
+                  rows={2}
+                  defaultValue={project.value.description}
+                />
+              </Field>
+              <Button type="submit" className="w-fit">Save</Button>
+            </form>
+          ) : (
+            <p className="text-sm text-fg-muted">{project.value.description}</p>
+          )}
+          <p className="mt-4 text-xs text-fg-subtle">Your role: {role ?? 'none'}</p>
+        </PanelBody>
+      </Panel>
 
-      <section className="border border-white/10 p-4">
-        <h2 className="text-lg font-medium">Pipeline</h2>
-        <ul className="mt-3 space-y-2 text-sm">
-          {stages.map((s) => (
-            <li
-              key={s.id}
-              className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 py-2"
-            >
-              <div>
-                <div className="font-medium">{s.name}</div>
-                <div className="font-mono text-[11px] text-white/40">
-                  {s.key} · pos {s.position}
-                  {s.isInitial ? ' · initial' : ''}
-                  {s.isTerminal ? ' · terminal' : ''}
+      <Panel>
+        <PanelHeader>
+          <span className="text-sm font-medium">Pipeline</span>
+        </PanelHeader>
+        <PanelBody>
+          <ul className="space-y-2 text-sm">
+            {stages.map((s) => (
+              <li
+                key={s.id}
+                className="flex flex-wrap items-center justify-between gap-2 border-b border-border py-2"
+              >
+                <div>
+                  <div className="font-medium">{s.name}</div>
+                  <div className="font-mono text-[11px] text-fg-subtle">
+                    {s.key} · pos {s.position}
+                    {s.isInitial ? ' · initial' : ''}
+                    {s.isTerminal ? ' · terminal' : ''}
+                  </div>
                 </div>
-              </div>
-              {canPipeline ? (
-                <form action={actionRenameStage} className="flex gap-1">
-                  <input type="hidden" name="stageId" value={s.id} />
-                  <input type="hidden" name="projectKey" value={projectKey} />
-                  <input
-                    name="name"
-                    defaultValue={s.name}
-                    className="w-36 border border-white/15 bg-black/30 px-2 py-1 text-xs"
-                  />
-                  <button
-                    type="submit"
-                    className="border border-white/20 px-2 py-1 text-xs"
-                  >
-                    Rename
-                  </button>
-                </form>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-        {canPipeline ? (
-          <form action={actionAddStage} className="mt-4 grid gap-2 border-t border-white/10 pt-4">
-            <input type="hidden" name="projectId" value={project.value.id} />
-            <input type="hidden" name="projectKey" value={projectKey} />
-            <div className="text-xs text-white/50">Add stage</div>
-            <input
-              name="key"
-              required
-              placeholder="key"
-              className="border border-white/15 bg-black/30 px-2 py-1 font-mono text-xs"
-            />
-            <input
-              name="name"
-              required
-              placeholder="Name"
-              className="border border-white/15 bg-black/30 px-2 py-1 text-sm"
-            />
-            <input
-              name="position"
-              type="number"
-              defaultValue={stages.length ? stages[stages.length - 1]!.position + 50 : 100}
-              className="border border-white/15 bg-black/30 px-2 py-1 text-sm"
-            />
-            <select
-              name="defaultOwnerClass"
-              defaultValue="human"
-              className="border border-white/15 bg-black/30 px-2 py-1 text-sm"
+                {canPipeline ? (
+                  <form action={actionRenameStage} className="flex gap-1">
+                    <input type="hidden" name="stageId" value={s.id} />
+                    <input type="hidden" name="projectKey" value={projectKey} />
+                    <Input
+                      name="name"
+                      defaultValue={s.name}
+                      className="w-36 text-xs"
+                    />
+                    <Button type="submit" variant="secondary" size="sm">
+                      Rename
+                    </Button>
+                  </form>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          {canPipeline ? (
+            <form
+              action={actionAddStage}
+              className="mt-4 grid gap-2 border-t border-border pt-4"
             >
-              <option value="human">human</option>
-              <option value="ai">ai</option>
-              <option value="external">external</option>
-            </select>
-            <label className="flex items-center gap-2 text-xs text-white/55">
-              <input type="checkbox" name="isTerminal" /> terminal
-            </label>
-            <button
-              type="submit"
-              className="w-fit bg-[var(--accent)] px-3 py-1.5 text-sm text-[var(--ink)]"
-            >
-              Add stage
-            </button>
-          </form>
-        ) : null}
-      </section>
+              <input type="hidden" name="projectId" value={project.value.id} />
+              <input type="hidden" name="projectKey" value={projectKey} />
+              <div className="text-xs text-fg-subtle">Add stage</div>
+              <Input name="key" required placeholder="key" className="font-mono text-xs" />
+              <Input name="name" required placeholder="Name" />
+              <Input
+                name="position"
+                type="number"
+                defaultValue={
+                  stages.length ? stages[stages.length - 1]!.position + 50 : 100
+                }
+              />
+              <select
+                name="defaultOwnerClass"
+                defaultValue="human"
+                className={inputClass}
+              >
+                <option value="human">human</option>
+                <option value="ai">ai</option>
+                <option value="external">external</option>
+              </select>
+              <label className="flex items-center gap-2 text-xs text-fg-muted">
+                <input type="checkbox" name="isTerminal" /> terminal
+              </label>
+              <Button type="submit" className="w-fit">Add stage</Button>
+            </form>
+          ) : null}
+        </PanelBody>
+      </Panel>
 
-      <section className="border border-white/10 p-4 lg:col-span-2">
-        <h2 className="text-lg font-medium">Labels</h2>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {labels.map((l) => (
-            <span
-              key={l.id}
-              className="border border-white/15 px-2 py-1 text-xs"
-              title={l.category ?? undefined}
+      <Panel className="lg:col-span-2">
+        <PanelHeader>
+          <span className="text-sm font-medium">Labels</span>
+        </PanelHeader>
+        <PanelBody>
+          <div className="flex flex-wrap gap-2">
+            {labels.map((l) => (
+              <Badge key={l.id} tone="neutral" title={l.category ?? undefined}>
+                <span className="font-mono">{l.key}</span>
+                <span className="ml-2 normal-case">{l.name}</span>
+              </Badge>
+            ))}
+          </div>
+          {canLabels ? (
+            <form
+              action={actionUpsertLabel}
+              className="mt-4 grid max-w-md gap-2 border-t border-border pt-4"
             >
-              <span className="font-mono text-[var(--accent)]/80">{l.key}</span>
-              <span className="ml-2 text-white/60">{l.name}</span>
-            </span>
-          ))}
-        </div>
-        {canLabels ? (
-          <form
-            action={actionUpsertLabel}
-            className="mt-4 grid max-w-md gap-2 border-t border-white/10 pt-4"
-          >
-            <input type="hidden" name="projectId" value={project.value.id} />
-            <input type="hidden" name="projectKey" value={projectKey} />
-            <div className="text-xs text-white/50">Upsert label</div>
-            <input
-              name="key"
-              required
-              placeholder="category:value"
-              className="border border-white/15 bg-black/30 px-2 py-1 font-mono text-xs"
-            />
-            <input
-              name="name"
-              required
-              placeholder="Display name"
-              className="border border-white/15 bg-black/30 px-2 py-1 text-sm"
-            />
-            <input
-              name="category"
-              placeholder="category"
-              className="border border-white/15 bg-black/30 px-2 py-1 text-sm"
-            />
-            <input
-              name="color"
-              defaultValue="gray"
-              className="border border-white/15 bg-black/30 px-2 py-1 text-sm"
-            />
-            <button
-              type="submit"
-              className="w-fit bg-[var(--accent)] px-3 py-1.5 text-sm text-[var(--ink)]"
-            >
-              Save label
-            </button>
-          </form>
-        ) : null}
-      </section>
+              <input type="hidden" name="projectId" value={project.value.id} />
+              <input type="hidden" name="projectKey" value={projectKey} />
+              <div className="text-xs text-fg-subtle">Upsert label</div>
+              <Input
+                name="key"
+                required
+                placeholder="category:value"
+                className="font-mono text-xs"
+              />
+              <Input name="name" required placeholder="Display name" />
+              <Input name="category" placeholder="category" />
+              <Input name="color" defaultValue="gray" />
+              <Button type="submit" className="w-fit">Save label</Button>
+            </form>
+          ) : null}
+        </PanelBody>
+      </Panel>
     </div>
   );
 }

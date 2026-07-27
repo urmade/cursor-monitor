@@ -20,6 +20,7 @@
     "@nexus/db": "workspace:*",
     "@nexus/jobs": "workspace:*",
     "@nexus/mcp": "workspace:*",
+    "@nexus/ui": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.17.0",
     "drizzle-orm": "^0.44.2",
     "jose": "^6.0.11",
