@@ -65,4 +65,10 @@ Every phase document uses the same shape so they can be diffed, reviewed, and pi
 
 ## Status
 
-All phases are **Planned**. Update the table above as phases move to In progress / Done, and record deviations in the phase document rather than in a separate changelog — the plan is the living document.
+| Phase | Status |
+|---|---|
+| 0 — De-risk and decide | Done (see `docs/decisions/phase-0-report.md`) |
+| 1 — System of record | In progress (PR implementing core + UI) |
+| 2–9 | Planned |
+
+Update this table as phases move to In progress / Done, and record deviations in the phase document rather than in a separate changelog — the plan is the living document.

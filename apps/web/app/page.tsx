@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export default function Home() {
   return (
     <main className="relative min-h-screen overflow-hidden">
@@ -24,16 +26,22 @@ export default function Home() {
         </p>
         <div className="anim-pulse-line mt-6 h-px max-w-md bg-gradient-to-r from-[var(--accent)] to-transparent" />
         <p className="anim-rise-delay mt-8 max-w-md text-lg leading-relaxed text-[var(--foreground)]/80 sm:text-xl">
-          Orchestrate agentic work across Cursor — tickets, runs, and reports in
-          one loop.
+          System of record for agentic work — projects, tickets, specs, and an
+          auditable pipeline.
         </p>
         <div className="anim-rise-delay mt-10 flex flex-wrap gap-4">
-          <a
-            href="/api/health"
+          <Link
+            href="/projects"
             className="bg-[var(--accent)] px-5 py-3 text-sm font-medium tracking-wide text-[var(--ink)] transition hover:brightness-110"
           >
+            Open projects
+          </Link>
+          <Link
+            href="/api/health"
+            className="border border-white/20 px-5 py-3 text-sm font-medium tracking-wide text-white/80 transition hover:border-[var(--accent)]/50"
+          >
             Health
-          </a>
+          </Link>
         </div>
       </div>
     </main>

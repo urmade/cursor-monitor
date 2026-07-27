@@ -20,7 +20,8 @@
     "@nexus/core": "workspace:*",
     "@nexus/cursor-client": "workspace:*",
     "@nexus/db": "workspace:*",
-    "drizzle-orm": "^0.44.2"
+    "drizzle-orm": "^0.44.2",
+    "uuid": "^14.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

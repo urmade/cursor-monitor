@@ -49,9 +49,14 @@ export async function currentUser(): Promise<AppUser | null> {
 }
 
 function devFallbackUser(): AppUser | null {
+  // Never invent identity on a deployed host.
   if (process.env.VERCEL) {
     return null;
   }
+  console.assert(
+    !process.env.VERCEL,
+    'dev identity fallback must not run under VERCEL',
+  );
   return {
     externalSub: 'local-dev-user',
     email: 'local@example.com',

@@ -1,0 +1,39 @@
+import { z } from 'zod';
+import { ActorSchema } from './actor';
+
+export const EventTypeSchema = z.enum([
+  'org.created',
+  'project.created',
+  'project.updated',
+  'stage.created',
+  'stage.updated',
+  'stage.archived',
+  'label.created',
+  'label.updated',
+  'label.archived',
+  'work_item.created',
+  'work_item.updated',
+  'work_item.archived',
+  'work_item.stage_changed',
+  'spec.version_created',
+  'member.added',
+  'member.role_changed',
+  'member.removed',
+  'status.override_set',
+  'status.override_cleared',
+]);
+
+export type EventType = z.infer<typeof EventTypeSchema>;
+
+export const NewEventSchema = z.object({
+  orgId: z.string().uuid(),
+  projectId: z.string().uuid().nullable().optional(),
+  type: EventTypeSchema,
+  subjectType: z.string().min(1),
+  subjectId: z.string().uuid(),
+  actor: ActorSchema,
+  payload: z.record(z.string(), z.unknown()).default({}),
+  occurredAt: z.date().optional(),
+});
+
+export type NewEvent = z.infer<typeof NewEventSchema>;

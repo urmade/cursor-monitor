@@ -1,2 +1,5 @@
-/** Schema exports — product tables land in Phase 1. */
-export {};
+export * from './identity';
+export * from './projects';
+export * from './work-items';
+export * from './history';
+export * from './infra';
