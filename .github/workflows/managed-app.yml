@@ -1,6 +1,7 @@
 name: Managed App
 on:
   pull_request:
+    types: [opened, synchronize, reopened, closed]
   push:
     branches: [main]
   workflow_dispatch:
@@ -46,7 +47,7 @@ jobs:
     name: deploy-preview
     needs:
       - resolve-app-manifest
-    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.target_env == 'preview')
+    if: (github.event_name == 'pull_request' && github.event.action != 'closed') || (github.event_name == 'workflow_dispatch' && inputs.target_env == 'preview')
     uses: internalsphere/internal-app-orchestrator/.github/workflows/sops-sync-and-deploy-reusable.yml@main
     with:
       target_env: preview
@@ -98,3 +99,25 @@ jobs:
       GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+  external-viewers-password:
+    name: external-viewers-password
+    permissions:
+      contents: read
+      pull-requests: write
+    # Runs only on a merged PR. Security review is enforced by branch protection
+    # (external-viewers.yml is code-owned by @internalsphere/security), so the merge
+    # already required it; the reusable workflow then (delivery before install) posts
+    # the generated passphrase as a bot comment and installs it on Vercel.
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+    uses: internalsphere/internal-app-orchestrator/.github/workflows/external-viewers-password-reusable.yml@main
+    with:
+      project_name: nexus
+      pr_number: ${{ github.event.pull_request.number }}
+      merge_sha: ${{ github.event.pull_request.merge_commit_sha }}
+      orchestrator_repo: internalsphere/internal-app-orchestrator
+      orchestrator_ref: main
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+      GH_APP_ID: ${{ secrets.GH_APP_ID }}
+      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
