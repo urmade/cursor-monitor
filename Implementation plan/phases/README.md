@@ -32,7 +32,7 @@ Nothing here changes scope. Where a technical decision was needed that the visio
 | 5 — Loops and rework | [`phase-05-loops-and-rework.md`](./phase-05-loops-and-rework.md) | — | P1, P2, P4 |
 | 6 — Attention | [`phase-06-attention.md`](./phase-06-attention.md) | M4 Product | P2–P5 |
 | 7 — Judgment assist | [`phase-07-judgment-assist.md`](./phase-07-judgment-assist.md) | — | P2, P3 |
-| 8 — Openness | [`phase-08-openness.md`](./phase-08-openness.md) | — | P1–P5 (parallelisable) | In progress on `cursor/phase-08-openness-8f3c` |
+| 8 — Openness | [`phase-08-openness.md`](./phase-08-openness.md) | — | P1–P5 (parallelisable) | Done (PR #21) |
 | 9 — Estimation, insight, PoC exit | [`phase-09-estimation-insight-and-poc-exit.md`](./phase-09-estimation-insight-and-poc-exit.md) | M5 PoC complete | P4, P5, P7 |
 
 ## How each plan is structured
@@ -69,12 +69,13 @@ Every phase document uses the same shape so they can be diffed, reviewed, and pi
 |---|---|
 | 0 — De-risk and decide | Done (see `docs/decisions/phase-0-report.md`) |
 | 1 — System of record | Done |
-| 2 — The agent loop | Done (PR #13; stacked base for Phase 3) |
+| 2 — The agent loop | Done |
 | 3 — Process enforcement | Done |
 | 4 — Economics | Done |
 | 5 — Loops and rework | Done |
-| 6 — Attention | Done (stacked; PR #17) |
-| 7 — Judgment assist | In progress (this branch) |
-| 8–9 | Planned |
+| 6 — Attention | Done |
+| 7 — Judgment assist | Done |
+| 8 — Openness | Done (PR #21; now on main) |
+| 9 — Estimation, insight, PoC exit | Done (this PR — M5) |
 
 Update this table as phases move to In progress / Done, and record deviations in the phase document rather than in a separate changelog — the plan is the living document.

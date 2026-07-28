@@ -89,7 +89,7 @@ async function main(): Promise<void> {
 
   // p7.agentic_gates removed (step 7.7) — agentic gates are always available.
 
-  for (const key of ['p8.api', 'p8.webhooks'] as const) {
+  for (const key of ['p8.api', 'p8.webhooks', 'p9.estimates'] as const) {
     await db
       .insert(featureFlags)
       .values({

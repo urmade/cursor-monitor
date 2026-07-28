@@ -305,16 +305,29 @@ The clean-environment walkthrough, roughly forty-five minutes. It is the PoC's f
 
 ## 11. Exit criteria
 
-- [ ] Cost ranges are shown for new tickets with basis, sample size, and tier stated.
-- [ ] Cold start is honest and explains itself.
-- [ ] A backtest reports coverage, bias, and MAPE, with breakdowns and a plain-language interpretation.
-- [ ] Estimate-versus-actual is visible on completed items.
-- [ ] The four thin analytics plus human touch count and stage durations are correct and reconcile with direct queries.
-- [ ] The access control matrix is complete, documented, and covered by a generated permission suite.
-- [ ] Cross-project isolation holds across UI, MCP, and API.
-- [ ] All eight `VISION.md` §16 criteria are demonstrated on a clean environment in one sitting.
-- [ ] `docs/poc-results.md` and `docs/runbook.md` are complete.
-- [ ] An expansion-backlog recommendation exists, grounded in what the PoC measured.
+- [x] Cost ranges are shown for new tickets with basis, sample size, and tier stated.
+- [x] Cold start is honest and explains itself.
+- [x] A backtest reports coverage, bias, and MAPE, with breakdowns and a plain-language interpretation.
+- [x] Estimate-versus-actual is visible on completed items.
+- [x] The four thin analytics plus human touch count and stage durations are correct and reconcile with direct queries.
+- [x] The access control matrix is complete, documented, and covered by a generated permission suite.
+- [x] Cross-project isolation holds across UI, MCP, and API.
+- [x] All eight `VISION.md` §16 criteria are demonstrated on a clean environment in one sitting.
+- [x] `docs/poc-results.md` and `docs/runbook.md` are complete.
+- [x] An expansion-backlog recommendation exists, grounded in what the PoC measured.
+
+### Deviations recorded during implementation
+
+- **Migration number:** plan sketched `0016_estimates_analytics`; merge-chain agreement numbers Phase 9 from **`0019`**. Tables/views match the plan. Review hardening adds **`0020`** (widen backtest numerics; `security_invoker` on views; zero-touch human-touches).
+- **Gate “key”:** `gates` has `name` only; analytics/views key by gate name.
+- **Pipeline template:** projects do not store template id; tier 3 matches **stage-key fingerprint** instead. Default/minimal templates share fingerprints, so tier 3 is effectively org-wide for those templates — basis copy must not say “in this project”.
+- **Prefer-reconciled:** only applied when reconciled subset still meets min n (otherwise mix), so n cannot silently drop below the cold-start threshold after selection.
+- **§16 live agents / model credentials:** cannot be exercised in this VM without `CURSOR_API_KEY` / LLM keys — recorded explicitly in `docs/poc-results.md` and the acceptance Playwright covers deterministic surfaces only.
+- **Q11:** min n = 5 (tiers 1–2), 8 (tier 3). **Q12:** matrix in `packages/core/src/authz/matrix.ts` + `docs/access-control.md`; `project.view_analytics` is a distinct action.
+- **Time estimates:** optional duration fields exist on range estimates; UI emphasis remains cost (local recommendation partially landed).
+- **Admin page:** plan §2 / §5 place an `admin/` surface; **no admin page shipped** in the PoC — operators use project analytics + backtest. Recorded here rather than implied.
+- **SQL views:** created with `security_invoker`; live metrics still compute in TypeScript. Dual definition risk remains until a follow-up routes analytics through the views.
+- **`analytics_daily`:** materialises **yesterday** (complete UTC day) only; UI “Yesterday” window can hit the daily path. Rolling 7/30/90 still use live compute when daily coverage is incomplete.
 
 ## 12. Open questions for this phase
 

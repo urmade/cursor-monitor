@@ -1,8 +1,10 @@
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const appDir = join(process.cwd(), 'app');
+/** Resolve against this file — not process.cwd() — so worktrees / non-root runs work. */
+const appDir = join(dirname(fileURLToPath(import.meta.url)), '../../app');
 
 const forbidden = [
   /border-white\//,

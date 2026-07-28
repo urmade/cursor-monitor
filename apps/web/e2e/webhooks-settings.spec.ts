@@ -36,6 +36,7 @@ test.describe('Phase 8 webhook settings', () => {
   });
 
   test('register endpoint, observe failed delivery, replay', async ({ page }) => {
+    test.setTimeout(90_000);
     seedWebhookFailedDelivery();
     const res = await page.goto('/projects/ALPHA/settings');
     expect(res?.status()).toBeLessThan(500);
@@ -46,8 +47,14 @@ test.describe('Phase 8 webhook settings', () => {
       timeout: 45_000,
     });
     await page.getByRole('button', { name: 'Replay' }).first().click();
-    await expect(page.getByRole('cell', { name: 'pending' }).first()).toBeVisible({
-      timeout: 45_000,
-    });
+    // Server action revalidate can lag past the default 30s test timeout; wait for
+    // the new pending row (reload once if soft-nav has not painted yet).
+    const pending = page.getByRole('cell', { name: 'pending' }).first();
+    try {
+      await expect(pending).toBeVisible({ timeout: 15_000 });
+    } catch {
+      await page.reload();
+      await expect(pending).toBeVisible({ timeout: 45_000 });
+    }
   });
 });

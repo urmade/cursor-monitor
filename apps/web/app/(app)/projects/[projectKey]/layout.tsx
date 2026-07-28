@@ -24,6 +24,11 @@ export default async function ProjectLayout({
       href: `/projects/${projectKey}/policies`,
     },
     {
+      slug: 'analytics',
+      label: 'Analytics',
+      href: `/projects/${projectKey}/analytics`,
+    },
+    {
       slug: 'questions',
       label: 'Questions',
       href: `/projects/${projectKey}/questions`,

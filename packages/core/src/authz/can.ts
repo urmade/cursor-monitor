@@ -63,6 +63,7 @@ export function can(
       const role = resource.role;
       switch (action) {
         case 'project.read':
+        case 'project.view_analytics':
         case 'work_item.read':
         case 'spec.read':
         case 'audit.read':

@@ -18,22 +18,23 @@ import { eq, inArray } from 'drizzle-orm';
 import { workItemLabels, labels as labelsTable } from '@nexus/db';
 import {
   Badge,
-  Button,
   complexityToTone,
   EmptyState,
-  Field,
-  Input,
   Panel,
   PanelBody,
   PanelHeader,
   statusToTone,
   formatMicroUsdDisplay,
   CostSourceBadge,
+  EstimateDisplay,
   LiveDuration,
   LoopBadge,
 } from '@nexus/ui';
+import type { CostEstimate } from '@nexus/contracts';
+import { CostEstimateSchema } from '@nexus/contracts';
 import { notFound } from 'next/navigation';
 import { TransitionWorkItemMenu } from '../../../../../src/components/TransitionWorkItemMenu';
+import { QuickCreateWithEstimate } from '../../../../../src/components/QuickCreateWithEstimate';
 import {
   actionCreateWorkItem,
   actionTransitionWorkItem,
@@ -196,43 +197,15 @@ export default async function BoardPage({
       {canCreate ? (
         <Panel>
           <PanelBody>
-            <form
+            <QuickCreateWithEstimate
+              projectId={project.value.id}
+              projectKey={projectKey}
+              labelPlaceholder={labels
+                .slice(0, 2)
+                .map((l) => l.key)
+                .join(', ')}
               action={actionCreateWorkItem}
-              className="flex flex-wrap items-end gap-3"
-            >
-              <input type="hidden" name="projectId" value={project.value.id} />
-              <input type="hidden" name="projectKey" value={projectKey} />
-              <Field label="Quick create" className="min-w-[16rem] flex-1">
-                <Input
-                  name="title"
-                  required
-                  placeholder="New work item title"
-                />
-              </Field>
-              <Field label="Complexity">
-                <select
-                  name="complexity"
-                  defaultValue=""
-                  className="flex h-[var(--nx-control-md)] rounded-md border border-border bg-surface px-2.5 text-sm"
-                >
-                  <option value="">—</option>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </Field>
-              <Field label="Labels (comma keys)" className="min-w-[12rem]">
-                <Input
-                  name="labelKeys"
-                  placeholder={labels
-                    .slice(0, 2)
-                    .map((l) => l.key)
-                    .join(', ')}
-                  className="font-mono text-xs"
-                />
-              </Field>
-              <Button type="submit">Create</Button>
-            </form>
+            />
           </PanelBody>
         </Panel>
       ) : (
@@ -314,6 +287,24 @@ export default async function BoardPage({
                               />
                             </Badge>
                           ) : null}
+                          {(() => {
+                            const stage = stages.find((s) => s.id === item.currentStageId);
+                            const started = Boolean(spent > BigInt(0));
+                            if (started || stage?.isTerminal) return null;
+                            const raw = item.estimateAtCreation;
+                            if (!raw) return null;
+                            let estimate: CostEstimate | null = null;
+                            try {
+                              estimate = CostEstimateSchema.parse(raw);
+                            } catch {
+                              estimate = null;
+                            }
+                            return estimate ? (
+                              <div className="mt-1 w-full">
+                                <EstimateDisplay estimate={estimate} />
+                              </div>
+                            ) : null;
+                          })()}
                           {blockReasonByItem.has(item.id) ? (
                             <Badge
                               tone="blocked"

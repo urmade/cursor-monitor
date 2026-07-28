@@ -4,7 +4,8 @@
     "DB_POSTGRES_URL",
     "DB_POSTGRES_URL_NON_POOLING",
     "DB_SSL",
-    "FLAG_P3_GATES"
+    "FLAG_P3_GATES",
+    "RUN_RLS_GRANTS_TEST"
   ],
   "tasks": {
     "build": {
@@ -19,7 +20,8 @@
         "DB_POSTGRES_URL",
         "DB_POSTGRES_URL_NON_POOLING",
         "DB_SSL",
-        "FLAG_P3_GATES"
+        "FLAG_P3_GATES",
+        "RUN_RLS_GRANTS_TEST"
       ]
     },
     "dev": {

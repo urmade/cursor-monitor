@@ -54,11 +54,14 @@ export const workItems = pgTable(
     reworkMs: bigint('rework_ms', { mode: 'bigint' }).notNull().default(BigInt(0)),
     loopEscalated: boolean('loop_escalated').notNull().default(false),
     remediationAttempts: integer('remediation_attempts').notNull().default(0),
+    estimateAtCreation: jsonb('estimate_at_creation').$type<Record<string, unknown>>(),
+    estimateTier: integer('estimate_tier'),
     version: integer('version').notNull().default(1),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
+
   (t) => [
     unique('work_items_project_id_number_unique').on(t.projectId, t.number),
     unique('work_items_project_id_key_unique').on(t.projectId, t.key),

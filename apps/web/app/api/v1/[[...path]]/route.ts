@@ -10,6 +10,10 @@ import {
   listProjectEvents,
   missingScopeForAction,
   listStages,
+  estimateForItem,
+  estimateForNewItem,
+  projectAnalytics,
+  analyticsToCsv,
   launchRun,
 } from '@nexus/core';
 import {
@@ -384,6 +388,113 @@ async function handle(req: Request, params: { path?: string[] }) {
               status = 200;
               payload = result.value;
             }
+          }
+        }
+      }
+    } else if (
+      segments[0] === 'projects' &&
+      segments[2] === 'analytics' &&
+      segments.length === 3 &&
+      req.method === 'GET'
+    ) {
+      const missing = missingScopeForAction(auth.scopes, 'project.view_analytics');
+      if (missing) {
+        status = 403;
+        payload = problem(403, 'Forbidden', `Missing scope: ${missing}`, {
+          missing_scope: missing,
+        });
+      } else {
+        const projectKey = segments[1]!;
+        const project = await getProjectByKey(auth.ctx, projectKey);
+        if (!project.ok || project.value.id !== auth.projectId) {
+          status = 404;
+          payload = problem(404, 'Not Found', 'Project not found');
+        } else {
+          const url = new URL(req.url);
+          const days = Number(url.searchParams.get('days') ?? '30');
+          const to = new Date();
+          const from = new Date(to.getTime() - Math.max(1, days) * 24 * 60 * 60 * 1000);
+          const summary = await projectAnalytics(auth.ctx, project.value.id, {
+            from,
+            to,
+          });
+          if (!summary.ok) {
+            status = 400;
+            payload = problem(400, 'Bad Request', summary.error.message);
+          } else if (url.searchParams.get('format') === 'csv') {
+            status = 200;
+            payload = { csv: analyticsToCsv(summary.value) };
+          } else {
+            status = 200;
+            payload = summary.value;
+          }
+        }
+      }
+    } else if (
+      segments[0] === 'work-items' &&
+      segments[2] === 'estimate' &&
+      segments.length === 3 &&
+      req.method === 'GET'
+    ) {
+      const missing = missingScopeForAction(auth.scopes, 'work_item.read');
+      if (missing) {
+        status = 403;
+        payload = problem(403, 'Forbidden', `Missing scope: ${missing}`, {
+          missing_scope: missing,
+        });
+      } else {
+        const item = await getWorkItemByKey(auth.ctx, auth.projectId, segments[1]!);
+        if (!item.ok || item.value.projectId !== auth.projectId) {
+          status = 404;
+          payload = problem(404, 'Not Found');
+        } else {
+          const est = await estimateForItem(auth.ctx, item.value.id);
+          if (!est.ok) {
+            status = 400;
+            payload = problem(400, 'Bad Request', est.error.message);
+          } else {
+            status = 200;
+            payload = { estimate: est.value };
+          }
+        }
+      }
+    } else if (
+      segments[0] === 'projects' &&
+      segments[2] === 'estimate' &&
+      segments.length === 3 &&
+      req.method === 'GET'
+    ) {
+      const missing = missingScopeForAction(auth.scopes, 'project.read');
+      if (missing) {
+        status = 403;
+        payload = problem(403, 'Forbidden', `Missing scope: ${missing}`, {
+          missing_scope: missing,
+        });
+      } else {
+        const projectKey = segments[1]!;
+        const project = await getProjectByKey(auth.ctx, projectKey);
+        if (!project.ok || project.value.id !== auth.projectId) {
+          status = 404;
+          payload = problem(404, 'Not Found', 'Project not found');
+        } else {
+          const url = new URL(req.url);
+          const complexity = (url.searchParams.get('complexity') ??
+            'medium') as 'low' | 'medium' | 'high';
+          const labels = (url.searchParams.get('labels') ?? '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+          const est = await estimateForNewItem(auth.ctx, {
+            projectId: project.value.id,
+            complexity,
+            labelKeys: labels,
+          });
+          if (!est.ok) {
+            status = 400;
+            payload = problem(400, 'Bad Request', est.error.message);
+          } else {
+            status = 200;
+            payload = { estimate: est.value };
           }
         }
       }

@@ -2,7 +2,7 @@ import type { ApiScope } from '@nexus/contracts';
 import type { AuthzAction } from '../authz/actions';
 
 const SCOPE_ACTIONS: Record<ApiScope, AuthzAction[]> = {
-  'projects:read': ['project.read'],
+  'projects:read': ['project.read', 'project.view_analytics'],
   'items:read': ['work_item.read', 'spec.read', 'run.read', 'audit.read'],
   'items:write': ['work_item.create', 'work_item.update', 'spec.write'],
   'items:transition': ['work_item.transition'],

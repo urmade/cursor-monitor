@@ -10,6 +10,7 @@ const human: Actor = {
 
 const actions: AuthzAction[] = [
   'project.read',
+  'project.view_analytics',
   'work_item.read',
   'spec.read',
   'audit.read',
@@ -34,6 +35,7 @@ const actions: AuthzAction[] = [
 const expected: Record<ProjectRole, Partial<Record<AuthzAction, boolean>>> = {
   viewer: {
     'project.read': true,
+    'project.view_analytics': true,
     'work_item.read': true,
     'spec.read': true,
     'audit.read': true,
@@ -56,6 +58,7 @@ const expected: Record<ProjectRole, Partial<Record<AuthzAction, boolean>>> = {
   },
   member: {
     'project.read': true,
+    'project.view_analytics': true,
     'work_item.read': true,
     'spec.read': true,
     'audit.read': true,
@@ -78,6 +81,7 @@ const expected: Record<ProjectRole, Partial<Record<AuthzAction, boolean>>> = {
   },
   maintainer: {
     'project.read': true,
+    'project.view_analytics': true,
     'work_item.read': true,
     'spec.read': true,
     'audit.read': true,
@@ -100,6 +104,7 @@ const expected: Record<ProjectRole, Partial<Record<AuthzAction, boolean>>> = {
   },
   owner: {
     'project.read': true,
+    'project.view_analytics': true,
     'work_item.read': true,
     'spec.read': true,
     'audit.read': true,

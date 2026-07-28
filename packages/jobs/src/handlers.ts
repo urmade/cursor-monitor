@@ -16,6 +16,9 @@ import {
   dispatchWebhookEventsDrain,
   deliverPendingWebhooks,
   migrateLegacyWebhookDispatcherCursor,
+  computeDaily,
+  runBacktest,
+  yesterdayUtc,
   resumeAfterQuestion,
 } from '@nexus/core';
 import { CursorClient } from '@nexus/cursor-client';
@@ -256,6 +259,61 @@ registerJobHandler('deliver_webhooks', async (db) => {
   await deliverPendingWebhooks(ctx, 50);
 });
 
+registerJobHandler('compute_analytics_daily', async (db, job) => {
+  const payload = job.payload as { day?: string; orgId?: string };
+  // B4: default to yesterday (complete UTC day), never incomplete "today".
+  const day = payload.day
+    ? new Date(`${payload.day.slice(0, 10)}T00:00:00.000Z`)
+    : yesterdayUtc();
+  // M23: loop every org — do not stop after the first.
+  const orgRows = payload.orgId
+    ? await db.query.orgs.findMany({
+        where: (o, { eq }) => eq(o.id, payload.orgId!),
+      })
+    : await db.query.orgs.findMany();
+  for (const org of orgRows) {
+    const ctx = createContext({
+      db,
+      orgId: org.id,
+      actor: { kind: 'system', reason: 'compute_analytics_daily' },
+      flags: createFlagReader(db),
+      logger: silentLogger,
+    });
+    const result = await computeDaily(ctx, day);
+    if (!result.ok) throw new Error(result.error.message);
+  }
+});
+
+registerJobHandler('run_estimate_backtest', async (db, job) => {
+  const payload = job.payload as { projectId?: string; orgId?: string };
+  // When projectId is set, resolve that project's org only — never write
+  // a system-actor backtest onto every tenant.
+  let orgRows: Array<{ id: string }>;
+  if (payload.orgId) {
+    orgRows = await db.query.orgs.findMany({
+      where: (o, { eq }) => eq(o.id, payload.orgId!),
+    });
+  } else if (payload.projectId) {
+    const project = await db.query.projects.findFirst({
+      where: (p, { eq }) => eq(p.id, payload.projectId!),
+    });
+    orgRows = project ? [{ id: project.orgId }] : [];
+  } else {
+    orgRows = await db.query.orgs.findMany();
+  }
+  for (const org of orgRows) {
+    const ctx = createContext({
+      db,
+      orgId: org.id,
+      actor: { kind: 'system', reason: 'run_estimate_backtest' },
+      flags: createFlagReader(db),
+      logger: silentLogger,
+    });
+    const result = await runBacktest(ctx, { projectId: payload.projectId });
+    if (!result.ok) throw new Error(result.error.message);
+  }
+});
+
 /** Enqueue attention maintenance jobs on cron tick. */
 export async function ensureAttentionJobs(): Promise<void> {
   const db = getDb();
@@ -309,6 +367,22 @@ export async function ensurePendingEvalJobs(): Promise<void> {
     payload: {},
     dedupeKey: `scrub_rubric_raw_responses:${day}`,
     priority: 1,
+  }).catch(() => undefined);
+  // B4: enqueue yesterday — the last complete UTC day.
+  const yesterday = new Date();
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const yesterdayKey = yesterday.toISOString().slice(0, 10);
+  await enqueueJob(db, {
+    kind: 'compute_analytics_daily',
+    payload: { day: yesterdayKey },
+    dedupeKey: `compute_analytics_daily:${yesterdayKey}`,
+    priority: 2,
+  }).catch(() => undefined);
+  await enqueueJob(db, {
+    kind: 'run_estimate_backtest',
+    payload: {},
+    dedupeKey: `run_estimate_backtest:${day}`,
+    priority: 2,
   }).catch(() => undefined);
 }
 

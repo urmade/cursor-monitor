@@ -51,6 +51,24 @@ export async function createWorkItem(
     return err(coreError('invariant', 'Project has no initial stage'));
   }
 
+  let creationEstimate: import('@nexus/contracts').CostEstimate | null = null;
+  if (input.complexity) {
+    try {
+      const enabled = await ctx.flags.isEnabled('p9.estimates', input.projectId);
+      if (enabled) {
+        const { estimateForNewItem } = await import('../estimates/estimate');
+        const est = await estimateForNewItem(ctx, {
+          projectId: input.projectId,
+          complexity: input.complexity,
+          labelKeys: input.labelKeys ?? [],
+        });
+        if (est.ok) creationEstimate = est.value;
+      }
+    } catch {
+      creationEstimate = null;
+    }
+  }
+
   const item = await ctx.db.transaction(async (tx) => {
     const numbered = await tx.execute(sql`
       update projects
@@ -79,6 +97,14 @@ export async function createWorkItem(
       currentStageId: initial.id,
       ownerClass: initial.defaultOwnerClass,
       createdByUserId: ctx.actor.kind === 'human' ? ctx.actor.userId : null,
+      estimateAtCreation: creationEstimate
+        ? (creationEstimate as unknown as Record<string, unknown>)
+        : null,
+      estimateTier: creationEstimate
+        ? creationEstimate.kind === 'range'
+          ? creationEstimate.tier
+          : 4
+        : null,
     });
 
     await tx.insert(stageInstances).values({
@@ -134,6 +160,11 @@ export async function createWorkItem(
         title: input.title,
         complexity: input.complexity ?? null,
         stageId: initial.id,
+        estimateTier: creationEstimate
+          ? creationEstimate.kind === 'range'
+            ? creationEstimate.tier
+            : 4
+          : null,
       },
     });
 

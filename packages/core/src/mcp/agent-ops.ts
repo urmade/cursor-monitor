@@ -339,6 +339,17 @@ export async function getTicketForAgent(
   );
   const concepts = normalizeOptionalConcepts(project?.optionalConcepts);
 
+  let estimatePayload: Record<string, unknown> | null = null;
+  try {
+    const { estimateForItem } = await import('../estimates/estimate');
+    const est = await estimateForItem(ctx, ticketId);
+    if (est.ok) {
+      estimatePayload = est.value as unknown as Record<string, unknown>;
+    }
+  } catch {
+    estimatePayload = null;
+  }
+
   return ok({
     id: item.id,
     key: item.key,
@@ -355,6 +366,7 @@ export async function getTicketForAgent(
     warnings: warningPayload,
     budget: budgetPayload,
     loops: loopsPayload,
+    estimate: estimatePayload,
     optional_concepts: {
       acceptance_criteria: concepts.acceptanceCriteria.enabled,
       visual_confirmation: concepts.visualConfirmation.enabled,

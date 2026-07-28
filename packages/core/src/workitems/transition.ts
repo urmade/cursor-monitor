@@ -480,6 +480,17 @@ async function transitionWorkItemImpl(
     `Withdrawn because item moved to stage ${toStage.key}`,
   );
 
+  if (toStage.isTerminal) {
+    try {
+      const { invalidateEstimateCacheForProject } = await import(
+        '../estimates/estimate'
+      );
+      await invalidateEstimateCacheForProject(ctx, existing.projectId);
+    } catch {
+      // cache invalidation is best-effort
+    }
+  }
+
   const statusAfter = await deriveWorkItemStatus(ctx, id);
   await emitWorkItemStatusChangedIfNeeded(ctx, {
     workItemId: id,

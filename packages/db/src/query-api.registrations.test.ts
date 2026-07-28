@@ -51,6 +51,9 @@ const CORE_QUERY_RELATIONS = [
   'webhookDeliveries',
   'apiRequestLog',
   'idempotencyKeys',
+  'estimateCache',
+  'estimateBacktests',
+  'analyticsDaily',
 ] as const;
 
 describe.runIf(hasDb)('drizzle relational query API', () => {

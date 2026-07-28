@@ -10,3 +10,4 @@ coverage
 .DS_Store
 .vercel
 *.tsbuildinfo
+apps/web/e2e/.acceptance-fixture.json

@@ -47,7 +47,11 @@ import {
   LiveDuration,
   JourneyRibbon,
   LoopBadge,
+  EstimateDisplay,
+  EstimateVersusActual,
 } from '@nexus/ui';
+import { CostEstimateSchema } from '@nexus/contracts';
+import type { CostEstimate } from '@nexus/contracts';
 import { notFound } from 'next/navigation';
 import { ChecksPanel, WhyCantMove } from '../../../../../../src/components/ChecksPanel';
 import { RunTimeline } from '../../../../../../src/components/RunTimeline';
@@ -296,6 +300,30 @@ export default async function ItemPage({
               budgetMicro={item.budgetMicroUsd?.toString() ?? null}
               spendSource={item.spendSource ?? 'estimated'}
             />
+            {(() => {
+              let estimate: CostEstimate | null = null;
+              if (item.estimateAtCreation) {
+                try {
+                  estimate = CostEstimateSchema.parse(item.estimateAtCreation);
+                } catch {
+                  estimate = null;
+                }
+              }
+              return (
+                <>
+                  <div className="mt-2">
+                    <p className="text-xs text-fg-muted">Estimate at creation</p>
+                    <EstimateDisplay estimate={estimate} />
+                  </div>
+                  {stageById.get(item.currentStageId)?.isTerminal ? (
+                    <EstimateVersusActual
+                      estimate={estimate}
+                      actualMicroUsd={item.spendMicroUsd}
+                    />
+                  ) : null}
+                </>
+              );
+            })()}
             {(item.loopCount ?? 0) > 0 ? (
               <p className="mt-1 text-xs text-fg-muted">
                 Rework (visits after the first):{' '}

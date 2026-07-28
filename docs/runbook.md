@@ -212,3 +212,50 @@ Model provider: set `NEXUS_LLM_API_KEY` or `OPENAI_API_KEY` (optional `NEXUS_LLM
 ### Raw response retention
 
 `raw_response` on `rubric_verdicts` is scrubbed after 30 days via the `scrub_rubric_raw_responses` job calling `scrubOldRawResponses` (criteria, outcome, and `model_outcome` remain). Infrastructure failure rows use sentinel `content_hash` values and are never served from the verdict cache.
+
+## Phase 8 — openness
+
+| Surface | URL | Notes |
+|---|---|---|
+| API tokens / webhooks | `/projects/[key]/settings` | Manage APIs & webhook endpoints |
+| OpenAPI | `/api/v1/openapi.json` | Generated from zod |
+| Public API | `/api/v1/...` | Bearer project token; 404 across projects |
+
+Feature flags: `p8.api`, `p8.webhooks`. Outbox webhook dispatch is **per-org** (global cursor was a tenancy bug).
+
+### Webhook backlog grows
+
+1. Confirm cron tick and `dispatch_webhook_events` / `deliver_webhooks` jobs.
+2. Check endpoint consecutive failures / disabled_at.
+3. Verify signing secret and event type filters.
+
+## Phase 9 — estimates, analytics, PoC exit
+
+| Surface | URL | Notes |
+|---|---|---|
+| Board quick-create estimate | `/projects/[key]/board` | Inline range or cold-start copy |
+| Ticket estimate vs actual | `/projects/[key]/items/[itemKey]` | Snapshot at creation; compare when terminal |
+| Analytics | `/projects/[key]/analytics` | Four metrics + touches + stage durations + backtest |
+| Access control | `docs/access-control.md` | Final role matrix |
+| PoC pack | `docs/poc-results.md`, `docs/expansion-backlog.md` | Go/no-go inputs |
+
+Feature flag: `p9.estimates` (analytics unflagged).
+
+Jobs: `compute_analytics_daily` (every org, **yesterday** UTC), `run_estimate_backtest` (org-scoped; `projectId` resolves that project’s org only).
+
+### Estimates look wrong
+
+1. Confirm comparable count and tier on the estimate basis string.
+2. Run backtest from Analytics — if coverage ≪ 80%, widen interval or raise min n deliberately (do not auto-tune).
+3. Cold start with n&lt;5 is expected; do not invent a range.
+
+### Acceptance walkthrough
+
+```bash
+pnpm db:exec-migrations
+pnpm acceptance:setup
+# Prefer next start on :3001 for Playwright (see Phase 6 notes above)
+```
+
+Script: `Implementation plan/phases/phase-09-estimation-insight-and-poc-exit.md` §9.
+Criteria that need live Cursor / model credentials cannot be closed in a keyless VM — record them as blocked, do not skip silently.

@@ -87,3 +87,8 @@ export {
   formatMicroUsdDisplay,
   type CostSourceLabel,
 } from './cost/CostDisplay';
+export {
+  EstimateDisplay,
+  EstimateVersusActual,
+  type CostEstimateView,
+} from './cost/EstimateDisplay';

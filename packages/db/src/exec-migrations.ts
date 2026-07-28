@@ -87,9 +87,16 @@ async function connectWithRetry(url: string): Promise<Sql> {
   throw lastError;
 }
 
-async function main(): Promise<void> {
+/**
+ * Apply all SQL migrations under packages/db/migrations to the given URL
+ * (or DB_POSTGRES_URL_NON_POOLING / DB_POSTGRES_URL). Safe to call from tests —
+ * does not depend on pnpm, process.cwd(), or an installed monorepo root.
+ */
+export async function execMigrations(connectionUrl?: string): Promise<void> {
   const rawUrl =
-    process.env.DB_POSTGRES_URL_NON_POOLING ?? process.env.DB_POSTGRES_URL;
+    connectionUrl ??
+    process.env.DB_POSTGRES_URL_NON_POOLING ??
+    process.env.DB_POSTGRES_URL;
   if (!rawUrl) {
     throw new Error(
       'Set DB_POSTGRES_URL_NON_POOLING or DB_POSTGRES_URL before running migrations',
@@ -144,7 +151,17 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+async function main(): Promise<void> {
+  await execMigrations();
+}
+
+const isCli =
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+
+if (isCli) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

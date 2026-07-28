@@ -1,37 +1,42 @@
 /**
- * Supabase-style RLS grant check: create anon/authenticated with default GRANT ALL,
- * apply migrations, assert no table grants remain (except schema_migrations).
- * Roles must exist before migrations run so 0016_attention.sql revokes apply.
+ * Supabase-style RLS grant check: create anon/authenticated with default GRANT ALL
+ * **on the fresh test database**, apply migrations, assert no table grants remain.
+ *
+ * B6: ALTER DEFAULT PRIVILEGES is per-database — applying it on `postgres` while
+ * asserting on a different DB made both assertions pass for any migration.
+ * Roles must exist before migrations run so 0016_attention.sql (and later) revokes apply.
+ * Runs whenever DB_POSTGRES_URL is set (default suite — not opt-in).
+ *
+ * Migrations are applied via {@link execMigrations} (in-process) — no pnpm, no
+ * hardcoded repo cwd. That matters for git worktrees outside the agent VM root.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execSync } from 'node:child_process';
 import { closeDb, getDb } from './client';
+import { execMigrations } from './exec-migrations';
 
-const runGrants =
-  process.env.RUN_RLS_GRANTS_TEST === '1' && Boolean(process.env.DB_POSTGRES_URL);
+const runGrants = Boolean(process.env.DB_POSTGRES_URL);
 
-describe.runIf(runGrants)('RLS grants after openness migrations', () => {
+describe.runIf(runGrants)('RLS grants after estimates migrations', () => {
   const dbName = `nx_rls_${Date.now()}`;
   const baseUrl =
     process.env.DB_POSTGRES_URL?.replace(/\/[^/]+$/, '') ??
     'postgres://postgres:postgres@127.0.0.1:5432';
+  const targetUrl = `${baseUrl}/${dbName}`;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     execSync(
       `psql "${baseUrl}/postgres" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${dbName};" -c "CREATE DATABASE ${dbName};"`,
       { stdio: 'inherit' },
     );
     execSync(
       `psql "${baseUrl}/${dbName}" -v ON_ERROR_STOP=1 -c "DO \\$\\$ BEGIN CREATE ROLE anon NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END \\$\\$;" -c "DO \\$\\$ BEGIN CREATE ROLE authenticated NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END \\$\\$;" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated;"`,
-      { stdio: 'inherit'},
+      { stdio: 'inherit' },
     );
-    process.env.DB_POSTGRES_URL = `${baseUrl}/${dbName}`;
+    process.env.DB_POSTGRES_URL = targetUrl;
+    process.env.DB_POSTGRES_URL_NON_POOLING = targetUrl;
     process.env.DB_SSL = 'disable';
-    execSync('pnpm db:exec-migrations', {
-      cwd: '/workspace',
-      stdio: 'inherit',
-      env: { ...process.env },
-    });
+    await execMigrations(targetUrl);
   });
 
   afterAll(async () => {
@@ -56,5 +61,21 @@ describe.runIf(runGrants)('RLS grants after openness migrations', () => {
     }>;
     const leaked = grants.filter((g) => g.table_name !== 'schema_migrations');
     expect(leaked).toEqual([]);
+  });
+
+  it('rejects TRUNCATE as anon (RLS does not filter TRUNCATE)', () => {
+    let combined = '';
+    try {
+      combined = execSync(
+        `psql "${baseUrl}/${dbName}" -v ON_ERROR_STOP=0 -c "SET ROLE anon; TRUNCATE work_items;"`,
+        { encoding: 'utf8' },
+      );
+    } catch (e) {
+      const err = e as { stdout?: string; stderr?: string; message?: string };
+      combined = `${err.stdout ?? ''}\n${err.stderr ?? ''}\n${err.message ?? ''}`;
+    }
+    expect(combined.toLowerCase()).toMatch(
+      /permission denied|must be owner|does not exist|not exist/,
+    );
   });
 });

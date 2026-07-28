@@ -12,7 +12,8 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "db:exec-migrations": "pnpm --filter @nexus/db exec-migrations",
-    "db:seed": "tsx packages/core/src/seed.ts"
+    "db:seed": "tsx packages/core/src/seed.ts",
+    "acceptance:setup": "tsx packages/core/src/acceptance-setup.ts"
   },
   "devDependencies": {
     "turbo": "^2.5.4",
