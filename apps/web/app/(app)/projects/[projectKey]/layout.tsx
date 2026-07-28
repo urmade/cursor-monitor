@@ -18,6 +18,11 @@ export default async function ProjectLayout({
 
   const tabs = [
     { slug: 'board', label: 'Board', href: `/projects/${projectKey}/board` },
+    {
+      slug: 'questions',
+      label: 'Questions',
+      href: `/projects/${projectKey}/questions`,
+    },
     { slug: 'settings', label: 'Settings', href: `/projects/${projectKey}/settings` },
     { slug: 'audit', label: 'Audit', href: `/projects/${projectKey}/audit` },
   ] as const;

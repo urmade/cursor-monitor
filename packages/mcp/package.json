@@ -17,6 +17,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@nexus/contracts": "workspace:*",
     "@nexus/core": "workspace:*",
     "@nexus/db": "workspace:*",

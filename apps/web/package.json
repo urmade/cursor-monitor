@@ -11,9 +11,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "next": "16.2.12",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
+    "@modelcontextprotocol/sdk": "^1.17.0",
     "@nexus/contracts": "workspace:*",
     "@nexus/core": "workspace:*",
     "@nexus/cursor-client": "workspace:*",
@@ -21,11 +19,13 @@
     "@nexus/jobs": "workspace:*",
     "@nexus/mcp": "workspace:*",
     "@nexus/ui": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.17.0",
     "drizzle-orm": "^0.44.2",
     "jose": "^6.0.11",
-    "zod": "^3.25.67",
-    "uuid": "^11.1.0"
+    "next": "16.2.12",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "uuid": "^11.1.0",
+    "zod": "^3.25.67"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
@@ -33,11 +33,11 @@
     "@types/node": "^22.20.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/uuid": "^10.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
     "typescript": "^5.8.3",
-    "vitest": "^3.2.4",
-    "@types/uuid": "^10.0.0"
+    "vitest": "^3.2.4"
   }
 }

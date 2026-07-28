@@ -36,6 +36,8 @@ export const workItems = pgTable(
     externallyBlockedReason: text('externally_blocked_reason'),
     parentWorkItemId: uuid('parent_work_item_id'),
     createdByUserId: uuid('created_by_user_id').references(() => users.id),
+    currentRunId: uuid('current_run_id'),
+    lastReportId: uuid('last_report_id'),
     version: integer('version').notNull().default(1),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

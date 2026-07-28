@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import {
-  deriveStatus,
+  deriveWorkItemStatus,
   getProjectByKey,
   getProjectRole,
   listLabels,
   listStages,
   listWorkItems,
+  loadActiveRunElapsed,
   can,
 } from '@nexus/core';
 import { eq, inArray } from 'drizzle-orm';
@@ -85,6 +86,17 @@ export default async function BoardPage({
     labelsByItem.set(row.workItemId, list);
   }
 
+  const activeRuns = await loadActiveRunElapsed(ctx, itemIds);
+  const statusByItem = new Map<string, string>();
+  await Promise.all(
+    items.map(async (item) => {
+      statusByItem.set(
+        item.id,
+        (await deriveWorkItemStatus(ctx, item.id)) ?? 'idle',
+      );
+    }),
+  );
+
   return (
     <div className="space-y-4">
       {canCreate ? (
@@ -154,11 +166,12 @@ export default async function BoardPage({
               </PanelHeader>
               <PanelBody className="space-y-2 p-2">
                 {columnItems.map((item) => {
-                  const status = deriveStatus({
-                    archivedAt: item.archivedAt,
-                    externallyBlockedReason: item.externallyBlockedReason,
-                  });
+                  const status = statusByItem.get(item.id) ?? 'idle';
                   const itemLabels = labelsByItem.get(item.id) ?? [];
+                  const active = activeRuns.get(item.id);
+                  const elapsedSec = active
+                    ? Math.round((Date.now() - active.startedAt.getTime()) / 1000)
+                    : null;
                   return (
                     <Panel key={item.id} className="bg-surface-sunken">
                       <PanelBody className="p-3">
@@ -173,6 +186,11 @@ export default async function BoardPage({
                             {item.title}
                           </div>
                         </Link>
+                        {active ? (
+                          <div className="mt-1 text-[11px] text-accent">
+                            AI working · {elapsedSec}s
+                          </div>
+                        ) : null}
                         <div className="mt-2 flex flex-wrap gap-1">
                           {item.complexity ? (
                             <Badge tone={complexityToTone(item.complexity)}>

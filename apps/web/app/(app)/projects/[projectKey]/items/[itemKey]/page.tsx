@@ -1,14 +1,18 @@
 import Link from 'next/link';
 import {
   can,
-  deriveStatus,
+  deriveWorkItemStatus,
   getProjectByKey,
   getProjectRole,
   getWorkItemByKey,
+  listArtifactRefs,
   listLabels,
   listProjectEvents,
+  listQuestions,
+  listRunsForWorkItem,
   listSpecVersions,
   listStageInstances,
+  listStageReports,
   listStages,
   listTransitions,
 } from '@nexus/core';
@@ -32,7 +36,11 @@ import {
   Textarea,
 } from '@nexus/ui';
 import { notFound } from 'next/navigation';
+import { RunTimeline } from '../../../../../../src/components/RunTimeline';
 import {
+  actionAnswerQuestion,
+  actionCancelRun,
+  actionLaunchRun,
   actionSaveSpec,
   actionTransitionWorkItem,
   actionUpdateWorkItem,
@@ -87,25 +95,59 @@ export default async function ItemPage({
     projectId: project.value.id,
     role,
   });
+  const canLaunch = can(ctx.actor, 'run.launch', {
+    type: 'work_item',
+    projectId: project.value.id,
+    role,
+  });
+  const canCancel = can(ctx.actor, 'run.cancel', {
+    type: 'work_item',
+    projectId: project.value.id,
+    role,
+  });
+  const canAnswer = can(ctx.actor, 'question.answer', {
+    type: 'work_item',
+    projectId: project.value.id,
+    role,
+  });
 
-  const [stagesR, specsR, instances, transitions, eventsR, allLabelsR] =
-    await Promise.all([
-      listStages(ctx, project.value.id),
-      listSpecVersions(ctx, item.id),
-      listStageInstances(ctx, item.id),
-      listTransitions(ctx, item.id),
-      listProjectEvents(ctx, project.value.id, {
-        workItemId: item.id,
-        limit: 50,
-      }),
-      listLabels(ctx, project.value.id),
-    ]);
+  const [
+    stagesR,
+    specsR,
+    instances,
+    transitions,
+    eventsR,
+    allLabelsR,
+    runsR,
+    reportsR,
+    questionsR,
+    artifactsR,
+  ] = await Promise.all([
+    listStages(ctx, project.value.id),
+    listSpecVersions(ctx, item.id),
+    listStageInstances(ctx, item.id),
+    listTransitions(ctx, item.id),
+    listProjectEvents(ctx, project.value.id, {
+      workItemId: item.id,
+      limit: 50,
+    }),
+    listLabels(ctx, project.value.id),
+    listRunsForWorkItem(ctx, item.id),
+    listStageReports(ctx, item.id),
+    listQuestions(ctx, item.id),
+    listArtifactRefs(ctx, item.id),
+  ]);
 
   const stages = stagesR.ok ? stagesR.value : [];
   const specs = specsR.ok ? specsR.value : [];
   const events = eventsR.ok ? eventsR.value : [];
   const allLabels = allLabelsR.ok ? allLabelsR.value : [];
+  const runs = runsR.ok ? runsR.value : [];
+  const reports = reportsR.ok ? reportsR.value : [];
+  const qs = questionsR.ok ? questionsR.value.questions : [];
+  const artifacts = artifactsR.ok ? artifactsR.value : [];
   const stageById = new Map(stages.map((s) => [s.id, s]));
+  const reportByRun = new Map(reports.map((r) => [r.runId, r]));
 
   const currentLabels = await ctx.db
     .select({
@@ -116,13 +158,36 @@ export default async function ItemPage({
     .innerJoin(labelsTable, eq(labelsTable.id, workItemLabels.labelId))
     .where(eq(workItemLabels.workItemId, item.id));
 
-  const status = deriveStatus({
-    archivedAt: item.archivedAt,
-    externallyBlockedReason: item.externallyBlockedReason,
-  });
+  const status = (await deriveWorkItemStatus(ctx, item.id)) ?? 'idle';
   const currentSpec = specs[0];
   const prevSpec = specs[1];
   const specContent = currentSpec?.content as Record<string, unknown> | undefined;
+  const openBlocking = qs.filter((q) => q.status === 'open' && q.blocking);
+
+  const runRows = runs.map((r) => {
+    const report = reportByRun.get(r.id);
+    return {
+      id: r.id,
+      status: r.status,
+      outcome: r.outcome,
+      durationMs: r.durationMs,
+      tokens: r.tokens,
+      providerUrl: r.providerUrl,
+      errorCode: r.errorCode,
+      errorDetail: r.errorDetail,
+      createdAt: r.createdAt.toISOString(),
+      report: report
+        ? {
+            headline: report.headline,
+            summary: report.summary,
+            outcome: report.outcome,
+            confidence: report.confidence,
+            assumptions: report.assumptions ?? [],
+            notVerified: report.notVerified ?? [],
+          }
+        : null,
+    };
+  });
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_14rem]">
@@ -139,6 +204,81 @@ export default async function ItemPage({
             {item.title}
           </h2>
         </div>
+
+        {openBlocking.length > 0 ? (
+          <Panel className="border-warning-border bg-warning-bg/30">
+            <PanelHeader>
+              <span className="text-sm font-medium text-warning-fg">
+                Needs answer
+              </span>
+            </PanelHeader>
+            <PanelBody className="space-y-4">
+              {openBlocking.map((q) => (
+                <div key={q.id} className="space-y-2">
+                  <p className="text-sm text-fg">{q.text}</p>
+                  {q.options.length > 0 ? (
+                    <ul className="list-disc pl-4 text-xs text-fg-muted">
+                      {q.options.map((o) => (
+                        <li key={o}>{o}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {canAnswer ? (
+                    <form action={actionAnswerQuestion} className="grid gap-2">
+                      <input type="hidden" name="questionId" value={q.id} />
+                      <input type="hidden" name="projectKey" value={projectKey} />
+                      <input type="hidden" name="itemKey" value={itemKey} />
+                      <Textarea name="answer" required rows={2} placeholder="Your answer" />
+                      <Button type="submit" className="w-fit" size="sm">
+                        Answer & resume
+                      </Button>
+                    </form>
+                  ) : null}
+                </div>
+              ))}
+            </PanelBody>
+          </Panel>
+        ) : null}
+
+        <Panel>
+          <PanelBody>
+            <RunTimeline
+              runs={runRows}
+              workItemId={item.id}
+              projectKey={projectKey}
+              itemKey={itemKey}
+              canLaunch={canLaunch}
+              canCancel={canCancel}
+              launchAction={actionLaunchRun}
+              cancelAction={actionCancelRun}
+            />
+          </PanelBody>
+        </Panel>
+
+        {artifacts.length > 0 ? (
+          <Panel>
+            <PanelHeader>
+              <span className="text-sm font-medium">Artifacts</span>
+            </PanelHeader>
+            <PanelBody>
+              <ul className="space-y-1 text-sm">
+                {artifacts.map((a) => (
+                  <li key={a.id}>
+                    <Badge tone="neutral">{a.kind}</Badge>{' '}
+                    <a
+                      href={a.url}
+                      className="text-link hover:underline"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {a.title ?? a.url}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </PanelBody>
+          </Panel>
+        ) : null}
 
         <Tabs defaultValue="spec">
           <TabsList>
@@ -270,6 +410,7 @@ export default async function ItemPage({
                           </span>
                           <span className="ml-2 text-xs text-fg-subtle">
                             seq {inst.seq}
+                            {inst.outcome ? ` · ${inst.outcome}` : ''}
                           </span>
                         </div>
                         <div className="text-xs text-fg-muted">

@@ -3,3 +3,5 @@ export * from './projects';
 export * from './work-items';
 export * from './history';
 export * from './infra';
+export * from './bindings';
+export * from './runs';

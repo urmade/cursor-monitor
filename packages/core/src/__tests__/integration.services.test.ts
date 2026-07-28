@@ -25,7 +25,7 @@ import {
 const hasDb = Boolean(process.env.DB_POSTGRES_URL);
 
 describe.runIf(hasDb)('phase 1 services integration', () => {
-  const db = getDb();
+  const db = hasDb ? getDb() : (null as unknown as ReturnType<typeof getDb>);
   let orgId = '';
   let ownerId = '';
   let viewerId = '';

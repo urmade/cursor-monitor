@@ -19,3 +19,7 @@ export {
   getJobHandler,
   listRegisteredKinds,
 } from './registry';
+
+// Side-effect: register Phase 2 job handlers.
+import './handlers';
+export { ensureSweepJob } from './handlers';

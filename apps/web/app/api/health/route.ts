@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getMigrationVersion, pingDb } from '@nexus/db';
+import { getMigrationVersion, pingDb, getDb, mcpCallLog } from '@nexus/db';
 import { queueDepth, readLastCronTick } from '@nexus/jobs';
-import { getDb } from '@nexus/db';
+import { sql } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +14,7 @@ export async function GET() {
     running: number;
     oldestPendingAt: string | null;
   } | null = null;
+  let mcp: { callsLastMinute: number } | null = null;
 
   try {
     dbOk = await pingDb();
@@ -46,6 +47,17 @@ export async function GET() {
     } catch {
       queue = null;
     }
+
+    try {
+      const rows = await getDb().execute(sql`
+        select count(*)::int as c from mcp_call_log
+        where created_at > now() - interval '1 minute'
+      `);
+      const arr = rows as unknown as Array<{ c: number }>;
+      mcp = { callsLastMinute: Number(arr[0]?.c ?? 0) };
+    } catch {
+      mcp = { callsLastMinute: 0 };
+    }
   }
 
   return NextResponse.json({
@@ -55,5 +67,8 @@ export async function GET() {
     migrationVersion,
     lastCronTick,
     queue,
+    mcp,
   });
 }
+
+void mcpCallLog;

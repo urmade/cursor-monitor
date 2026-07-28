@@ -15,10 +15,8 @@ function hasRole(role: ProjectRole | null, minimum: ProjectRole): boolean {
 
 /**
  * Single authorisation module. Adapters must not make their own access decisions.
- * Phase 1 matrix (architecture-baseline §6.3):
- * - viewer: read-only
- * - member: create/update work items, write specs, transition
- * - maintainer/owner: project settings, pipeline, labels, members, overrides
+ * Phase 2: agents may read/write work-item scoped surfaces; MCP token scope is
+ * the real boundary. Humans gain run.launch / run.cancel / binding management.
  */
 export function can(
   actor: Actor,
@@ -29,8 +27,20 @@ export function can(
     return true;
   }
 
-  if (actor.kind === 'agent' || actor.kind === 'api_token') {
-    // Machine principals are scoped in Phase 2/8; deny product mutations here.
+  if (actor.kind === 'agent') {
+    const agentAllowed: AuthzAction[] = [
+      'work_item.read',
+      'work_item.update',
+      'spec.read',
+      'spec.write',
+      'run.read',
+      'project.read',
+      'audit.read',
+    ];
+    return agentAllowed.includes(action);
+  }
+
+  if (actor.kind === 'api_token') {
     return action.endsWith('.read') || action === 'audit.read';
   }
 
@@ -46,17 +56,22 @@ export function can(
         case 'work_item.read':
         case 'spec.read':
         case 'audit.read':
+        case 'run.read':
           return hasRole(role, 'viewer');
         case 'work_item.create':
         case 'work_item.update':
         case 'work_item.transition':
         case 'spec.write':
+        case 'run.launch':
+        case 'run.cancel':
+        case 'question.answer':
           return hasRole(role, 'member');
         case 'work_item.archive':
         case 'project.update':
         case 'project.manage_pipeline':
         case 'project.manage_labels':
         case 'project.manage_members':
+        case 'project.manage_bindings':
         case 'status.override':
           return hasRole(role, 'maintainer');
         case 'project.archive':

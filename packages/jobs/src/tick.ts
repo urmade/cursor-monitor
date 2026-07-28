@@ -8,6 +8,7 @@ import {
   queueDepth,
 } from './queue';
 import { getJobHandler } from './registry';
+import { ensureSweepJob } from './handlers';
 
 export type TickResult = {
   ok: true;
@@ -62,13 +63,24 @@ export async function runCronTick(): Promise<TickResult> {
   lastCronTickMemory = lastCronTick;
   await recordLastCronTick(lastCronTick);
 
-  // Keep a heartbeat no-op in the queue so preview proves claim/complete.
   await enqueueJob(db, {
     kind: 'noop',
     payload: { source: 'cron_tick', at: lastCronTick },
     dedupeKey: `noop:${lastCronTick.slice(0, 16)}`,
     priority: -10,
   }).catch(() => undefined);
+
+  await ensureSweepJob().catch(() => undefined);
+
+  const hour = new Date().getUTCHours();
+  if (hour === 3) {
+    await enqueueJob(db, {
+      kind: 'cursor_live_smoke',
+      payload: { at: lastCronTick },
+      dedupeKey: `cursor_live_smoke:${lastCronTick.slice(0, 10)}`,
+      priority: 0,
+    }).catch(() => undefined);
+  }
 
   const workerId = `cron-${newId().slice(0, 8)}`;
   const claimed = await claimJobs(db, workerId, 20);

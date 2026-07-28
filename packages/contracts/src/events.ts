@@ -21,6 +21,25 @@ export const EventTypeSchema = z.enum([
   'member.removed',
   'status.override_set',
   'status.override_cleared',
+  // Phase 2
+  'binding.created',
+  'binding.updated',
+  'binding.archived',
+  'prompt_template.created',
+  'run.launched',
+  'run.started',
+  'run.finished',
+  'run.failed',
+  'run.cancelled',
+  'run.expired',
+  'run.completed_without_report',
+  'run.launch_failed',
+  'stage_report.posted',
+  'question.asked',
+  'question.answered',
+  'question.withdrawn',
+  'artifact_ref.attached',
+  'label.agent_set',
 ]);
 
 export type EventType = z.infer<typeof EventTypeSchema>;

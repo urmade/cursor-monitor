@@ -7,6 +7,7 @@ export type AuthzAction =
   | 'project.manage_members'
   | 'project.manage_pipeline'
   | 'project.manage_labels'
+  | 'project.manage_bindings'
   | 'work_item.read'
   | 'work_item.create'
   | 'work_item.update'
@@ -15,7 +16,11 @@ export type AuthzAction =
   | 'spec.read'
   | 'spec.write'
   | 'audit.read'
-  | 'status.override';
+  | 'status.override'
+  | 'run.read'
+  | 'run.launch'
+  | 'run.cancel'
+  | 'question.answer';
 
 export type AuthzResource =
   | { type: 'org'; orgId: string }

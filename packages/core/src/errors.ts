@@ -5,7 +5,15 @@ export type CoreErrorCode =
   | 'stale_version'
   | 'validation'
   | 'invalid_transition'
-  | 'invariant';
+  | 'invariant'
+  | 'run_already_active'
+  | 'no_binding'
+  | 'orchestration_disabled'
+  | 'provider_busy'
+  | 'provider_error'
+  | 'item_archived'
+  | 'daily_cap_exceeded'
+  | 'concurrency_ceiling';
 
 export type CoreError = {
   code: CoreErrorCode;

@@ -65,6 +65,8 @@ export type AgentUsage = {
   cacheWriteTokens?: number;
   cacheReadTokens?: number;
   usageUuid?: string;
+  chargedCents?: number;
+  rawCostCents?: number;
   [key: string]: unknown;
 };
 
