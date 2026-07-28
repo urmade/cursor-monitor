@@ -21,6 +21,7 @@ import {
   createContext,
   createFlagReader,
   getSpec,
+  getGateContextForAgent,
   getTicketForAgent,
   listQuestions,
   logMcpCall,
@@ -47,7 +48,7 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   set_labels: `Add/remove labels against the project taxonomy (agent-settable only). Max ${MCP_LIMITS.labelsPerCall} per call.`,
   ask_question: `Ask a human a question. blocking:true marks the ticket needs_answer. Text ≤ ${MCP_LIMITS.questionChars} chars.`,
   attach_artifact_ref: `Attach a URL reference (pr/branch/preview/artifact/link). Max ${MCP_LIMITS.artifactRefsPerRun} per run.`,
-  get_gate_context: `Recent gate results and open warnings. Empty until Phase 3.`,
+  get_gate_context: `Recent gate results, open warnings with codes, and pending approvals for this ticket.`,
   list_questions: `List this ticket's questions (most recent ${MCP_LIMITS.listQuestionsLimit}) and any answers.`,
 };
 
@@ -169,7 +170,9 @@ export const toolHandlers: Record<string, ToolHandler> = {
     if (ctx.actor.kind === 'agent' && ctx.actor.workItemId !== input.ticket_id) {
       return mcpErr('ticket_mismatch', 'ticket_id does not match token scope');
     }
-    return mcpOk({ gates: [], warnings: [], note: 'Phase 3 populates gate context' });
+    const r = await getGateContextForAgent(ctx, input.ticket_id);
+    if (!r.ok) return mapCoreError(r.error.code, r.error.message);
+    return mcpOk(r.value);
   },
 
   async list_questions(args, ctx) {

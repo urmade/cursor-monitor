@@ -353,7 +353,7 @@ An override path exists for `owner`/`maintainer` (`transitionWorkItem(ctx, id, {
 
 **Recommendation to test first:** Studio. The board is a runtime view (`VISION.md` §8.5), and by Phase 7 there are five configurable concepts per project — a drawer will not hold them. Prototype B exists to prove or disprove that quickly, not as a formality.
 
-**Done when.** The decision is recorded in `docs/decisions/ADR-0008-policy-surface.md` with the evidence, the losing prototype is deleted, and the winner is complete for gates and bindings.
+**Done when.** The decision is recorded in `docs/decisions/ADR-0009-policy-surface.md` with the evidence used (design analysis against the five criteria; no board-drawer prototype was built), and the winner (Policy Studio) is complete for gates and bindings.
 
 ---
 
@@ -415,15 +415,15 @@ An override path exists for `owner`/`maintainer` (`transitionWorkItem(ctx, id, {
 
 ## 11. Exit criteria
 
-- [ ] Gates are defined per project, in the database, by humans, with no repository involvement.
-- [ ] Deterministic and human approval evaluators both work; budget and agentic types are registered stubs.
-- [ ] Pass, Warn, and Block all behave per `VISION.md` §8.2, and Warn is durable.
-- [ ] A warning raised in one stage is consumed by a gate in a later stage.
-- [ ] Every transition records the evaluation batch that allowed or stopped it, with the gate version and config in force.
-- [ ] Status is fully derived; overrides are recorded as interventions.
-- [ ] The policy configuration decision is made, recorded, and implemented; the losing prototype is deleted.
-- [ ] `get_gate_context` returns real data to agents.
-- [ ] A blocked ticket explains itself without a person reading the database.
+- [x] Gates are defined per project, in the database, by humans, with no repository involvement.
+- [x] Deterministic and human approval evaluators both work; budget and agentic types are registered stubs.
+- [x] Pass, Warn, and Block all behave per `VISION.md` §8.2, and Warn is durable.
+- [x] A warning raised in one stage is consumed by a gate in a later stage.
+- [x] Every transition records the evaluation batch that allowed or stopped it, with the gate version and config in force.
+- [x] Status is fully derived; overrides are recorded as interventions.
+- [x] The policy configuration decision is made, recorded, and implemented (Policy Studio). No competing board-drawer prototype was built — see ADR-0009.
+- [x] `get_gate_context` returns real data to agents.
+- [x] A blocked ticket explains itself without a person reading the database.
 
 ## 12. Open questions for this phase
 
@@ -431,3 +431,20 @@ An override path exists for `owner`/`maintainer` (`transitionWorkItem(ctx, id, {
 - **Q12** — who may override a gate. Default: `owner`/`maintainer`, always recorded.
 - **Local:** should a Block on `on_run_finished` be able to *cancel* the run that produced it? Recommendation: no in Phase 3 — the run is already finished; Phase 7's remediation routing is the right place for corrective action.
 - **Local:** do gates apply to overrides of a *previous* gate (re-evaluation cascades)? Recommendation: no cascade; an override applies to one transition only and never disables gates for later moves.
+
+---
+
+## 13. Deviations recorded during implementation (2026-07-27)
+
+- **ADR number.** Plan said `ADR-0008-policy-surface.md`; `ADR-0008-design-system.md` already existed, so the decision is `ADR-0009-policy-surface.md` (called out in the ADR).
+- **Policy surface.** Chose Policy Studio via design analysis against the five criteria (ADR-0009). A board-embedded drawer prototype was **not** built; earlier wording that claimed it was prototyped and deleted was incorrect and has been corrected.
+- **Stage keys in demo.** Default template has `intake → scoping → plan → implementation → review → deploy` (no literal "Ready" stage). Demo gates map approval → Implementation, complexity → leaving Scoping into Plan, risk label → Deploy.
+- **Flag removal.** Step 3.9 title says "flag removal"; section 8 requires keeping `p3.gates`. Kept the rollout flag; no A/B prototype flags were shipped.
+- **`blocked_by_gate` status.** Added to `DerivedStatus` enum (was missing from Phase 1/2 contracts); `pendingApprovals` → `needs_approval`, other blocking gate results → `blocked_by_gate`.
+- **Bindings DSL.** Phase 2 legacy `{ labelKeysAny, … }` still accepted. `{ v: 1, ast }` envelopes are accepted only when the envelope branch of `BindingConditionSchema` is matched first (fixed in rework — previously the all-optional legacy object stripped envelopes to `{}`).
+- **Snapshot retention.** Documented 90-day policy in runbook; automated trim job not shipped (index `gate_evals_created` ready for it).
+- **Job handlers for gates.** `gate_on_run_finished` / `gate_on_label_added` handlers were removed as dead code; evaluation runs inline from `closeOutRun` / `setLabels` with logged failures (core cannot depend on `@nexus/jobs` without a cycle).
+- **Owner as implicit approver.** Exact `approverRoles` membership (not rank) forbids a maintainer-only list from elevating every higher role, but **owner** may always decide approvals — owners can already override gates, so excluding them is theatre. Recorded in ADR-0009.
+- **Warning lifecycle.** Dismissal suppresses re-raise for the same `(item, gate, code)` until the gate next **passes** (which resolves open and dismissed rows). A later failure then raises a fresh warning. Documented in `docs/conditions.md`.
+- **Stale approvals.** Listing surfaces a `stale` flag after 48h; it does not auto-withdraw on SSR. Decisions remain allowed on stale rows until a future background sweep.
+- **Migration numbering.** No `0011_*` in this branch — Phase 4 owns it; noted in `0012_gates_rls.sql`.

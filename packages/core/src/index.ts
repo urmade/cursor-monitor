@@ -45,4 +45,20 @@ export {
   getTicketForAgent,
   updateSpecFromAgent,
   setAgentLabels,
+  getGateContextForAgent,
 } from './mcp/agent-ops';
+export * from './conditions';
+export * from './gates';
+export {
+  listWarnings,
+  dismissWarning,
+} from './warnings';
+export {
+  listPendingApprovals,
+  listPendingApprovalsForItem,
+  decideApproval,
+  canDecideApproval,
+  isApprovalStale,
+  STALE_APPROVAL_MS,
+  type PendingApprovalView,
+} from './approvals';

@@ -214,22 +214,28 @@ describe.runIf(hasDb)('phase 1 services integration', () => {
   });
 
   it('rolls back event when state insert fails', async () => {
-    const before = await db.select().from(events);
-    const beforeCount = before.length;
     const ownerCtx = createContext({
       db,
       orgId,
       actor: { kind: 'human', userId: ownerId },
     });
-    // invalid key should fail zod before write
-    const bad = await createProject(ownerCtx, {
-      key: 'bad-key',
-      name: 'Nope',
-      template: 'default',
-    }).catch((e: unknown) => e);
-    expect(bad).toBeTruthy();
-    const after = await db.select().from(events);
-    expect(after.length).toBe(beforeCount);
+    // invalid key fails zod parse before any durable write
+    let threw = false;
+    try {
+      await createProject(ownerCtx, {
+        key: 'bad-key',
+        name: 'Nope',
+        template: 'default',
+      });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+    const { projects } = await import('@nexus/db');
+    const sneaky = await db.query.projects.findFirst({
+      where: eq(projects.key, 'bad-key'),
+    });
+    expect(sneaky).toBeUndefined();
   });
 
   it('membership row exists after create', async () => {

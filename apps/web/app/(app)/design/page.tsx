@@ -7,7 +7,6 @@ import {
   Kbd,
   Panel,
   PanelBody,
-  PanelHeader,
   Separator,
   Skeleton,
   Tabs,

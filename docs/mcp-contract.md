@@ -35,7 +35,7 @@ Errors are returned as tool results (not transport errors) so agents can read an
 | `set_labels` | W | ≤ 20 labels/call; taxonomy + `agent_settable` |
 | `ask_question` | W | Text ≤ 4 KB; `blocking` marks `needs_answer` |
 | `attach_artifact_ref` | W | ≤ 20 refs/run |
-| `get_gate_context` | R | Empty until Phase 3 |
+| `get_gate_context` | R | Recent results, warnings, pending approvals |
 | `list_questions` | R | Most recent 50 + total count |
 
 ### `get_ticket`
@@ -44,7 +44,7 @@ Errors are returned as tool results (not transport errors) so agents can read an
 { "ticket_id": "<uuid>" }
 ```
 
-Returns: `id`, `key`, `title`, `description`, `complexity`, `stage`, `labels`, `owner_class`, `status`, `spec` meta, `warnings` ([] until P3), `budget` (null until P4), `links.ui_url`.
+Returns: `id`, `key`, `title`, `description`, `complexity`, `stage`, `labels`, `owner_class`, `status`, `spec` meta, `warnings` (open warnings with `id`/`code`/`message`/`status`/`created_at` — populated in Phase 3), `budget` (null until P4), `links.ui_url`.
 
 ### `get_spec`
 
@@ -94,9 +94,24 @@ Idempotent: a second call returns the first report with `already_posted: true`. 
 
 `kind`: `pr|branch|preview|artifact|link`.
 
-### `get_gate_context` / `list_questions`
+### `get_gate_context`
 
-Read helpers; gate context is empty until Phase 3.
+```json
+{ "ticket_id": "<uuid>" }
+```
+
+Returns (Phase 3 — additive, still `nexus-mcp/1`):
+
+- `gates[]` — latest evaluation per gate: `gate_id`, `gate_name`, `gate_version`, `outcome`, `reason`, `evidence`, `evaluated_at`
+- `recent_evaluations[]` — last 10 evaluations
+- `warnings[]` — open warnings with codes/messages
+- `pending_approvals[]` — pending approval requests and `requested_for` trigger
+
+**Fingerprint note (2026-07-27).** Tool *argument* schemas are unchanged; only response payloads gained fields. Golden fingerprint in `contract.golden.test.ts` is therefore unchanged. If a future change alters arg schemas, update `EXPECTED_FINGERPRINT` deliberately and document here.
+
+### `list_questions`
+
+Read helper for open/answered questions (most recent 50 + total).
 
 ## Error codes
 

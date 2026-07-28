@@ -13,7 +13,8 @@ export type CoreErrorCode =
   | 'provider_error'
   | 'item_archived'
   | 'daily_cap_exceeded'
-  | 'concurrency_ceiling';
+  | 'concurrency_ceiling'
+  | 'gate_blocked';
 
 export type CoreError = {
   code: CoreErrorCode;

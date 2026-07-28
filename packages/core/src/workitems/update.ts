@@ -164,6 +164,32 @@ export async function setLabels(
   const refreshed = await ctx.db.query.workItems.findFirst({
     where: eq(workItems.id, id),
   });
+
+  for (const key of change.add) {
+    try {
+      const { evaluateOnLabelAdded } = await import('../gates/events');
+      const result = await evaluateOnLabelAdded(ctx, {
+        workItemId: id,
+        labelKey: key,
+      });
+      if (!result.ok) {
+        ctx.logger.warn(
+          { err: result.error.message, workItemId: id, labelKey: key },
+          'gate evaluation on label added failed',
+        );
+      }
+    } catch (e) {
+      ctx.logger.warn(
+        {
+          err: e instanceof Error ? e.message : String(e),
+          workItemId: id,
+          labelKey: key,
+        },
+        'gate evaluation on label added threw',
+      );
+    }
+  }
+
   return ok(refreshed!);
 }
 

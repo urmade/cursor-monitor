@@ -130,9 +130,9 @@ The role matrix in `architecture-baseline.md` §6.3 is a proposal (`VISION.md` �
 
 ### Q13 — Policy Studio or board-embedded policy configuration? (`VISION.md` §17.1)
 
-Phase 3 forces this decision with a timeboxed prototype of both (step 3.7). An early steer from the product owner would save that timebox.
+**Status (2026-07-27).** Closed — Policy Studio. See `docs/decisions/ADR-0009-policy-surface.md` (ADR-0008 was already used for the design system).
 
-**Default.** Prototype both, decide on evidence, and keep the engine indifferent either way.
+**Default used.** Prototype both against the stated criteria; ship Studio; delete board-embedded drawer.
 
 ### Q14 — Do we mirror any Bugbot / Cursor Review state? (`VISION.md` §17.6)
 

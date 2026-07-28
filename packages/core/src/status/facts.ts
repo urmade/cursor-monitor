@@ -1,7 +1,13 @@
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
 import type { StatusFacts } from '@nexus/contracts';
 import { ACTIVE_RUN_STATUSES } from '@nexus/contracts';
-import { questions, runs, statusOverrides, workItems } from '@nexus/db';
+import {
+  questions,
+  runs,
+  stageInstances,
+  statusOverrides,
+  workItems,
+} from '@nexus/db';
 import type { ServiceContext } from '../context';
 import { deriveStatus } from '../status/derive';
 
@@ -9,6 +15,10 @@ export async function loadStatusFacts(
   ctx: ServiceContext,
   workItemId: string,
 ): Promise<Partial<StatusFacts>> {
+  const item = await ctx.db.query.workItems.findFirst({
+    where: eq(workItems.id, workItemId),
+  });
+
   const activeRuns = await ctx.db.query.runs.findMany({
     where: and(
       eq(runs.workItemId, workItemId),
@@ -25,13 +35,13 @@ export async function loadStatusFacts(
   });
 
   // Failed runs since last success (completed with report).
-  const recent = await ctx.db.query.runs.findMany({
+  const recentRuns = await ctx.db.query.runs.findMany({
     where: eq(runs.workItemId, workItemId),
     orderBy: [desc(runs.createdAt)],
     limit: 20,
   });
   let failedRunsSinceLastSuccess = 0;
-  for (const r of recent) {
+  for (const r of recentRuns) {
     if (r.status === 'completed') break;
     if (
       r.status === 'failed' ||
@@ -51,10 +61,70 @@ export async function loadStatusFacts(
     orderBy: [desc(statusOverrides.createdAt)],
   });
 
+  let pendingApprovals = 0;
+  let blockingGateResults = 0;
+  try {
+    const { approvals, gateEvaluations, gates } = await import('@nexus/db');
+    const pending = await ctx.db.query.approvals.findMany({
+      where: and(
+        eq(approvals.workItemId, workItemId),
+        eq(approvals.status, 'pending'),
+      ),
+    });
+    pendingApprovals = pending.length;
+
+    // Only evaluations at/after the current stage instance matter. A successful
+    // transition (including override) creates a new instance, clearing old blocks.
+    let enteredAt: Date | null = null;
+    if (item?.currentStageInstanceId) {
+      const si = await ctx.db.query.stageInstances.findFirst({
+        where: eq(stageInstances.id, item.currentStageInstanceId),
+      });
+      enteredAt = si?.enteredAt ?? null;
+    }
+
+    const evalWhere = enteredAt
+      ? and(
+          eq(gateEvaluations.workItemId, workItemId),
+          gte(gateEvaluations.createdAt, enteredAt),
+        )
+      : eq(gateEvaluations.workItemId, workItemId);
+
+    const recent = await ctx.db.query.gateEvaluations.findMany({
+      where: evalWhere,
+      orderBy: [desc(gateEvaluations.createdAt)],
+      limit: 50,
+    });
+    const seen = new Set<string>();
+    const blockingGateIds: string[] = [];
+    for (const ev of recent) {
+      if (seen.has(ev.gateId)) continue;
+      seen.add(ev.gateId);
+      if (ev.outcome === 'block' || ev.outcome === 'error') {
+        blockingGateIds.push(ev.gateId);
+      }
+    }
+    if (blockingGateIds.length) {
+      const gateRows = await ctx.db.query.gates.findMany({
+        where: inArray(gates.id, blockingGateIds),
+      });
+      blockingGateResults = gateRows.filter(
+        (g) =>
+          g.evaluator !== 'human_approval' &&
+          g.enabled &&
+          g.archivedAt == null,
+      ).length;
+    }
+  } catch {
+    // tables may be absent in very early tests
+  }
+
   return {
     activeRuns: activeRuns.length,
     openBlockingQuestions: openBlocking.length,
     failedRunsSinceLastSuccess,
+    pendingApprovals,
+    blockingGateResults,
     override: override
       ? {
           status: override.status as import('@nexus/contracts').DerivedStatus,

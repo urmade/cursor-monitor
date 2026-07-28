@@ -40,6 +40,21 @@ export const EventTypeSchema = z.enum([
   'question.withdrawn',
   'artifact_ref.attached',
   'label.agent_set',
+  // Phase 3
+  'gate.created',
+  'gate.updated',
+  'gate.archived',
+  'gate.evaluated',
+  'gate.blocked',
+  'gate.warned',
+  'warning.created',
+  'warning.resolved',
+  'warning.dismissed',
+  'approval.requested',
+  'approval.approved',
+  'approval.rejected',
+  'approval.withdrawn',
+  'intervention.recorded',
 ]);
 
 export type EventType = z.infer<typeof EventTypeSchema>;

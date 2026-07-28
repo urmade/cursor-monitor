@@ -1,5 +1,4 @@
 import {
-  closeOutRun,
   createContext,
   createFlagReader,
   pollRun,
@@ -7,7 +6,7 @@ import {
   sweepStuckRuns,
 } from '@nexus/core';
 import { CursorClient } from '@nexus/cursor-client';
-import { getDb, orgs } from '@nexus/db';
+import { getDb } from '@nexus/db';
 import { registerJobHandler } from './registry';
 import { enqueueJob } from './queue';
 
@@ -56,6 +55,12 @@ registerJobHandler('cursor_live_smoke', async () => {
   // here we only assert the live endpoint still responds.
 });
 
+/**
+ * Gate evaluation for on_run_finished / on_label_added runs inline from
+ * closeOutRun / setLabels (core cannot depend on @nexus/jobs without a cycle).
+ * Dead `gate_on_*` handlers were removed rather than left registered-but-unenqueued.
+ */
+
 /** Enqueue the hourly stuck sweep if not already pending. */
 export async function ensureSweepJob(): Promise<void> {
   const db = getDb();
@@ -66,6 +71,3 @@ export async function ensureSweepJob(): Promise<void> {
     priority: 5,
   });
 }
-
-// Keep closeOutRun referenced for typecheck of re-exports used by tests.
-void closeOutRun;

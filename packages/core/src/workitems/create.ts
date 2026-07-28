@@ -194,3 +194,25 @@ export async function getWorkItemByKey(
   if (!item) return err(coreError('not_found', 'Work item not found'));
   return ok(item);
 }
+
+export async function getWorkItem(
+  ctx: ServiceContext,
+  id: string,
+): Promise<Result<WorkItem, CoreError>> {
+  const item = await ctx.db.query.workItems.findFirst({
+    where: and(eq(workItems.id, id), isNull(workItems.archivedAt)),
+  });
+  if (!item) return err(coreError('not_found', 'Work item not found'));
+
+  const role = await getProjectRole(ctx, item.projectId);
+  if (
+    !can(ctx.actor, 'work_item.read', {
+      type: 'work_item',
+      projectId: item.projectId,
+      role,
+    })
+  ) {
+    return err(coreError('not_found', 'Work item not found'));
+  }
+  return ok(item);
+}

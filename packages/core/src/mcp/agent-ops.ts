@@ -180,6 +180,32 @@ export async function setAgentLabels(
       .where(eq(workItems.id, ticketId));
   });
 
+  // Phase 3: fire on_label_added gates for each newly added label.
+  for (const key of change.add) {
+    try {
+      const { evaluateOnLabelAdded } = await import('../gates/events');
+      const result = await evaluateOnLabelAdded(ctx, {
+        workItemId: ticketId,
+        labelKey: key,
+      });
+      if (!result.ok) {
+        ctx.logger.warn(
+          { err: result.error.message, workItemId: ticketId, labelKey: key },
+          'gate evaluation on label added failed',
+        );
+      }
+    } catch (e) {
+      ctx.logger.warn(
+        {
+          err: e instanceof Error ? e.message : String(e),
+          workItemId: ticketId,
+          labelKey: key,
+        },
+        'gate evaluation on label added threw',
+      );
+    }
+  }
+
   return ok({ added: change.add, removed: change.remove });
 }
 
@@ -245,6 +271,29 @@ export async function getTicketForAgent(
     process.env.NEXUS_PUBLIC_URL ??
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
+  let warningPayload: Array<{
+    id: string;
+    code: string;
+    message: string;
+    status: string;
+    created_at: string;
+  }> = [];
+  try {
+    const { listWarnings } = await import('../warnings');
+    const w = await listWarnings(ctx, ticketId, { status: 'open' });
+    if (w.ok) {
+      warningPayload = w.value.map((row) => ({
+        id: row.id,
+        code: row.code,
+        message: row.message,
+        status: row.status,
+        created_at: row.createdAt.toISOString(),
+      }));
+    }
+  } catch {
+    warningPayload = [];
+  }
+
   return ok({
     id: item.id,
     key: item.key,
@@ -258,10 +307,83 @@ export async function getTicketForAgent(
     owner_class: item.ownerClass,
     status,
     spec: specMeta,
-    warnings: [],
+    warnings: warningPayload,
     budget: null,
     links: {
       ui_url: `${base.replace(/\/$/, '')}/projects/${project?.key}/items/${item.key}`,
     },
+  });
+}
+
+/** Real gate context for agents (Phase 3). Additive to nexus-mcp/1. */
+export async function getGateContextForAgent(
+  ctx: ServiceContext,
+  ticketId: string,
+): Promise<Result<Record<string, unknown>, CoreError>> {
+  if (ctx.actor.kind === 'agent' && ctx.actor.workItemId !== ticketId) {
+    return err(coreError('forbidden', 'ticket_id does not match token scope'));
+  }
+
+  const item = await ctx.db.query.workItems.findFirst({
+    where: eq(workItems.id, ticketId),
+  });
+  if (!item) return err(coreError('not_found', 'Work item not found'));
+
+  const role = await getProjectRole(ctx, item.projectId);
+  if (
+    !can(ctx.actor, 'work_item.read', {
+      type: 'work_item',
+      projectId: item.projectId,
+      role,
+    })
+  ) {
+    return err(coreError('not_found', 'Work item not found'));
+  }
+
+  const { listRecentGateEvaluations, getLatestGateResultsByGate } =
+    await import('../gates/evaluate');
+  const { listWarnings } = await import('../warnings');
+  const { listPendingApprovalsForItem } = await import('../approvals');
+
+  const latestByGate = await getLatestGateResultsByGate(ctx, ticketId);
+  const recent = await listRecentGateEvaluations(ctx, ticketId, 10);
+  const openWarnings = await listWarnings(ctx, ticketId, { status: 'open' });
+  const pending = await listPendingApprovalsForItem(ctx, ticketId);
+
+  return ok({
+    gates: [...latestByGate.values()].map((ev) => ({
+      gate_id: ev.gateId,
+      gate_name: ev.gateName || null,
+      gate_version: ev.gateVersion,
+      outcome: ev.outcome,
+      reason: ev.reason,
+      evidence: ev.evidence,
+      evaluated_at: ev.createdAt.toISOString(),
+    })),
+    recent_evaluations: recent.map((ev) => ({
+      id: ev.id,
+      gate_id: ev.gateId,
+      gate_name: ev.gateName || null,
+      outcome: ev.outcome,
+      reason: ev.reason,
+      batch_id: ev.batchId,
+      created_at: ev.createdAt.toISOString(),
+    })),
+    warnings: openWarnings.ok
+      ? openWarnings.value.map((w) => ({
+          id: w.id,
+          code: w.code,
+          message: w.message,
+          status: w.status,
+          created_at: w.createdAt.toISOString(),
+        }))
+      : [],
+    pending_approvals: pending.map((a) => ({
+      id: a.id,
+      gate_id: a.gateId,
+      status: a.status,
+      requested_at: a.requestedAt.toISOString(),
+      requested_for: a.requestedFor,
+    })),
   });
 }

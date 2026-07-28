@@ -4,15 +4,21 @@ import {
   addStage,
   answerQuestion,
   archiveBinding,
+  archiveGate,
   cancelRun,
+  createGate,
   createProject,
   createPromptTemplate,
   createSpecVersion,
   createWorkItem,
+  decideApproval,
+  dismissWarning,
+  evaluateGates,
   launchRun,
   resolveBinding,
   setLabels,
   transitionWorkItem,
+  updateGate,
   updateProject,
   updateStage,
   updateWorkItem,
@@ -71,19 +77,205 @@ export async function actionTransitionWorkItem(formData: FormData) {
   const projectKey = String(formData.get('projectKey') ?? '');
   const itemKey = String(formData.get('itemKey') ?? '');
   const note = String(formData.get('note') ?? '') || undefined;
+  const overrideReason = String(formData.get('overrideReason') ?? '').trim();
   const result = await transitionWorkItem(
     ctx,
     id,
-    { toStageId, note },
+    {
+      toStageId,
+      note,
+      ...(overrideReason ? { override: { reason: overrideReason } } : {}),
+    },
     expectedVersion,
   );
   if (!result.ok) {
+    if (result.error.code === 'gate_blocked') {
+      const blocked = (result.error.details?.blockedBy as Array<{ reason: string }>) ?? [];
+      throw new Error(
+        `Blocked by gate(s): ${blocked.map((b) => b.reason).join('; ') || result.error.message}`,
+      );
+    }
     throw new Error(result.error.message);
   }
   revalidatePath(`/projects/${projectKey}/board`);
   if (itemKey) {
     revalidatePath(`/projects/${projectKey}/items/${itemKey}`);
   }
+}
+
+export async function actionDryRunGates(formData: FormData) {
+  const { ctx } = await requireSession();
+  const workItemId = String(formData.get('workItemId') ?? '');
+  const toStageId = String(formData.get('toStageId') ?? '');
+  const { getWorkItem } = await import('@nexus/core');
+  const item = await getWorkItem(ctx, workItemId);
+  if (!item.ok) {
+    return { ok: false as const, error: item.error.message };
+  }
+  const batch = await evaluateGates(ctx, {
+    workItemId,
+    trigger: {
+      kind: 'on_transition',
+      fromStageId: item.value.currentStageId,
+      toStageId,
+    },
+    dryRun: true,
+  });
+  if (!batch.ok) {
+    return { ok: false as const, error: batch.error.message };
+  }
+  return {
+    ok: true as const,
+    outcome: batch.value.outcome,
+    blockedBy: batch.value.results
+      .filter((r) => r.outcome === 'block' || r.outcome === 'warn' || r.outcome === 'error')
+      .map((r) => ({
+        gateName: r.gateName,
+        reason: r.reason,
+        outcome: r.outcome,
+      })),
+  };
+}
+
+export async function actionCreateGate(formData: FormData) {
+  const { ctx } = await requireSession();
+  const projectId = String(formData.get('projectId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const evaluator = String(formData.get('evaluator') ?? 'field_rule') as
+    | 'field_rule'
+    | 'human_approval'
+    | 'budget'
+    | 'agentic';
+  const triggerKind = String(formData.get('triggerKind') ?? 'on_transition');
+  const toStageId = String(formData.get('toStageId') ?? '');
+  const labelKey = String(formData.get('labelKey') ?? '');
+  const onFailure = String(formData.get('onFailure') ?? 'block') as 'block' | 'warn';
+
+  let trigger;
+  if (triggerKind === 'on_label_added') {
+    trigger = { kind: 'on_label_added' as const, labelKey };
+  } else if (triggerKind === 'on_run_finished') {
+    trigger = { kind: 'on_run_finished' as const };
+  } else {
+    trigger = { kind: 'on_transition' as const, toStageId };
+  }
+
+  let config: Record<string, unknown>;
+  if (evaluator === 'human_approval') {
+    const rolesRaw = String(formData.get('approverRoles') ?? 'owner,maintainer');
+    const approverRoles = rolesRaw
+      .split(',')
+      .map((r) => r.trim())
+      .filter(Boolean);
+    config = {
+      approverRoles: approverRoles.length ? approverRoles : ['owner', 'maintainer'],
+      allowSelfApproval: formData.get('allowSelfApproval') === 'on',
+      instructions: String(formData.get('instructions') ?? ''),
+    };
+  } else if (evaluator === 'field_rule') {
+    const field = String(formData.get('field') ?? 'ticket.complexity');
+    const op = String(formData.get('op') ?? 'exists');
+    const value = String(formData.get('value') ?? '');
+    const message = String(formData.get('message') ?? 'Gate failed');
+    const code = String(formData.get('code') ?? '') || undefined;
+    if (op === 'has_label' || op === 'lacks_label') {
+      config = {
+        require: { op, value: value || 'risk:high' },
+        message,
+        code,
+      };
+    } else if (op === 'exists' || op === 'missing') {
+      config = { require: { op, field }, message, code };
+    } else if (op === 'count_gte') {
+      config = {
+        require: { op, field, value: Number(value) || 1 },
+        message,
+        code,
+      };
+    } else {
+      config = {
+        require: { op, field, value: value || null },
+        message,
+        code,
+      };
+    }
+  } else {
+    config = {};
+  }
+
+  const result = await createGate(ctx, {
+    projectId,
+    name: String(formData.get('name') ?? 'Untitled gate'),
+    description: String(formData.get('description') ?? ''),
+    evaluator,
+    trigger,
+    config,
+    onFailure,
+    enabled: formData.get('enabled') === 'on',
+  });
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/policies`);
+}
+
+export async function actionEnableGate(formData: FormData) {
+  const { ctx } = await requireSession();
+  const gateId = String(formData.get('gateId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const enabled = formData.get('enabled') === 'on';
+  const result = await updateGate(ctx, gateId, { enabled });
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/policies`);
+}
+
+export async function actionArchiveGate(formData: FormData) {
+  const { ctx } = await requireSession();
+  const gateId = String(formData.get('gateId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const result = await archiveGate(ctx, gateId);
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/policies`);
+}
+
+export async function actionDecideApproval(formData: FormData) {
+  const { ctx } = await requireSession();
+  const approvalId = String(formData.get('approvalId') ?? '');
+  const decision = String(formData.get('decision') ?? '') as 'approved' | 'rejected';
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const itemKey = String(formData.get('itemKey') ?? '');
+  const comment = String(formData.get('comment') ?? '') || undefined;
+  const result = await decideApproval(ctx, approvalId, { decision, comment });
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/policies`);
+  revalidatePath(`/projects/${projectKey}/approvals`);
+  revalidatePath(`/projects/${projectKey}/board`);
+  if (itemKey) revalidatePath(`/projects/${projectKey}/items/${itemKey}`);
+}
+
+export async function actionDismissWarning(formData: FormData) {
+  const { ctx } = await requireSession();
+  const warningId = String(formData.get('warningId') ?? '');
+  const reason = String(formData.get('reason') ?? '').trim();
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const itemKey = String(formData.get('itemKey') ?? '');
+  if (!reason) {
+    throw new Error('Dismissal reason is required');
+  }
+  const result = await dismissWarning(ctx, warningId, reason);
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/items/${itemKey}`);
+}
+
+export async function actionSetEnforcementMode(formData: FormData) {
+  const { ctx } = await requireSession();
+  const projectId = String(formData.get('projectId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const mode = String(formData.get('enforcement_mode') ?? 'enforce');
+  const result = await updateProject(ctx, projectId, {
+    settings: { enforcement_mode: mode === 'observe' ? 'observe' : 'enforce' },
+  });
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/policies`);
+  revalidatePath(`/projects/${projectKey}/settings`);
 }
 
 export async function actionSaveSpec(formData: FormData) {

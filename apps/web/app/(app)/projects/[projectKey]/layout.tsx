@@ -19,6 +19,11 @@ export default async function ProjectLayout({
   const tabs = [
     { slug: 'board', label: 'Board', href: `/projects/${projectKey}/board` },
     {
+      slug: 'policies',
+      label: 'Policies',
+      href: `/projects/${projectKey}/policies`,
+    },
+    {
       slug: 'questions',
       label: 'Questions',
       href: `/projects/${projectKey}/questions`,

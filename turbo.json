@@ -1,5 +1,10 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": [
+    "DB_POSTGRES_URL",
+    "DB_POSTGRES_URL_NON_POOLING",
+    "FLAG_P3_GATES"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -8,7 +13,12 @@
     "lint": {},
     "typecheck": {},
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "passThroughEnv": [
+        "DB_POSTGRES_URL",
+        "DB_POSTGRES_URL_NON_POOLING",
+        "FLAG_P3_GATES"
+      ]
     },
     "dev": {
       "cache": false,

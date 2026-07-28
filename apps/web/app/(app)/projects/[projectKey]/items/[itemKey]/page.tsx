@@ -2,11 +2,13 @@ import Link from 'next/link';
 import {
   can,
   deriveWorkItemStatus,
+  getLatestGateResultsByGate,
   getProjectByKey,
   getProjectRole,
   getWorkItemByKey,
   listArtifactRefs,
   listLabels,
+  listPendingApprovalsForItem,
   listProjectEvents,
   listQuestions,
   listRunsForWorkItem,
@@ -15,6 +17,7 @@ import {
   listStageReports,
   listStages,
   listTransitions,
+  listWarnings,
 } from '@nexus/core';
 import { eq } from 'drizzle-orm';
 import { labels as labelsTable, workItemLabels } from '@nexus/db';
@@ -36,10 +39,14 @@ import {
   Textarea,
 } from '@nexus/ui';
 import { notFound } from 'next/navigation';
+import { ChecksPanel, WhyCantMove } from '../../../../../../src/components/ChecksPanel';
 import { RunTimeline } from '../../../../../../src/components/RunTimeline';
 import {
   actionAnswerQuestion,
   actionCancelRun,
+  actionDecideApproval,
+  actionDismissWarning,
+  actionDryRunGates,
   actionLaunchRun,
   actionSaveSpec,
   actionTransitionWorkItem,
@@ -122,6 +129,8 @@ export default async function ItemPage({
     reportsR,
     questionsR,
     artifactsR,
+    warningsR,
+    pendingApprovals,
   ] = await Promise.all([
     listStages(ctx, project.value.id),
     listSpecVersions(ctx, item.id),
@@ -136,6 +145,8 @@ export default async function ItemPage({
     listStageReports(ctx, item.id),
     listQuestions(ctx, item.id),
     listArtifactRefs(ctx, item.id),
+    listWarnings(ctx, item.id, { status: 'open' }),
+    listPendingApprovalsForItem(ctx, item.id),
   ]);
 
   const stages = stagesR.ok ? stagesR.value : [];
@@ -146,8 +157,42 @@ export default async function ItemPage({
   const reports = reportsR.ok ? reportsR.value : [];
   const qs = questionsR.ok ? questionsR.value.questions : [];
   const artifacts = artifactsR.ok ? artifactsR.value : [];
+  const openWarnings = warningsR.ok ? warningsR.value : [];
+  const latestByGate = await getLatestGateResultsByGate(ctx, item.id);
+  const checks = [...latestByGate.values()].map((ev) => ({
+    gateId: ev.gateId,
+    gateName: ev.gateName || ev.gateId.slice(0, 8),
+    outcome: ev.outcome,
+    reason: ev.reason,
+    evidence: ev.evidence as Record<string, unknown>,
+    gateVersion: ev.gateVersion,
+    gateConfig: ev.gateConfig,
+  }));
+  const approvalRows = pendingApprovals.map((a) => {
+    const stored = [...latestByGate.values()].find((e) => e.gateId === a.gateId);
+    const cfg = (stored?.gateConfig ?? {}) as { instructions?: string };
+    return {
+      id: a.id,
+      gateId: a.gateId,
+      gateName: stored?.gateName,
+      status: a.status,
+      instructions: cfg.instructions,
+    };
+  });
+  const canOverride = can(ctx.actor, 'gate.override', {
+    type: 'work_item',
+    projectId: project.value.id,
+    role,
+  });
+  const canDecide = can(ctx.actor, 'approval.decide', {
+    type: 'work_item',
+    projectId: project.value.id,
+    role,
+  });
   const stageById = new Map(stages.map((s) => [s.id, s]));
   const reportByRun = new Map(reports.map((r) => [r.runId, r]));
+  // eslint-disable-next-line react-hooks/purity -- SSR wall-clock snapshot for open-stage duration
+  const pageRenderedAtMs = Date.now();
 
   const currentLabels = await ctx.db
     .select({
@@ -239,6 +284,35 @@ export default async function ItemPage({
             </PanelBody>
           </Panel>
         ) : null}
+
+        <ChecksPanel
+          checks={checks}
+          warnings={openWarnings.map((w) => ({
+            id: w.id,
+            code: w.code,
+            message: w.message,
+            status: w.status,
+          }))}
+          approvals={approvalRows}
+          canDecide={canDecide}
+          canDismiss={canWrite}
+          dismissAction={actionDismissWarning}
+          decideAction={actionDecideApproval}
+          projectKey={projectKey}
+          itemKey={itemKey}
+        />
+
+        <WhyCantMove
+          stages={stages.map((s) => ({ id: s.id, name: s.name }))}
+          currentStageId={item.currentStageId}
+          dryRunAction={actionDryRunGates}
+          workItemId={item.id}
+          projectKey={projectKey}
+          itemKey={itemKey}
+          expectedVersion={item.version}
+          canOverride={canOverride}
+          transitionAction={actionTransitionWorkItem}
+        />
 
         <Panel>
           <PanelBody>
@@ -398,7 +472,7 @@ export default async function ItemPage({
                     const stage = stageById.get(inst.stageId);
                     const durationMs = inst.exitedAt
                       ? inst.exitedAt.getTime() - inst.enteredAt.getTime()
-                      : Date.now() - inst.enteredAt.getTime();
+                      : pageRenderedAtMs - inst.enteredAt.getTime();
                     return (
                       <li
                         key={inst.id}
@@ -414,8 +488,9 @@ export default async function ItemPage({
                           </span>
                         </div>
                         <div className="text-xs text-fg-muted">
-                          {Math.round(durationMs / 1000)}s
-                          {inst.exitedAt ? '' : ' (open)'}
+                          {inst.exitedAt == null
+                            ? `${Math.round(durationMs / 1000)}s (open)`
+                            : `${Math.round(durationMs / 1000)}s`}
                         </div>
                       </li>
                     );

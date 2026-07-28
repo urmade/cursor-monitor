@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import {
   deriveWorkItemStatus,
+  getLatestBlockingReasonsForItems,
   getProjectByKey,
   getProjectRole,
   listLabels,
@@ -90,12 +91,19 @@ export default async function BoardPage({
   const statusByItem = new Map<string, string>();
   await Promise.all(
     items.map(async (item) => {
-      statusByItem.set(
-        item.id,
-        (await deriveWorkItemStatus(ctx, item.id)) ?? 'idle',
-      );
+      const status = (await deriveWorkItemStatus(ctx, item.id)) ?? 'idle';
+      statusByItem.set(item.id, status);
     }),
   );
+  const blockedIds = items
+    .filter((i) => {
+      const s = statusByItem.get(i.id);
+      return s === 'blocked_by_gate' || s === 'needs_approval';
+    })
+    .map((i) => i.id);
+  const blockReasonByItem = await getLatestBlockingReasonsForItems(ctx, blockedIds);
+  // eslint-disable-next-line react-hooks/purity -- SSR wall-clock snapshot for elapsed readout
+  const boardRenderedAtMs = Date.now();
 
   return (
     <div className="space-y-4">
@@ -170,7 +178,12 @@ export default async function BoardPage({
                   const itemLabels = labelsByItem.get(item.id) ?? [];
                   const active = activeRuns.get(item.id);
                   const elapsedSec = active
-                    ? Math.round((Date.now() - active.startedAt.getTime()) / 1000)
+                    ? Math.max(
+                        0,
+                        Math.round(
+                          (boardRenderedAtMs - active.startedAt.getTime()) / 1000,
+                        ),
+                      )
                     : null;
                   return (
                     <Panel key={item.id} className="bg-surface-sunken">
@@ -198,10 +211,25 @@ export default async function BoardPage({
                             </Badge>
                           ) : null}
                           <Badge tone={statusToTone(status)}>{status}</Badge>
+                          {blockReasonByItem.has(item.id) ? (
+                            <Badge
+                              tone="blocked"
+                              title={blockReasonByItem.get(item.id)}
+                            >
+                              blocked
+                            </Badge>
+                          ) : null}
                           {itemLabels.map((l) => (
-                            <Badge key={l.key} tone="neutral">{l.key}</Badge>
+                            <Badge key={l.key} tone="neutral">
+                              {l.key}
+                            </Badge>
                           ))}
                         </div>
+                        {blockReasonByItem.has(item.id) ? (
+                          <p className="mt-1 text-[11px] text-danger-fg line-clamp-2">
+                            {blockReasonByItem.get(item.id)}
+                          </p>
+                        ) : null}
                         {canMove ? (
                           <TransitionWorkItemMenu
                             workItemId={item.id}

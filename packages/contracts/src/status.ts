@@ -5,6 +5,7 @@ export const DerivedStatusSchema = z.enum([
   'ai_working',
   'needs_answer',
   'needs_approval',
+  'blocked_by_gate',
   'blocked_external',
   'paused_budget',
   'failed_run',

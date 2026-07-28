@@ -159,7 +159,11 @@ export async function getProjectByKey(
 export async function updateProject(
   ctx: ServiceContext,
   id: string,
-  patch: { name?: string; description?: string },
+  patch: {
+    name?: string;
+    description?: string;
+    settings?: Record<string, unknown>;
+  },
 ): Promise<Result<Project, CoreError>> {
   const { getProjectRole } = await import('./members');
   const role = await getProjectRole(ctx, id);
@@ -167,12 +171,22 @@ export async function updateProject(
     return err(coreError('forbidden', 'Cannot update project'));
   }
 
+  const existing = await ctx.db.query.projects.findFirst({
+    where: eq(projects.id, id),
+  });
+  if (!existing) return err(coreError('not_found', 'Project not found'));
+
+  const nextSettings = patch.settings
+    ? { ...(existing.settings as Record<string, unknown>), ...patch.settings }
+    : undefined;
+
   const updated = await ctx.db.transaction(async (tx) => {
     const [row] = await tx
       .update(projects)
       .set({
         ...(patch.name !== undefined ? { name: patch.name } : {}),
         ...(patch.description !== undefined ? { description: patch.description } : {}),
+        ...(nextSettings !== undefined ? { settings: nextSettings } : {}),
         updatedAt: new Date(),
       })
       .where(eq(projects.id, id))

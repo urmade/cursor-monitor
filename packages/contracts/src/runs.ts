@@ -75,13 +75,28 @@ export const BindingConfigSchema = z.discriminatedUnion('adapter', [
 
 export type BindingConfig = z.infer<typeof BindingConfigSchema>;
 
-/** Phase 2 condition: null = always; label filters only until Phase 3 DSL. */
-export const BindingConditionSchema = z
+/** Legacy Phase 2 binding filters (still accepted). */
+export const LegacyBindingConditionSchema = z.object({
+  labelKeysAny: z.array(z.string()).optional(),
+  labelKeysAll: z.array(z.string()).optional(),
+  complexity: z.array(z.enum(['low', 'medium', 'high'])).optional(),
+});
+
+/**
+ * Binding conditions: null = always; Phase 2 legacy filters; or Phase 3 DSL envelope.
+ * Envelope branch MUST come first — LegacyBindingConditionSchema has every field optional
+ * and would otherwise match `{ v: 1, ast }` and strip it to `{}`.
+ * AST is validated at evaluate time (avoids circular import with conditions.ts).
+ */
+export const BindingDslEnvelopeSchema = z
   .object({
-    labelKeysAny: z.array(z.string()).optional(),
-    labelKeysAll: z.array(z.string()).optional(),
-    complexity: z.array(z.enum(['low', 'medium', 'high'])).optional(),
+    v: z.literal(1),
+    ast: z.unknown(),
   })
+  .strict();
+
+export const BindingConditionSchema = z
+  .union([BindingDslEnvelopeSchema, LegacyBindingConditionSchema])
   .nullable();
 
 export type BindingCondition = z.infer<typeof BindingConditionSchema>;

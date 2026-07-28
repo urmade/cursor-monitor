@@ -68,7 +68,9 @@ Every phase document uses the same shape so they can be diffed, reviewed, and pi
 | Phase | Status |
 |---|---|
 | 0 — De-risk and decide | Done (see `docs/decisions/phase-0-report.md`) |
-| 1 — System of record | In progress (PR implementing core + UI) |
-| 2–9 | Planned |
+| 1 — System of record | Done |
+| 2 — The agent loop | Done (PR #13; stacked base for Phase 3) |
+| 3 — Process enforcement | Done |
+| 4–9 | Planned |
 
 Update this table as phases move to In progress / Done, and record deviations in the phase document rather than in a separate changelog — the plan is the living document.

@@ -5,3 +5,4 @@ export * from './history';
 export * from './infra';
 export * from './bindings';
 export * from './runs';
+export * from './gates';

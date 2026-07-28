@@ -815,6 +815,31 @@ export async function closeOutRun(
     },
   });
 
+  // Phase 3: event-triggered gates on run finished (inline; never fails close-out).
+  if (status === 'completed' || status === 'completed_no_report') {
+    try {
+      const { evaluateOnRunFinished } = await import('../gates/events');
+      const stageInst = await ctx.db.query.stageInstances.findFirst({
+        where: eq(stageInstances.id, run.stageInstanceId),
+      });
+      const result = await evaluateOnRunFinished(ctx, {
+        workItemId: run.workItemId,
+        stageId: stageInst?.stageId,
+      });
+      if (!result.ok) {
+        ctx.logger.warn(
+          { err: result.error.message, runId },
+          'gate evaluation on run finished failed',
+        );
+      }
+    } catch (e) {
+      ctx.logger.warn(
+        { err: e instanceof Error ? e.message : String(e), runId },
+        'gate evaluation on run finished threw',
+      );
+    }
+  }
+
   return ok(updated!);
 }
 

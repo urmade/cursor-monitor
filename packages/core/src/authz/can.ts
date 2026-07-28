@@ -72,10 +72,14 @@ export function can(
         case 'project.manage_labels':
         case 'project.manage_members':
         case 'project.manage_bindings':
+        case 'project.manage_gates':
         case 'status.override':
+        case 'gate.override':
           return hasRole(role, 'maintainer');
         case 'project.archive':
           return hasRole(role, 'owner');
+        case 'approval.decide':
+          return hasRole(role, 'member');
         default:
           return false;
       }

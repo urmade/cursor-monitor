@@ -67,3 +67,32 @@ Override via env `FLAG_P2_RUNS=0` etc.
 
 Per project settings JSON: `concurrentRunCeiling` (default 5), `dailyRunCap` (default 50).
 Per binding: `maxDurationMinutes`. Global: `orchestration.enabled` flag.
+
+## Phase 3 — process enforcement
+
+| Surface | URL | Notes |
+|---|---|---|
+| Policy Studio | `/projects/[key]/policies` | Gates, bindings list, pending approvals, budgets placeholder (ADR-0009) |
+| Ticket Checks | `/projects/[key]/items/[itemKey]` | Latest gate results, warnings, approvals, dry-run |
+| Board chips | `/projects/[key]/board` | `blocked_by_gate` / `needs_approval` with reason text |
+
+### Feature flags & modes
+
+- `p3.gates` (per project / env `FLAG_P3_GATES=1`) — until enabled, transitions behave as Phase 1/2.
+- Project `settings.enforcement_mode`: `enforce` (default) or `observe` (evaluate & record, never block).
+- New gates are **created disabled**; enabling is a second deliberate action.
+
+### A ticket is stuck and nobody knows why
+
+1. Open the ticket → **Checks** panel. Every applicable gate's latest outcome, reason, and evidence is listed (all gates evaluate even after one blocks).
+2. Use **Why can't I move this?** dry-run against the target stage — it lists every failing gate at once without mutating state.
+3. If status is `needs_approval`, approve/reject from Checks (or Policies → Approvals). Approval re-runs the batch and completes the original transition when nothing else blocks.
+4. If status is `blocked_by_gate`, fix the cited fact (complexity, label, open warning, etc.) or have an `owner`/`maintainer` override with a mandatory reason (recorded as an `intervention`).
+5. Confirm project `enforcement_mode` is not unexpectedly `enforce` during a rollout, and that `p3.gates` is intentional.
+6. Audit → filter `gate.blocked` / `gate.evaluated` / `intervention.recorded`. Stored evaluations keep `gate_version` + `gate_config` — later gate edits do not rewrite history.
+7. Pathological config: max 40 gates/project; condition depth ≤ 8; contradicting `on_failure` on the same trigger is warned at create time.
+8. Snapshot retention: keep `context_snapshot` 90 days at full fidelity; older rows may be trimmed to `evidence` only (ops job TBD — index `gate_evals_created` supports the sweep).
+
+### Overrides
+
+Only `owner`/`maintainer` (`gate.override`). Reason required. Visible forever on the transition (`reasonCode: gate_override`) and in `interventions`.

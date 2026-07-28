@@ -2,6 +2,7 @@ export {
   createWorkItem,
   listWorkItems,
   getWorkItemByKey,
+  getWorkItem,
   type WorkItem,
 } from './create';
 export { updateWorkItem, setLabels, archiveWorkItem } from './update';

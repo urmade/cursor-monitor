@@ -39,14 +39,20 @@ export async function upsertUserFromPassport(
   });
   if (!org) {
     const orgId = newId();
-    await db.insert(orgs).values({
-      id: orgId,
-      name: 'Anysphere',
-      slug: DEFAULT_ORG_SLUG,
+    await db
+      .insert(orgs)
+      .values({
+        id: orgId,
+        name: 'Anysphere',
+        slug: DEFAULT_ORG_SLUG,
+      })
+      .onConflictDoNothing();
+    org = await db.query.orgs.findFirst({
+      where: eq(orgs.slug, DEFAULT_ORG_SLUG),
     });
-    org = { id: orgId, name: 'Anysphere', slug: DEFAULT_ORG_SLUG } as typeof org & {
-      id: string;
-    };
+    if (!org) {
+      throw new Error('Failed to bootstrap default org');
+    }
   }
 
   const userId = newId();

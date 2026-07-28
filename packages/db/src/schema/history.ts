@@ -52,6 +52,7 @@ export const transitions = pgTable(
     note: text('note'),
     actor: jsonb('actor').$type<Record<string, unknown>>().notNull(),
     gateEvaluationId: uuid('gate_evaluation_id'),
+    gateBatchId: uuid('gate_batch_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('transitions_work_item_idx').on(t.workItemId, t.createdAt)],

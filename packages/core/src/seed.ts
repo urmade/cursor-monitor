@@ -33,6 +33,21 @@ async function main(): Promise<void> {
 
   await db.update(orgs).set({ name: 'Anysphere' }).where(eq(orgs.id, orgId));
 
+  // Phase 3 rollout flag — enabled for seeded projects by default.
+  const { featureFlags } = await import('@nexus/db');
+  await db
+    .insert(featureFlags)
+    .values({
+      key: 'p3.gates',
+      enabled: true,
+      enabledForProjectIds: [],
+      updatedBy: userId,
+    })
+    .onConflictDoUpdate({
+      target: featureFlags.key,
+      set: { enabled: true, updatedAt: new Date() },
+    });
+
   const alpha = await createProject(ctx, {
     key: 'ALPHA',
     name: 'Alpha',

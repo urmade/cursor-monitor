@@ -89,11 +89,24 @@ export function StatusDot({
 export function statusToTone(status: string): BadgeTone {
   switch (status) {
     case 'active':
+    case 'ai_working':
       return 'active';
     case 'externally_blocked':
+    case 'blocked_external':
+    case 'blocked_by_gate':
       return 'blocked';
+    case 'needs_approval':
+    case 'needs_answer':
+      return 'warning';
+    case 'failed_run':
+      return 'danger';
+    case 'paused_budget':
+      return 'warning';
     case 'archived':
+    case 'abandoned':
       return 'archived';
+    case 'idle':
+      return 'neutral';
     default:
       return 'neutral';
   }

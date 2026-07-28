@@ -44,6 +44,18 @@ describe('deriveStatus', () => {
     expect(deriveStatus(active, { pendingApprovals: 1 })).toBe('needs_approval');
   });
 
+  it('returns blocked_by_gate for blocking gate results without approvals', () => {
+    expect(deriveStatus(active, { blockingGateResults: 1 })).toBe(
+      'blocked_by_gate',
+    );
+  });
+
+  it('prefers needs_approval over blocked_by_gate when both set', () => {
+    expect(
+      deriveStatus(active, { pendingApprovals: 1, blockingGateResults: 2 }),
+    ).toBe('needs_approval');
+  });
+
   it('returns failed_run when failures and no active runs', () => {
     expect(
       deriveStatus(active, {

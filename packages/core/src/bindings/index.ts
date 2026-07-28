@@ -2,6 +2,7 @@ import { and, desc, eq, isNull, type InferSelectModel } from 'drizzle-orm';
 import {
   BindingConditionSchema,
   BindingConfigSchema,
+  unwrapCondition,
 } from '@nexus/contracts';
 import {
   automationBindings,
@@ -13,6 +14,7 @@ import {
   workItems,
 } from '@nexus/db';
 import { can } from '../authz/can';
+import { emptyGateContext, evaluateCondition } from '../conditions';
 import type { ServiceContext } from '../context';
 import { coreError, type CoreError } from '../errors';
 import { emit } from '../events/emit';
@@ -272,9 +274,42 @@ function conditionMatches(
   },
 ): boolean {
   if (condition == null) return true;
+
+  // Phase 3 DSL envelope
+  if (
+    typeof condition === 'object' &&
+    condition !== null &&
+    'v' in condition &&
+    (condition as { v: unknown }).v === 1
+  ) {
+    const ast = unwrapCondition(condition);
+    if (!ast) return true;
+    const ctx = emptyGateContext({
+      labels: facts.labelKeys,
+      ticket: {
+        id: '00000000-0000-7000-8000-000000000001',
+        projectId: '00000000-0000-7000-8000-000000000002',
+        title: '',
+        complexity: facts.complexity,
+        ownerClass: null,
+        stageKey: null,
+        stageId: null,
+        currentStageInstanceId: null,
+      },
+    });
+    return evaluateCondition(ast, ctx).ok;
+  }
+
   const parsed = BindingConditionSchema.safeParse(condition);
   if (!parsed.success || !parsed.data) return true;
-  const c = parsed.data;
+  if (!('complexity' in parsed.data || 'labelKeysAny' in parsed.data || 'labelKeysAll' in parsed.data)) {
+    return true;
+  }
+  const c = parsed.data as {
+    labelKeysAny?: string[];
+    labelKeysAll?: string[];
+    complexity?: Array<'low' | 'medium' | 'high'>;
+  };
   if (c.complexity?.length) {
     if (!facts.complexity || !c.complexity.includes(facts.complexity as 'low')) {
       return false;

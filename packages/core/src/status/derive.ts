@@ -6,8 +6,8 @@ export type WorkItemStatusInput = {
 };
 
 /**
- * Pure derived status. Phase 1 only uses archivedAt, external block, and override;
- * later phases fill in the remaining StatusFacts fields without changing the signature.
+ * Pure derived status. No code path writes a status string onto the work item.
+ * Phase 3 completes needs_approval and blocked_by_gate; budget/loop remain later.
  */
 export function deriveStatus(
   item: WorkItemStatusInput,
@@ -33,7 +33,8 @@ export function deriveStatus(
   if (item.externallyBlockedReason) return 'blocked_external';
   if (f.budgetState === 'blocked') return 'paused_budget';
   if (f.openBlockingQuestions > 0) return 'needs_answer';
-  if (f.pendingApprovals > 0 || f.blockingGateResults > 0) return 'needs_approval';
+  if (f.pendingApprovals > 0) return 'needs_approval';
+  if (f.blockingGateResults > 0) return 'blocked_by_gate';
   if (f.failedRunsSinceLastSuccess > 0 && f.activeRuns === 0) return 'failed_run';
   if (f.loopEscalated) return 'needs_approval';
   if (f.activeRuns > 0) return 'ai_working';
