@@ -9,6 +9,10 @@ import {
   dispatchAttentionEvents,
   reconcileAttention,
   rescoreOpenItems,
+  evaluateRubric,
+  evaluateGates,
+  processPendingEvaluations,
+  scrubOldRawResponses,
   resumeAfterQuestion,
 } from '@nexus/core';
 import { CursorClient } from '@nexus/cursor-client';
@@ -157,6 +161,71 @@ registerJobHandler('rescore_attention', async (db) => {
   await rescoreOpenItems(ctx);
 });
 
+registerJobHandler('evaluate_rubric', async (db, job) => {
+  const payload = job.payload as {
+    pendingEvaluationId?: string;
+    workItemId?: string;
+    gateId?: string;
+    rubricId?: string;
+  };
+  const org = await db.query.orgs.findFirst();
+  const ctx = createContext({
+    db,
+    orgId: org?.id ?? '00000000-0000-7000-8000-000000000000',
+    actor: { kind: 'system', reason: 'evaluate_rubric' },
+    flags: createFlagReader(db),
+    logger: silentLogger,
+  });
+
+  if (payload.pendingEvaluationId || payload.workItemId) {
+    // Prefer bulk processor when pending id present via processPendingEvaluations
+    await processPendingEvaluations(ctx, 20);
+    return;
+  }
+
+  if (!payload.rubricId || !payload.workItemId) {
+    await processPendingEvaluations(ctx, 20);
+    return;
+  }
+
+  const result = await evaluateRubric(ctx, {
+    rubricId: payload.rubricId,
+    workItemId: payload.workItemId,
+    skipAuthz: true,
+  });
+
+  if (result.ok) {
+    await evaluateGates(ctx, {
+      workItemId: payload.workItemId,
+      trigger: { kind: 'on_demand' },
+    });
+  }
+});
+
+registerJobHandler('process_pending_evaluations', async (db) => {
+  const org = await db.query.orgs.findFirst();
+  const ctx = createContext({
+    db,
+    orgId: org?.id ?? '00000000-0000-7000-8000-000000000000',
+    actor: { kind: 'system', reason: 'process_pending_evaluations' },
+    flags: createFlagReader(db),
+    logger: silentLogger,
+  });
+  await processPendingEvaluations(ctx, 20);
+});
+
+registerJobHandler('scrub_rubric_raw_responses', async (db) => {
+  const org = await db.query.orgs.findFirst();
+  const ctx = createContext({
+    db,
+    orgId: org?.id ?? '00000000-0000-7000-8000-000000000000',
+    actor: { kind: 'system', reason: 'scrub_rubric_raw_responses' },
+    flags: createFlagReader(db),
+    logger: silentLogger,
+  });
+  await scrubOldRawResponses(ctx, 30);
+});
+
 /** Enqueue attention maintenance jobs on cron tick. */
 export async function ensureAttentionJobs(): Promise<void> {
   const db = getDb();
@@ -179,6 +248,25 @@ export async function ensureAttentionJobs(): Promise<void> {
     payload: {},
     dedupeKey: `reconcile_attention:${fiveMinBucket}`,
     priority: 7,
+  }).catch(() => undefined);
+}
+
+/** Drain pending agentic evaluations each minute. */
+export async function ensurePendingEvalJobs(): Promise<void> {
+  const db = getDb();
+  const bucket = new Date().toISOString().slice(0, 16);
+  await enqueueJob(db, {
+    kind: 'process_pending_evaluations',
+    payload: {},
+    dedupeKey: `process_pending_evaluations:${bucket}`,
+    priority: 9,
+  }).catch(() => undefined);
+  const day = new Date().toISOString().slice(0, 10);
+  await enqueueJob(db, {
+    kind: 'scrub_rubric_raw_responses',
+    payload: {},
+    dedupeKey: `scrub_rubric_raw_responses:${day}`,
+    priority: 1,
   }).catch(() => undefined);
 }
 

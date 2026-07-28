@@ -14,6 +14,7 @@ import { users } from './identity';
 import { projects } from './projects';
 import { workItems } from './work-items';
 import { stageInstances } from './history';
+import { automationBindings } from './bindings';
 
 export const gates = pgTable(
   'gates',
@@ -25,7 +26,14 @@ export const gates = pgTable(
     name: text('name').notNull(),
     description: text('description').notNull().default(''),
     evaluator: text('evaluator')
-      .$type<'field_rule' | 'human_approval' | 'budget' | 'agentic' | 'loop_budget'>()
+      .$type<
+        | 'field_rule'
+        | 'human_approval'
+        | 'budget'
+        | 'agentic'
+        | 'loop_budget'
+        | 'visual_confirmation'
+      >()
       .notNull(),
     trigger: jsonb('trigger').$type<Record<string, unknown>>().notNull(),
     appliesWhen: jsonb('applies_when').$type<Record<string, unknown> | null>(),
@@ -33,6 +41,10 @@ export const gates = pgTable(
     onFailure: text('on_failure').$type<'block' | 'warn'>().notNull().default('block'),
     enabled: boolean('enabled').notNull().default(false),
     version: integer('version').notNull().default(1),
+    remediationBindingId: uuid('remediation_binding_id').references(
+      () => automationBindings.id,
+    ),
+    remediationMaxAttempts: integer('remediation_max_attempts').notNull().default(2),
     createdByUserId: uuid('created_by_user_id').references(() => users.id),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

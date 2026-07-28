@@ -1033,6 +1033,23 @@ async function completeRunAfterTerminal(
         'gate evaluation on run finished threw',
       );
     }
+
+    // Phase 7: remediation runs re-evaluate agentic gates after rewrite
+    const trigger = run.trigger as { kind?: string } | null;
+    if (trigger?.kind === 'remediation' && status === 'completed') {
+      try {
+        const { evaluateGates } = await import('../gates/evaluate');
+        await evaluateGates(ctx, {
+          workItemId: run.workItemId,
+          trigger: { kind: 'on_demand' },
+        });
+      } catch (e) {
+        ctx.logger.warn(
+          { err: e instanceof Error ? e.message : String(e), runId },
+          'remediation re-evaluation failed',
+        );
+      }
+    }
   }
 }
 

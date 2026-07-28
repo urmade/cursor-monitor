@@ -95,32 +95,41 @@ function getStore(): CounterStore {
   return memoryStore;
 }
 
+/** Counter with configurable window (seconds). Falls back to in-process when Redis unset. */
+export async function checkRateLimitWindow(
+  key: string,
+  limit: number,
+  windowSec: number,
+): Promise<RateLimitResult> {
+  const store = getStore();
+  const bucket = `rl:${key}:${Math.floor(Date.now() / (windowSec * 1000))}`;
+  try {
+    const count = await store.incr(bucket);
+    if (count === 1) await store.expire(bucket, windowSec * 2);
+    const remaining = Math.max(0, limit - count);
+    return {
+      allowed: count <= limit,
+      remaining,
+      retryAfterSec: count <= limit ? 0 : windowSec,
+    };
+  } catch {
+    const count = await memoryStore.incr(bucket);
+    if (count === 1) await memoryStore.expire(bucket, windowSec * 2);
+    const capped = Math.min(limit, 30);
+    return {
+      allowed: count <= capped,
+      remaining: Math.max(0, capped - count),
+      retryAfterSec: count <= capped ? 0 : windowSec,
+    };
+  }
+}
+
 /** Sliding 60s window counter. Falls back to in-process when Redis is unset. */
 export async function checkRateLimit(
   key: string,
   limitPerMinute: number,
 ): Promise<RateLimitResult> {
-  const store = getStore();
-  const bucket = `rl:${key}:${Math.floor(Date.now() / 60_000)}`;
-  try {
-    const count = await store.incr(bucket);
-    if (count === 1) await store.expire(bucket, 120);
-    const remaining = Math.max(0, limitPerMinute - count);
-    return {
-      allowed: count <= limitPerMinute,
-      remaining,
-      retryAfterSec: count <= limitPerMinute ? 0 : 60,
-    };
-  } catch {
-    // Redis unavailable → conservative in-process limit (Phase 8 posture).
-    const count = await memoryStore.incr(bucket);
-    if (count === 1) await memoryStore.expire(bucket, 120);
-    return {
-      allowed: count <= Math.min(limitPerMinute, 30),
-      remaining: Math.max(0, 30 - count),
-      retryAfterSec: count <= 30 ? 0 : 60,
-    };
-  }
+  return checkRateLimitWindow(key, limitPerMinute, 60);
 }
 
 /** Test helper — clears in-memory counters. */

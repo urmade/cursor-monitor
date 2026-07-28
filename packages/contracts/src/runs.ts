@@ -27,7 +27,11 @@ export const TERMINAL_RUN_STATUSES = [
   'abandoned',
 ] as const;
 
-export const RunAdapterSchema = z.enum(['cloud_agent', 'automation_webhook']);
+export const RunAdapterSchema = z.enum([
+  'cloud_agent',
+  'automation_webhook',
+  'internal_llm',
+]);
 export type RunAdapter = z.infer<typeof RunAdapterSchema>;
 
 export const RunTriggerSchema = z.object({

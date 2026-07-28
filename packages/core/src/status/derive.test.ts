@@ -50,7 +50,19 @@ describe('deriveStatus', () => {
     );
   });
 
-  it('prefers needs_approval over blocked_by_gate when both set', () => {
+  it('returns awaiting_evaluation when pending evals', () => {
+    expect(deriveStatus(active, { awaitingEvaluations: 1 })).toBe(
+      'awaiting_evaluation',
+    );
+  });
+
+  it('prefers needs_approval over awaiting_evaluation and blocked_by_gate', () => {
+    expect(
+      deriveStatus(active, {
+        pendingApprovals: 1,
+        awaitingEvaluations: 1,
+      }),
+    ).toBe('needs_approval');
     expect(
       deriveStatus(active, { pendingApprovals: 1, blockingGateResults: 2 }),
     ).toBe('needs_approval');

@@ -334,6 +334,11 @@ export async function getTicketForAgent(
     };
   }
 
+  const { normalizeOptionalConcepts } = await import(
+    '../rubrics/optional-concepts'
+  );
+  const concepts = normalizeOptionalConcepts(project?.optionalConcepts);
+
   return ok({
     id: item.id,
     key: item.key,
@@ -350,6 +355,10 @@ export async function getTicketForAgent(
     warnings: warningPayload,
     budget: budgetPayload,
     loops: loopsPayload,
+    optional_concepts: {
+      acceptance_criteria: concepts.acceptanceCriteria.enabled,
+      visual_confirmation: concepts.visualConfirmation.enabled,
+    },
     links: {
       ui_url: `${base.replace(/\/$/, '')}/projects/${project?.key}/items/${item.key}`,
     },
@@ -391,16 +400,58 @@ export async function getGateContextForAgent(
   const openWarnings = await listWarnings(ctx, ticketId, { status: 'open' });
   const pending = await listPendingApprovalsForItem(ctx, ticketId);
 
+  // Enrich agentic evaluations with verdict detail for remediation agents
+  const { rubricVerdicts } = await import('@nexus/db');
+  const { desc: d } = await import('drizzle-orm');
+  const recentVerdicts = await ctx.db.query.rubricVerdicts.findMany({
+    where: eq(rubricVerdicts.workItemId, ticketId),
+    orderBy: [d(rubricVerdicts.createdAt)],
+    limit: 10,
+  });
+  const verdictByEval = new Map(
+    recentVerdicts
+      .filter((v) => v.gateEvaluationId)
+      .map((v) => [v.gateEvaluationId!, v]),
+  );
+
   return ok({
-    gates: [...latestByGate.values()].map((ev) => ({
-      gate_id: ev.gateId,
-      gate_name: ev.gateName || null,
-      gate_version: ev.gateVersion,
-      outcome: ev.outcome,
-      reason: ev.reason,
-      evidence: ev.evidence,
-      evaluated_at: ev.createdAt.toISOString(),
-    })),
+    // Phase 6: gateName comes from getLatestGateResultsByGate (no extra listGates).
+    // Phase 7: enrich agentic rows with verdict/criteria for remediation agents.
+    gates: [...latestByGate.values()].map((ev) => {
+      const evidence = ev.evidence as Record<string, unknown>;
+      const verdictId =
+        typeof evidence.verdictId === 'string' ? evidence.verdictId : null;
+      const verdict =
+        (verdictId
+          ? recentVerdicts.find((v) => v.id === verdictId)
+          : undefined) ??
+        recentVerdicts.find(
+          (v) =>
+            v.rubricId ===
+            (typeof evidence.rubricId === 'string' ? evidence.rubricId : null),
+        );
+      return {
+        gate_id: ev.gateId,
+        gate_name: ev.gateName || null,
+        gate_version: ev.gateVersion,
+        outcome: ev.outcome,
+        reason: ev.reason,
+        evidence: ev.evidence,
+        evaluated_at: ev.createdAt.toISOString(),
+        ...(evidence.criteria || verdict
+          ? {
+              criteria: evidence.criteria ?? verdict?.criteria ?? null,
+              suggested_remediation:
+                evidence.suggestedRemediation ??
+                verdict?.suggestedRemediation ??
+                null,
+              verdict_id: evidence.verdictId ?? verdict?.id ?? null,
+              rubric_version:
+                evidence.rubricVersion ?? verdict?.rubricVersion ?? null,
+            }
+          : {}),
+      };
+    }),
     recent_evaluations: recent.map((ev) => ({
       id: ev.id,
       gate_id: ev.gateId,
@@ -409,6 +460,14 @@ export async function getGateContextForAgent(
       reason: ev.reason,
       batch_id: ev.batchId,
       created_at: ev.createdAt.toISOString(),
+      ...(verdictByEval.has(ev.id)
+        ? {
+            criteria: verdictByEval.get(ev.id)!.criteria,
+            suggested_remediation:
+              verdictByEval.get(ev.id)!.suggestedRemediation,
+            evidence_detail: verdictByEval.get(ev.id)!.criteria,
+          }
+        : {}),
     })),
     warnings: openWarnings.ok
       ? openWarnings.value.map((w) => ({

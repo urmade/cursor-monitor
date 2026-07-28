@@ -97,6 +97,7 @@ export function statusToTone(status: string): BadgeTone {
       return 'blocked';
     case 'needs_approval':
     case 'needs_answer':
+    case 'awaiting_evaluation':
       return 'warning';
     case 'failed_run':
       return 'danger';

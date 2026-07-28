@@ -163,7 +163,7 @@ describe('performance: 20 gates × context is cheap', () => {
         currentStageInstanceId: null,
       },
       labels: ['risk:low'],
-      spec: { exists: true, acceptanceCriteriaCount: 3 },
+      spec: { exists: true, acceptanceCriteriaCount: 3, acceptanceCriteriaEnabled: true },
     });
     const ev = getEvaluator('field_rule')!;
     const start = performance.now();

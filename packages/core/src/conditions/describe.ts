@@ -63,6 +63,10 @@ export function describeCondition(ast: ConditionAst): string {
       return `has label ${ast.value}`;
     case 'lacks_label':
       return `has no label ${ast.value}`;
+    case 'has_warning_code':
+      return `has open warning code ${ast.value}`;
+    case 'lacks_warning_code':
+      return `has no open warning code ${ast.value}`;
     case 'exists':
       if (ast.field === 'ticket.complexity') return 'complexity is set';
       if (ast.field === 'spec.exists') return 'spec exists';

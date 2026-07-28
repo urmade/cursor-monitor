@@ -313,12 +313,73 @@ function stubEvaluator(
   });
 }
 
+async function agenticEvaluator(input: {
+  gate: GateRow;
+  ctx: import('../conditions/evaluate').GateContext;
+  serviceCtx?: import('../context').ServiceContext;
+}): Promise<GateEvalResult> {
+  if (!input.serviceCtx) {
+    return {
+      gateId: input.gate.id,
+      gateName: input.gate.name,
+      gateVersion: input.gate.version,
+      outcome: 'error',
+      reason: 'agentic evaluator requires service context',
+      evidence: {},
+      durationMs: 0,
+    };
+  }
+  const { agenticGateEvaluator } = await import('../rubrics/agentic-evaluator');
+  return agenticGateEvaluator({
+    gate: input.gate,
+    ctx: input.ctx,
+    workItemId: input.ctx.ticket.id,
+    serviceCtx: input.serviceCtx,
+  });
+}
+
+async function visualConfirmationEvaluator(input: {
+  gate: GateRow;
+  ctx: import('../conditions/evaluate').GateContext;
+  serviceCtx?: import('../context').ServiceContext;
+}): Promise<GateEvalResult> {
+  if (!input.serviceCtx) {
+    return {
+      gateId: input.gate.id,
+      gateName: input.gate.name,
+      gateVersion: input.gate.version,
+      outcome: 'error',
+      reason: 'visual_confirmation requires service context',
+      evidence: {},
+      durationMs: 0,
+    };
+  }
+  const { visualConfirmationGate } = await import(
+    '../rubrics/optional-concepts'
+  );
+  const { projects } = await import('@nexus/db');
+  const { eq } = await import('drizzle-orm');
+  const project = await input.serviceCtx.db.query.projects.findFirst({
+    where: eq(projects.id, input.gate.projectId),
+  });
+  return visualConfirmationGate({
+    gate: input.gate,
+    ctx: input.ctx,
+    workItemId: input.ctx.ticket.id,
+    serviceCtx: input.serviceCtx,
+    optionalConcepts: project?.optionalConcepts ?? {},
+  });
+}
+
 export function ensureDefaultEvaluatorsRegistered(): void {
   registerEvaluator('field_rule', fieldRule);
   registerEvaluator('human_approval', humanApproval);
   registerEvaluator('budget', budgetGate);
   registerEvaluator('loop_budget', loopBudgetGate);
-  registerEvaluator('agentic', stubEvaluator('agentic'));
+  registerEvaluator('agentic', agenticEvaluator);
+  registerEvaluator('visual_confirmation', visualConfirmationEvaluator);
+  // Keep stub reference reachable for tests that assert Phase 7 wiring.
+  void stubEvaluator;
 }
 
 function slugCode(name: string): string {

@@ -23,7 +23,9 @@ export type GateContext = {
   labels: string[];
   spec: {
     exists: boolean;
-    acceptanceCriteriaCount: number;
+    /** null when the acceptance-criteria concept is disabled for the project. */
+    acceptanceCriteriaCount: number | null;
+    acceptanceCriteriaEnabled: boolean;
   };
   latestReport: {
     outcome: string | null;
@@ -255,6 +257,19 @@ export function evaluateInner(ast: ConditionAst, ctx: GateContext): EvalResult {
     case 'lte':
     case 'gt':
     case 'gte': {
+      if (
+        ast.field === 'spec.acceptance_criteria.count' &&
+        !ctx.spec.acceptanceCriteriaEnabled
+      ) {
+        return {
+          ok: true,
+          evidence: {
+            op: ast.op,
+            field: ast.field,
+            skipped: 'acceptance_criteria_concept_disabled',
+          },
+        };
+      }
       const actual = readField(ctx, ast.field);
       const ok = compare(ast.op, actual, ast.value);
       return {
@@ -305,6 +320,28 @@ export function evaluateInner(ast: ConditionAst, ctx: GateContext): EvalResult {
         evidence: { op: 'lacks_label', value: ast.value, labels: ctx.labels },
       };
     }
+    case 'has_warning_code': {
+      const ok = ctx.warnings.openCodes.includes(ast.value);
+      return {
+        ok,
+        evidence: {
+          op: 'has_warning_code',
+          value: ast.value,
+          openCodes: ctx.warnings.openCodes,
+        },
+      };
+    }
+    case 'lacks_warning_code': {
+      const ok = !ctx.warnings.openCodes.includes(ast.value);
+      return {
+        ok,
+        evidence: {
+          op: 'lacks_warning_code',
+          value: ast.value,
+          openCodes: ctx.warnings.openCodes,
+        },
+      };
+    }
     case 'exists': {
       const actual = readField(ctx, ast.field);
       const ok = !isMissing(actual) && actual !== false;
@@ -329,6 +366,19 @@ export function evaluateInner(ast: ConditionAst, ctx: GateContext): EvalResult {
       };
     }
     case 'count_gte': {
+      if (
+        ast.field === 'spec.acceptance_criteria.count' &&
+        !ctx.spec.acceptanceCriteriaEnabled
+      ) {
+        return {
+          ok: true,
+          evidence: {
+            op: 'count_gte',
+            field: ast.field,
+            skipped: 'acceptance_criteria_concept_disabled',
+          },
+        };
+      }
       const count = readCount(ctx, ast.field);
       const ok = count >= ast.value;
       return {

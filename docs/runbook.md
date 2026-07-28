@@ -186,3 +186,29 @@ DB_POSTGRES_URL=... PLAYWRIGHT_BASE_URL=http://127.0.0.1:3001 PLAYWRIGHT_SKIP_WE
 Use `next start` (not `pnpm dev`) for Playwright in this environment: Turbopack HMR websockets fail against `127.0.0.1`, so client components may not hydrate and inbox clicks will not fire. `playwright.config.ts` can start a production server automatically when `PLAYWRIGHT_SKIP_WEBSERVER` is unset.
 
 CI does not run Playwright today (managed `managed-app.yml` is policy-owned).
+
+## Phase 7 — judgment assist
+
+| Surface | URL | Notes |
+|---|---|---|
+| Policy Studio → Rubrics | `/projects/[key]/policies` | Author/version rubrics; golden set; enable |
+| Policy Studio → Gates | same | `agentic` evaluator + remediation binding |
+| Ticket verdicts | `/projects/[key]/items/[itemKey]` | Criteria table, cost/latency, add to golden set |
+| Settings → Optional concepts | `/projects/[key]/settings` | Acceptance criteria / visual confirmation |
+
+Feature flag: agentic gates are live (step 7.7 removed `p7.agentic_gates`). Deterministic / human gates remain independent.
+
+Model provider: set `NEXUS_LLM_API_KEY` or `OPENAI_API_KEY` (optional `NEXUS_LLM_BASE_URL`). Without a key, evaluations Warn with `provider_unavailable`. Tests use the fixture provider.
+
+### An agentic gate is misbehaving
+
+1. **Disable the gate** in Policy Studio (or set project enforcement to `observe`) — deterministic gates keep working.
+2. Check circuit breaker: three consecutive provider failures suspend agentic gates for ten minutes (`agentic.circuit_open` warn). Deterministic gates are unaffected.
+3. Inspect the latest verdict on the ticket: rubric version, model, tokens, cost, evidence quotations.
+4. If a rubric edit caused a spike, compare golden-set regression for the new version before re-enabling.
+5. Hourly evaluation cap (`RUBRIC_EVAL_HOURLY_CAP=60`) applies to paid (non-cache-hit) evaluations. Phase 4 item budget is checked before calling the provider — when an item is hard-blown, evaluation Warns with `budget_blocked` and does not spend. Spend that does run appears as `adapter=internal_llm` runs.
+6. Fallback: leave the gate disabled; teams continue with field_rule / human_approval only until the provider recovers (breaker half-opens automatically).
+
+### Raw response retention
+
+`raw_response` on `rubric_verdicts` is scrubbed after 30 days via the `scrub_rubric_raw_responses` job calling `scrubOldRawResponses` (criteria, outcome, and `model_outcome` remain). Infrastructure failure rows use sentinel `content_hash` values and are never served from the verdict cache.

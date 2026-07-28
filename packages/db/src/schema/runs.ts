@@ -31,7 +31,7 @@ export const runs = pgTable(
     bindingId: uuid('binding_id').references(() => automationBindings.id),
     promptTemplateId: uuid('prompt_template_id').references(() => promptTemplates.id),
     adapter: text('adapter')
-      .$type<'cloud_agent' | 'automation_webhook'>()
+      .$type<'cloud_agent' | 'automation_webhook' | 'internal_llm'>()
       .notNull(),
     trigger: jsonb('trigger').$type<Record<string, unknown>>().notNull(),
     status: text('status').notNull(),

@@ -1,14 +1,18 @@
 import {
   can,
   describeCondition,
+  describeRubric,
   getProjectByKey,
   getProjectRole,
+  isAcceptanceCriteriaEnabled,
   listBindings,
   listGates,
   listPendingApprovals,
+  listRubrics,
   listStages,
   listWorkItems,
   previewGates,
+  SEEDED_RUBRIC_TEMPLATES,
 } from '@nexus/core';
 import type { ConditionAst, GateTrigger } from '@nexus/contracts';
 import {
@@ -30,7 +34,10 @@ import { notFound } from 'next/navigation';
 import {
   actionArchiveGate,
   actionCreateGate,
+  actionCreateRubric,
   actionEnableGate,
+  actionEnableRubric,
+  actionRunGoldenSet,
   actionSetEnforcementMode,
 } from '../../../../../src/server/actions';
 import { requireSession } from '../../../../../src/server/session';
@@ -54,19 +61,23 @@ export default async function PoliciesPage({
     role,
   });
 
-  const [gatesR, stagesR, bindingsR, itemsR, pendingR] = await Promise.all([
-    listGates(ctx, project.value.id),
-    listStages(ctx, project.value.id),
-    listBindings(ctx, project.value.id),
-    listWorkItems(ctx, project.value.id),
-    listPendingApprovals(ctx, { projectId: project.value.id }),
-  ]);
+  const [gatesR, stagesR, bindingsR, itemsR, pendingR, rubricsR] =
+    await Promise.all([
+      listGates(ctx, project.value.id),
+      listStages(ctx, project.value.id),
+      listBindings(ctx, project.value.id),
+      listWorkItems(ctx, project.value.id),
+      listPendingApprovals(ctx, { projectId: project.value.id }),
+      listRubrics(ctx, project.value.id),
+    ]);
 
   const gates = gatesR.ok ? gatesR.value : [];
   const stages = stagesR.ok ? stagesR.value : [];
   const bindings = bindingsR.ok ? bindingsR.value : [];
   const items = itemsR.ok ? itemsR.value.slice(0, 40) : [];
   const pending = pendingR.ok ? pendingR.value : [];
+  const rubrics = rubricsR.ok ? rubricsR.value : [];
+  const acEnabled = isAcceptanceCriteriaEnabled(project.value.optionalConcepts);
   const stageById = new Map(stages.map((s) => [s.id, s]));
   const settings = (project.value.settings ?? {}) as Record<string, unknown>;
   const enforcementMode =
@@ -149,6 +160,7 @@ export default async function PoliciesPage({
       <Tabs defaultValue="gates">
         <TabsList>
           <TabsTrigger value="gates">Gates ({gates.length})</TabsTrigger>
+          <TabsTrigger value="rubrics">Rubrics ({rubrics.length})</TabsTrigger>
           <TabsTrigger value="bindings">Bindings ({bindings.length})</TabsTrigger>
           <TabsTrigger value="approvals">
             Approvals ({pending.length})
@@ -179,9 +191,49 @@ export default async function PoliciesPage({
                       <option value="human_approval">human_approval</option>
                       <option value="budget">budget</option>
                       <option value="loop_budget">loop_budget</option>
-                      <option value="agentic">agentic (stub)</option>
+                      <option value="agentic">agentic</option>
+                      <option value="visual_confirmation">
+                        visual_confirmation
+                      </option>
                     </select>
                   </Field>
+                  <Field label="Rubric (agentic)">
+                    <select
+                      name="rubricId"
+                      className="h-9 w-full rounded border border-border bg-surface px-2 text-sm"
+                      defaultValue={rubrics[0]?.id ?? ''}
+                    >
+                      <option value="">—</option>
+                      {rubrics.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name} v{r.version}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Remediation binding (agentic Block)">
+                    <select
+                      name="remediationBindingId"
+                      className="h-9 w-full rounded border border-border bg-surface px-2 text-sm"
+                      defaultValue=""
+                    >
+                      <option value="">None</option>
+                      {bindings.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Warning code (agentic)">
+                    <Input name="warningCode" placeholder="spec.not_testable" />
+                  </Field>
+                  {!acEnabled ? (
+                    <p className="sm:col-span-2 text-xs text-fg-muted">
+                      Acceptance-criteria field conditions are hidden — enable
+                      the optional concept in Settings to use them.
+                    </p>
+                  ) : null}
                   <Field label="Trigger">
                     <select
                       name="triggerKind"
@@ -289,6 +341,11 @@ export default async function PoliciesPage({
                     >
                       <option value="ticket.complexity">ticket.complexity</option>
                       <option value="spec.exists">spec.exists</option>
+                      {acEnabled ? (
+                        <option value="spec.acceptance_criteria.count">
+                          spec.acceptance_criteria.count
+                        </option>
+                      ) : null}
                       <option value="warnings.open.count">warnings.open.count</option>
                     </select>
                   </Field>
@@ -428,6 +485,124 @@ export default async function PoliciesPage({
                 </Panel>
               );
             })
+          )}
+        </TabsContent>
+
+        <TabsContent value="rubrics" className="mt-4 space-y-4">
+          {canManage ? (
+            <Panel>
+              <PanelHeader>
+                <span className="text-sm font-medium">Create rubric</span>
+              </PanelHeader>
+              <PanelBody>
+                <form action={actionCreateRubric} className="grid gap-3 sm:grid-cols-2">
+                  <input type="hidden" name="projectId" value={project.value.id} />
+                  <input type="hidden" name="projectKey" value={projectKey} />
+                  <Field label="Seeded template">
+                    <select
+                      name="template"
+                      className="h-9 w-full rounded border border-border bg-surface px-2 text-sm"
+                      defaultValue={SEEDED_RUBRIC_TEMPLATES[0]?.name}
+                    >
+                      {SEEDED_RUBRIC_TEMPLATES.map((t) => (
+                        <option key={t.name} value={t.name}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Uncertainty policy">
+                    <select
+                      name="uncertaintyPolicy"
+                      className="h-9 w-full rounded border border-border bg-surface px-2 text-sm"
+                      defaultValue="warn"
+                    >
+                      <option value="warn">warn (default)</option>
+                      <option value="pass">pass</option>
+                      <option value="block">block</option>
+                    </select>
+                  </Field>
+                  <Field label="Name override">
+                    <Input name="name" placeholder="Leave blank to use template name" />
+                  </Field>
+                  <Field label="Model">
+                    <Input name="model" defaultValue="gpt-4o-mini" />
+                  </Field>
+                  <Button type="submit" className="w-fit">
+                    Create from template
+                  </Button>
+                </form>
+              </PanelBody>
+            </Panel>
+          ) : null}
+
+          {rubrics.length === 0 ? (
+            <EmptyState
+              title="No rubrics"
+              description="Create a seeded rubric above, then wire it into an agentic gate."
+            />
+          ) : (
+            rubrics.map((r) => (
+              <Panel key={r.id}>
+                <PanelHeader>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium">{r.name}</span>
+                    <Badge tone={r.enabled ? 'active' : 'neutral'}>
+                      v{r.version} · {r.enabled ? 'enabled' : 'draft'}
+                    </Badge>
+                  </div>
+                </PanelHeader>
+                <PanelBody className="space-y-2 text-sm">
+                  <p className="text-fg-muted">
+                    {describeRubric({
+                      name: r.name,
+                      version: r.version,
+                      question: r.question,
+                      criteriaCount: Array.isArray(r.criteria)
+                        ? r.criteria.length
+                        : 0,
+                      uncertaintyPolicy: r.uncertaintyPolicy,
+                      enabled: r.enabled,
+                    })}
+                  </p>
+                  <p>
+                    <span className="text-fg-subtle">Question: </span>
+                    {r.question}
+                  </p>
+                  <ul className="list-inside list-disc text-fg-muted">
+                    {(r.criteria as Array<{ key: string; weight: string; statement: string }>).map(
+                      (c) => (
+                        <li key={c.key}>
+                          [{c.weight}] {c.key}: {c.statement}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                  {canManage ? (
+                    <div className="flex flex-wrap gap-2 pt-2">
+                      <form action={actionRunGoldenSet}>
+                        <input type="hidden" name="rubricId" value={r.id} />
+                        <input type="hidden" name="projectKey" value={projectKey} />
+                        <Button type="submit" size="sm" variant="secondary">
+                          Run golden set
+                        </Button>
+                      </form>
+                      <form action={actionEnableRubric} className="flex items-center gap-2">
+                        <input type="hidden" name="rubricId" value={r.id} />
+                        <input type="hidden" name="projectKey" value={projectKey} />
+                        <label className="flex items-center gap-1 text-xs text-fg-muted">
+                          <input type="checkbox" name="acknowledgeSkippedRegression" />
+                          Skip regression ack
+                        </label>
+                        <Button type="submit" size="sm">
+                          Enable version
+                        </Button>
+                      </form>
+                    </div>
+                  ) : null}
+                </PanelBody>
+              </Panel>
+            ))
           )}
         </TabsContent>
 

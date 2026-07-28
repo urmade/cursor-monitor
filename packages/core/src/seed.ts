@@ -87,6 +87,8 @@ async function main(): Promise<void> {
       set: { enabled: true, updatedAt: new Date() },
     });
 
+  // p7.agentic_gates removed (step 7.7) — agentic gates are always available.
+
   const alpha = await createProject(ctx, {
     key: 'ALPHA',
     name: 'Alpha',

@@ -41,6 +41,11 @@ const CORE_QUERY_RELATIONS = [
   'notificationChannels',
   'notificationDeliveries',
   'attentionReconciliations',
+  'rubrics',
+  'rubricVerdicts',
+  'rubricGoldenCases',
+  'rubricRegressionRuns',
+  'pendingEvaluations',
 ] as const;
 
 describe.runIf(hasDb)('drizzle relational query API', () => {

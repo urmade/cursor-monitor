@@ -72,6 +72,14 @@ export const EventTypeSchema = z.enum([
   'item.resumed',
   'attention.created',
   'attention.resolved',
+  // Phase 7
+  'rubric.created',
+  'rubric.version_created',
+  'rubric.enabled',
+  'rubric.evaluated',
+  'remediation.launched',
+  'remediation.exhausted',
+  'remediation.launch_failed',
 ]);
 
 export type EventType = z.infer<typeof EventTypeSchema>;

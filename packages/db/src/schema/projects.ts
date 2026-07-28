@@ -26,7 +26,7 @@ export const projects = pgTable(
     ownerUserId: uuid('owner_user_id').references(() => users.id),
     nextItemNumber: integer('next_item_number').notNull().default(1),
     optionalConcepts: jsonb('optional_concepts')
-      .$type<{ acceptanceCriteria: boolean; visualConfirmation: boolean }>()
+      .$type<Record<string, unknown>>()
       .notNull()
       .default({ acceptanceCriteria: false, visualConfirmation: false }),
     settings: jsonb('settings').$type<Record<string, unknown>>().notNull().default({}),

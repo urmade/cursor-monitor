@@ -18,6 +18,7 @@ export function deriveStatus(
     openBlockingQuestions: facts.openBlockingQuestions ?? 0,
     failedRunsSinceLastSuccess: facts.failedRunsSinceLastSuccess ?? 0,
     pendingApprovals: facts.pendingApprovals ?? 0,
+    awaitingEvaluations: facts.awaitingEvaluations ?? 0,
     blockingGateResults: facts.blockingGateResults ?? 0,
     budgetState: facts.budgetState ?? 'ok',
     loopEscalated: facts.loopEscalated ?? false,
@@ -34,6 +35,7 @@ export function deriveStatus(
   if (f.budgetState === 'blocked') return 'paused_budget';
   if (f.openBlockingQuestions > 0) return 'needs_answer';
   if (f.pendingApprovals > 0) return 'needs_approval';
+  if (f.awaitingEvaluations > 0) return 'awaiting_evaluation';
   if (f.blockingGateResults > 0) return 'blocked_by_gate';
   if (f.failedRunsSinceLastSuccess > 0 && f.activeRuns === 0) return 'failed_run';
   if (f.loopEscalated) return 'needs_approval';

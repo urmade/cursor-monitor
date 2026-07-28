@@ -63,6 +63,7 @@ type ConditionAstInternal =
     }
   | { op: 'in' | 'not_in'; field: FieldRef; values: JsonPrimitive[] }
   | { op: 'has_label' | 'lacks_label'; value: string }
+  | { op: 'has_warning_code' | 'lacks_warning_code'; value: string }
   | { op: 'exists' | 'missing'; field: FieldRef }
   | { op: 'count_gte'; field: CountableRef; value: number };
 
@@ -90,6 +91,10 @@ export const ConditionAstSchema: z.ZodType<ConditionAst> = z.lazy(() =>
     }),
     z.object({
       op: z.enum(['has_label', 'lacks_label']),
+      value: z.string().min(1).max(100),
+    }),
+    z.object({
+      op: z.enum(['has_warning_code', 'lacks_warning_code']),
       value: z.string().min(1).max(100),
     }),
     z.object({
@@ -148,6 +153,7 @@ export const GateEvaluatorKindSchema = z.enum([
   'budget',
   'agentic',
   'loop_budget',
+  'visual_confirmation',
 ]);
 export type GateEvaluatorKind = z.infer<typeof GateEvaluatorKindSchema>;
 
@@ -203,14 +209,27 @@ export const BudgetConfigSchema = z
   .passthrough();
 export type BudgetConfig = z.infer<typeof BudgetConfigSchema>;
 
-/** Phase 7 fills this in. */
-export const AgenticConfigSchema = z
-  .object({
-    rubricId: z.string().uuid().optional(),
-    preferWarnOnUncertainty: z.boolean().optional(),
-  })
-  .passthrough();
+/** Phase 7 agentic gate config. */
+export const AgenticConfigSchema = z.object({
+  rubricId: z.string().uuid(),
+  warningCode: z.string().min(1).max(100).optional(),
+  async: z.boolean().optional(),
+});
 export type AgenticConfig = z.infer<typeof AgenticConfigSchema>;
+
+/** Visual confirmation gate — requires artifact refs of accepted kinds. */
+export const VisualConfirmationConfigSchema = z.object({
+  evidenceKinds: z
+    .array(z.enum(['pr', 'branch', 'preview', 'artifact', 'link']))
+    .min(1)
+    .default(['preview', 'artifact']),
+  requireApproval: z.boolean().default(false),
+  message: z.string().max(500).default('Visual confirmation evidence required'),
+  code: z.string().min(1).max(100).optional(),
+});
+export type VisualConfirmationConfig = z.infer<
+  typeof VisualConfirmationConfigSchema
+>;
 
 export { LoopBudgetConfigSchema } from './loops';
 export type { LoopBudgetConfig } from './loops';
@@ -221,6 +240,7 @@ export const GateConfigSchema = z.union([
   BudgetConfigSchema,
   AgenticConfigSchema,
   LoopBudgetConfigSchema,
+  VisualConfirmationConfigSchema,
 ]);
 export type GateConfig = z.infer<typeof GateConfigSchema>;
 

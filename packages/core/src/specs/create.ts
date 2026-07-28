@@ -47,10 +47,13 @@ export async function createSpecVersion(
   }
 
   // Acceptance criteria only surfaced when project enables the optional concept (P7).
-  // Phase 1 accepts the field if present but does not require it.
   const content = { ...parsed.data };
-  if (!project.optionalConcepts?.acceptanceCriteria) {
-    // Keep data if provided; UI simply does not prompt for it.
+  const { isAcceptanceCriteriaEnabled } = await import(
+    '../rubrics/optional-concepts'
+  );
+  if (!isAcceptanceCriteriaEnabled(project.optionalConcepts)) {
+    // Field accepted but not promoted — strip from stored content.
+    delete content.acceptanceCriteria;
   }
 
   const byteSize = Buffer.byteLength(JSON.stringify(content), 'utf8');

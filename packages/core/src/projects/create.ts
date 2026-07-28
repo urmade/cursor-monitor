@@ -168,6 +168,7 @@ export async function updateProject(
     name?: string;
     description?: string;
     settings?: Record<string, unknown>;
+    optionalConcepts?: Record<string, unknown>;
   },
 ): Promise<Result<Project, CoreError>> {
   const { getProjectRole } = await import('./members');
@@ -185,6 +186,63 @@ export async function updateProject(
     ? { ...(existing.settings as Record<string, unknown>), ...patch.settings }
     : undefined;
 
+  let nextConcepts: Record<string, unknown> | undefined;
+  if (patch.optionalConcepts !== undefined) {
+    const { normalizeOptionalConcepts } = await import(
+      '../rubrics/optional-concepts'
+    );
+    const existingNorm = normalizeOptionalConcepts(existing.optionalConcepts);
+    // Merge enabled toggles into the structured form so requiredAtStageId /
+    // evidenceKinds survive a settings form that only posts booleans.
+    const mergedRaw: Record<string, unknown> = {
+      acceptanceCriteria: existingNorm.acceptanceCriteria,
+      visualConfirmation: existingNorm.visualConfirmation,
+    };
+    if ('acceptanceCriteria' in patch.optionalConcepts) {
+      const ac = patch.optionalConcepts.acceptanceCriteria;
+      if (typeof ac === 'boolean') {
+        mergedRaw.acceptanceCriteria = {
+          ...existingNorm.acceptanceCriteria,
+          enabled: ac,
+        };
+      } else if (ac && typeof ac === 'object') {
+        mergedRaw.acceptanceCriteria = {
+          ...existingNorm.acceptanceCriteria,
+          ...(ac as Record<string, unknown>),
+        };
+      }
+    }
+    if ('visualConfirmation' in patch.optionalConcepts) {
+      const vc = patch.optionalConcepts.visualConfirmation;
+      if (typeof vc === 'boolean') {
+        mergedRaw.visualConfirmation = {
+          ...existingNorm.visualConfirmation,
+          enabled: vc,
+        };
+      } else if (vc && typeof vc === 'object') {
+        mergedRaw.visualConfirmation = {
+          ...existingNorm.visualConfirmation,
+          ...(vc as Record<string, unknown>),
+        };
+      }
+    }
+    const n = normalizeOptionalConcepts(mergedRaw);
+    nextConcepts = {
+      acceptanceCriteria: n.acceptanceCriteria.enabled
+        ? n.acceptanceCriteria
+        : false,
+      visualConfirmation: n.visualConfirmation.enabled
+        ? {
+            enabled: true,
+            evidenceKinds: n.visualConfirmation.evidenceKinds,
+            ...(n.visualConfirmation.requiredAtStageId
+              ? { requiredAtStageId: n.visualConfirmation.requiredAtStageId }
+              : {}),
+          }
+        : false,
+    };
+  }
+
   const updated = await ctx.db.transaction(async (tx) => {
     const [row] = await tx
       .update(projects)
@@ -192,6 +250,7 @@ export async function updateProject(
         ...(patch.name !== undefined ? { name: patch.name } : {}),
         ...(patch.description !== undefined ? { description: patch.description } : {}),
         ...(nextSettings !== undefined ? { settings: nextSettings } : {}),
+        ...(nextConcepts !== undefined ? { optionalConcepts: nextConcepts } : {}),
         updatedAt: new Date(),
       })
       .where(eq(projects.id, id))

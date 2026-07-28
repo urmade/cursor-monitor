@@ -53,6 +53,7 @@ export const workItems = pgTable(
       .default(BigInt(0)),
     reworkMs: bigint('rework_ms', { mode: 'bigint' }).notNull().default(BigInt(0)),
     loopEscalated: boolean('loop_escalated').notNull().default(false),
+    remediationAttempts: integer('remediation_attempts').notNull().default(0),
     version: integer('version').notNull().default(1),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

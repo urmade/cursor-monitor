@@ -42,7 +42,8 @@ export async function buildGateContext(
     .innerJoin(labels, eq(labels.id, workItemLabels.labelId))
     .where(eq(workItemLabels.workItemId, workItemId));
 
-  let acceptanceCriteriaCount = 0;
+  let acceptanceCriteriaCount: number | null = 0;
+  let acceptanceCriteriaEnabled = false;
   let specExists = false;
   if (item.currentSpecVersionId) {
     const { specVersions } = await import('@nexus/db');
@@ -51,10 +52,29 @@ export async function buildGateContext(
     });
     if (spec) {
       specExists = true;
-      const content = spec.content as Record<string, unknown>;
-      const ac = content.acceptanceCriteria;
-      acceptanceCriteriaCount = Array.isArray(ac) ? ac.length : 0;
+      const { isAcceptanceCriteriaEnabled } = await import(
+        '../rubrics/optional-concepts'
+      );
+      acceptanceCriteriaEnabled = isAcceptanceCriteriaEnabled(
+        project.optionalConcepts,
+      );
+      if (acceptanceCriteriaEnabled) {
+        const content = spec.content as Record<string, unknown>;
+        const ac = content.acceptanceCriteria;
+        acceptanceCriteriaCount = Array.isArray(ac) ? ac.length : 0;
+      } else {
+        // Concept off must not read as "missing" (count 0) for gate conditions.
+        acceptanceCriteriaCount = null;
+      }
     }
+  } else {
+    const { isAcceptanceCriteriaEnabled } = await import(
+      '../rubrics/optional-concepts'
+    );
+    acceptanceCriteriaEnabled = isAcceptanceCriteriaEnabled(
+      project.optionalConcepts,
+    );
+    if (!acceptanceCriteriaEnabled) acceptanceCriteriaCount = null;
   }
 
   const latestReport = await ctx.db.query.stageReports.findFirst({
@@ -167,6 +187,7 @@ export async function buildGateContext(
     spec: {
       exists: specExists,
       acceptanceCriteriaCount,
+      acceptanceCriteriaEnabled,
     },
     latestReport: latestReport
       ? {
@@ -234,7 +255,11 @@ export function emptyGateContext(
       currentStageInstanceId: null,
     },
     labels: [],
-    spec: { exists: false, acceptanceCriteriaCount: 0 },
+    spec: {
+      exists: false,
+      acceptanceCriteriaCount: 0,
+      acceptanceCriteriaEnabled: true,
+    },
     latestReport: null,
     activeRun: { status: null, countInStage: 0 },
     warnings: { openCount: 0, openInCurrentStageCount: 0, openCodes: [] },

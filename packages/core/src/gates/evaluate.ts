@@ -70,6 +70,8 @@ function toGateRow(row: typeof gates.$inferSelect): GateRow {
     onFailure: row.onFailure,
     enabled: row.enabled,
     version: row.version,
+    remediationBindingId: row.remediationBindingId,
+    remediationMaxAttempts: row.remediationMaxAttempts,
   };
 }
 
@@ -501,6 +503,7 @@ export async function evaluateGates(
       ctx: gateContext,
       trigger: input.trigger,
       existingPendingApprovalId,
+      serviceCtx: ctx,
     });
     result.evaluator = row.evaluator;
     results.push(result);
@@ -545,6 +548,24 @@ export async function evaluateGates(
       });
     }
 
+    if (result.outcome === 'pass' && row.evaluator === 'agentic') {
+      // Prefer gate config; fall back to the evaluator's warningCode (Phase 7).
+      // Phase 6 requires a concrete code string (resolves open + dismissed).
+      const code =
+        (typeof row.config.warningCode === 'string'
+          ? row.config.warningCode
+          : undefined) ?? result.warningCode;
+      if (code) {
+        await resolveWarningsOnPass(ctx, {
+          workItemId: input.workItemId,
+          gateId: g.id,
+          evaluationId,
+          code,
+          dryRun,
+        });
+      }
+    }
+
     if (
       result.outcome === 'block' &&
       result.reason === 'awaiting_approval' &&
@@ -559,6 +580,23 @@ export async function evaluateGates(
         dryRun,
       });
       if (approvalId) result.approvalId = approvalId;
+    }
+
+    if (
+      !dryRun &&
+      result.outcome === 'block' &&
+      row.evaluator === 'agentic' &&
+      result.reason !== 'awaiting_evaluation'
+    ) {
+      const { maybeRemediateAfterAgenticBlock } = await import(
+        '../rubrics/agentic-evaluator'
+      );
+      await maybeRemediateAfterAgenticBlock(ctx, {
+        workItemId: input.workItemId,
+        gateId: g.id,
+        gateEvaluationId: evaluationId,
+        result,
+      });
     }
   }
 
@@ -645,7 +683,7 @@ async function persistEvaluation(
   },
 ): Promise<string> {
   const id = newId();
-  await ctx.db.insert(gateEvaluations).values({
+    await ctx.db.insert(gateEvaluations).values({
     id,
     gateId: input.gate.id,
     gateVersion: input.gate.version,
@@ -658,7 +696,20 @@ async function persistEvaluation(
     reason: input.result.reason,
     evidence: input.result.evidence,
     contextSnapshot: input.contextSnapshot,
-    evaluatorMeta: { durationMs: input.result.durationMs },
+    evaluatorMeta: {
+      durationMs: input.result.durationMs,
+      ...(input.gate.evaluator === 'agentic'
+        ? {
+            rubricId: input.result.evidence?.rubricId,
+            rubricVersion: input.result.evidence?.rubricVersion,
+            verdictId: input.result.evidence?.verdictId,
+            model: input.result.evidence?.model,
+            tokens: input.result.evidence?.tokens,
+            costMicroUsd: input.result.evidence?.costMicroUsd,
+            cacheHit: input.result.evidence?.cacheHit,
+          }
+        : {}),
+    },
     batchId: input.batchId,
   });
   return id;
@@ -827,6 +878,7 @@ export async function previewGates(
         gate: fake,
         ctx: gateContext,
         trigger: gate.trigger,
+        serviceCtx: ctx,
       });
       rows.push({
         workItemId,

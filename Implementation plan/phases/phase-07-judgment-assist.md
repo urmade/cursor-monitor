@@ -299,7 +299,7 @@ The `agentic` gate evaluator becomes real, calling `evaluateRubric` and mapping 
 
 ## 8. Rollout and safety
 
-- Flag `p7.agentic_gates`, per project. Deterministic and human gates are untouched by it.
+- Flag `p7.agentic_gates` **removed** (step 7.7). Agentic gates are available whenever authored and enabled; rollout control is observe→enforce on the gate itself.
 - New agentic gates start in Phase 3's `observe` mode: they evaluate, record, and display, but do not block. A team promotes a rubric to enforcing after seeing a week of verdicts it agrees with. This is the single most important rollout control in the plan — an agentic gate that blocks on day one, before anyone trusts it, will be switched off and never switched back on.
 - Per-project hourly evaluation cap plus the Phase 4 budget, so a rubric loop cannot spend unbounded money.
 - The circuit breaker fails **open** (Warn), never closed (Block).
@@ -331,20 +331,33 @@ The `agentic` gate evaluator becomes real, calling `evaluateRubric` and mapping 
 
 ## 11. Exit criteria
 
-- [ ] Rubrics are authored, versioned, and testable against real items before being enabled.
-- [ ] Agentic gates return Pass, Warn, and Block, preferring Warn under uncertainty per policy.
-- [ ] Every verdict cites evidence per criterion, and one without evidence is rejected.
-- [ ] Warn verdicts create durable warnings that later gate conditions consume.
-- [ ] Block routes to a bound remediation automation; re-evaluation is automatic; the attempt cap escalates to a human.
-- [ ] No agent loop runs inside our product — remediation is always a Cursor Automation.
-- [ ] Evaluation cost and latency are recorded per verdict and roll into item and project spend.
-- [ ] Caching, timeout-to-Warn, and the circuit breaker all demonstrably work.
-- [ ] Optional concepts are genuinely optional across every surface, MCP included.
-- [ ] A golden set exists per enabled rubric, with a regression report for its current version.
+- [~] Rubrics are authored, versioned, and testable against real items before being enabled. *(partial — authoring/versioning hold; zero-golden enable required acknowledge after rework)*
+- [~] Agentic gates return Pass, Warn, and Block, preferring Warn under uncertainty per policy. *(partial — policy held in prompt tests; criterion-key evasion fixed in rework)*
+- [~] Every verdict cites evidence per criterion, and one without evidence is rejected. *(partial — met=no evidence rule held; unknown/missing keys now validated)*
+- [~] Warn verdicts create durable warnings that later gate conditions consume. *(partial — warnings created; `has_warning_code` condition op added so demo step 6 is expressible)*
+- [ ] Block routes to a bound remediation automation; re-evaluation is automatic; the attempt cap escalates to a human. *(refuted then fixed — attempts now count on launch attempt; launch failure escalates)*
+- [x] No agent loop runs inside our product — remediation is always a Cursor Automation.
+- [~] Evaluation cost and latency are recorded per verdict and roll into item and project spend. *(partial — rollup path exists; golden set now routes through guarded evaluate; budget check gates paid evals)*
+- [ ] Caching, timeout-to-Warn, and the circuit breaker all demonstrably work. *(refuted then fixed — timeout no longer poisons cache; breaker Redis-backed; timeouts trip breaker)*
+- [~] Optional concepts are genuinely optional across every surface, MCP included. *(partial — MCP/surfaces held; AC-off no longer reads as count=0 in gate context; settings form preserves structured fields)*
+- [ ] A golden set exists per enabled rubric, with a regression report for its current version. *(refuted then fixed — enable requires golden cases or explicit acknowledge; regression still required when cases exist)*
+
+Rework note: criteria 2, 5, 8, 10 were refuted by the Opus 5 audit; 1, 3, 4, 7, 9 were partial; only 6 was fully confirmed. Fixes in this rework restore 5/8/10/2 paths with proving tests — ticks above reflect post-rework honesty, not the first-pass claim.
 
 ## 12. Open questions for this phase
 
-- **Q10** — model provider key. Without it, the no-repo cloud agent fallback applies and latency becomes user-visible.
-- **Local:** should agentic gate spend count against the *item* budget or a separate project-level governance budget? Recommendation: item budget, because that is where the decision to spend was made — but flag it in the demo, since it makes gates visibly reduce the budget available for actual work.
-- **Local:** may a rubric read the whole spec history, or only the current version? Recommendation: current version only in the PoC. History multiplies cost and invites the model to judge the author rather than the artefact.
-- **Local:** who may enable an enforcing agentic gate? Recommendation: `owner` only, distinct from the `maintainer` right to author rubrics. Enforcing judgement is a bigger commitment than writing it.
+- **Q10** — model provider key. Without it, the no-repo cloud agent fallback applies and latency becomes user-visible. **Decision for this implementation:** OpenAI-compatible HTTP via `NEXUS_LLM_API_KEY` / `OPENAI_API_KEY`; when unset, evaluations Warn with `provider_unavailable` (fail open). Fixture provider for all tests. No secret added until Q10 is approved.
+- **Local:** should agentic gate spend count against the *item* budget or a separate project-level governance budget? **Decision:** item budget via `adapter=internal_llm` runs + Phase 4 rollups.
+- **Local:** may a rubric read the whole spec history, or only the current version? **Decision:** current version only.
+- **Local:** who may enable an enforcing agentic gate? **Decision:** `owner` only; maintainers may author rubrics and draft gates.
+
+## 13. Deviations recorded during implementation
+
+- **Model provider:** No provider key in `secrets/` yet (Q10). Runtime uses OpenAI-compatible HTTP when env keys are present; otherwise Warn/`provider_unavailable`. Tests never call a live model — fixture provider only. No-repo Cursor cloud agent fallback is not wired as a live adapter in this PR (same port, deferred until Q10).
+- **Async awaiting_evaluation:** Default agentic path evaluates synchronously with the 20s timeout (Vercel-friendly). Setting `config.async: true` creates a `pending_evaluations` row and returns `awaiting_evaluation`; cron `process_pending_evaluations` completes it. Status derivation includes `awaiting_evaluation`. Stale `running` rows are reclaimed.
+- **CI Playwright / managed workflow:** Unchanged — policy-owned; Playwright runs locally per `docs/runbook.md` against `next start`.
+- **Hourly rate limit:** Implemented via `checkRateLimitWindow` (3600s) in core Redis helper (memory fallback when Redis unset). Cache hits do not consume the cap.
+- **Circuit breaker:** Redis-backed (same KV helper as the hourly cap) with in-process fallback; timeouts and provider errors both trip it; fails open to Warn.
+- **visual_confirmation evaluator:** Added as a first-class gate evaluator kind (plan §3.4 “gate type”), not only a condition — keeps artifact-ref checks consistent with other evaluators.
+- **Flag removal (7.7):** `p7.agentic_gates` removed — agentic gates are live; observe→enforce on individual gates remains the rollout control.
+- **Opus 5 rework:** BL-1…BL-5 fixed with proving tests; Date-in-raw-SQL sweep found only `scrubOldRawResponses` (fixed via `lt()`); exit criteria ticks corrected above. Surviving-mutation follow-up closed M14/M17/M10/M9/M15/M12/M5/M7/M11/M18.

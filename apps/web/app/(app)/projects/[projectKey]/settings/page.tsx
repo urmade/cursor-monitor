@@ -2,6 +2,8 @@ import {
   can,
   getProjectByKey,
   getProjectRole,
+  isAcceptanceCriteriaEnabled,
+  isVisualConfirmationEnabled,
   listBindings,
   listLabels,
   listPromptTemplates,
@@ -88,6 +90,8 @@ export default async function SettingsPage({
   const templates = templatesR.ok ? templatesR.value : [];
   const items = itemsR.ok ? itemsR.value : [];
   const reasons = reasonsR.ok ? reasonsR.value : [];
+  const acOn = isAcceptanceCriteriaEnabled(project.value.optionalConcepts);
+  const vcOn = isVisualConfirmationEnabled(project.value.optionalConcepts);
   const budgetSettings = parseProjectBudgetSettings(
     project.value.settings as Record<string, unknown>,
   );
@@ -120,6 +124,46 @@ export default async function SettingsPage({
                   defaultValue={project.value.description}
                 />
               </Field>
+              <fieldset className="space-y-2 rounded-md border border-border p-3">
+                <legend className="px-1 text-xs font-medium text-fg-muted">
+                  Optional concepts
+                </legend>
+                <input type="hidden" name="optionalConceptsPresent" value="1" />
+                <p className="text-xs text-fg-subtle">
+                  When off, the concept does not exist — no UI section, no MCP
+                  nagging, no completeness gap.
+                </p>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="acceptanceCriteria"
+                    defaultChecked={acOn}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="font-medium">Acceptance criteria</span>
+                    <span className="block text-xs text-fg-muted">
+                      Adds a spec section and allows gates/rubrics to reference
+                      them.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="visualConfirmation"
+                    defaultChecked={vcOn}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="font-medium">Visual confirmation</span>
+                    <span className="block text-xs text-fg-muted">
+                      Enables the visual_confirmation gate type (preview/artifact
+                      refs, optional approval).
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
               <Button type="submit" className="w-fit">Save</Button>
             </form>
           ) : (

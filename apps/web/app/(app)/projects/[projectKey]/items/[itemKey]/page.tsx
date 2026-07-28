@@ -21,6 +21,8 @@ import {
   listStages,
   listTransitions,
   listWarnings,
+  listVerdictsForItem,
+  isAcceptanceCriteriaEnabled,
 } from '@nexus/core';
 import { eq } from 'drizzle-orm';
 import { labels as labelsTable, workItemLabels } from '@nexus/db';
@@ -57,6 +59,7 @@ import {
   actionDecideApproval,
   actionDismissWarning,
   actionDryRunGates,
+  actionAddGoldenFromVerdict,
   actionLaunchRun,
   actionResumeBudgetItem,
   actionSaveSpec,
@@ -151,6 +154,7 @@ export default async function ItemPage({
     loopSummaryR,
     journeyR,
     reasonCodesR,
+    verdictsR,
   ] = await Promise.all([
     listStages(ctx, project.value.id),
     listSpecVersions(ctx, item.id),
@@ -170,6 +174,7 @@ export default async function ItemPage({
     getLoopSummary(ctx, item.id),
     buildJourneyRibbonModel(ctx, item.id),
     listReasonCodes(ctx, project.value.id),
+    listVerdictsForItem(ctx, item.id, 10),
   ]);
 
   const stages = stagesR.ok ? stagesR.value : [];
@@ -181,6 +186,8 @@ export default async function ItemPage({
   const qs = questionsR.ok ? questionsR.value.questions : [];
   const artifacts = artifactsR.ok ? artifactsR.value : [];
   const openWarnings = warningsR.ok ? warningsR.value : [];
+  const verdicts = verdictsR.ok ? verdictsR.value : [];
+  const acEnabled = isAcceptanceCriteriaEnabled(project.value.optionalConcepts);
   const latestByGate = await getLatestGateResultsByGate(ctx, item.id);
   const checks = [...latestByGate.values()].map((ev) => ({
     gateId: ev.gateId,
@@ -486,6 +493,114 @@ export default async function ItemPage({
           itemKey={itemKey}
         />
 
+        {verdicts.length > 0 ? (
+          <Panel>
+            <PanelHeader>
+              <span className="text-sm font-medium">Rubric verdicts</span>
+            </PanelHeader>
+            <PanelBody className="space-y-3">
+              {verdicts.map((v) => (
+                <div
+                  key={v.id}
+                  className="rounded-md border border-border p-3 text-sm"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      tone={
+                        v.outcome === 'pass'
+                          ? 'active'
+                          : v.outcome === 'block'
+                            ? 'blocked'
+                            : 'warning'
+                      }
+                    >
+                      {v.outcome}
+                    </Badge>
+                    {v.modelOutcome &&
+                    v.modelOutcome !== v.outcome ? (
+                      <span className="rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning">
+                        policy: model said {v.modelOutcome} → {v.outcome}
+                      </span>
+                    ) : null}
+                    <span className="font-medium">{v.headline}</span>
+                    {v.cacheHit ? (
+                      <span className="text-xs text-fg-subtle">cache hit</span>
+                    ) : null}
+                    {v.errorCode ? (
+                      <span className="text-xs text-fg-subtle">
+                        {v.errorCode}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-1 text-xs text-fg-muted">
+                    rubric v{v.rubricVersion} · {v.model} ·{' '}
+                    {v.durationMs ?? 0}ms · cost{' '}
+                    {v.costMicroUsd != null
+                      ? `$${(Number(v.costMicroUsd) / 1_000_000).toFixed(4)}`
+                      : '—'}
+                    {v.confidence != null
+                      ? ` · confidence ${v.confidence}`
+                      : ''}
+                  </p>
+                  <ul className="mt-2 space-y-1 text-xs">
+                    {(
+                      v.criteria as Array<{
+                        key: string;
+                        met: string;
+                        reason: string;
+                        evidence: string;
+                      }>
+                    ).map((c) => (
+                      <li key={c.key}>
+                        <span className="font-mono">{c.key}</span> [{c.met}]:{' '}
+                        {c.reason}
+                        {c.evidence ? (
+                          <span className="text-fg-subtle">
+                            {' '}
+                            — “{c.evidence}”
+                          </span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                  {canWrite ? (
+                    <form
+                      action={actionAddGoldenFromVerdict}
+                      className="mt-2 flex flex-wrap items-end gap-2"
+                    >
+                      <input type="hidden" name="verdictId" value={v.id} />
+                      <input type="hidden" name="rubricId" value={v.rubricId} />
+                      <input type="hidden" name="projectKey" value={projectKey} />
+                      <input type="hidden" name="itemKey" value={itemKey} />
+                      <Field label="Expected">
+                        <select
+                          name="expectedOutcome"
+                          defaultValue={v.outcome === 'error' ? 'block' : v.outcome}
+                          className="h-8 rounded border border-border bg-surface px-2 text-xs"
+                        >
+                          <option value="pass">pass</option>
+                          <option value="warn">warn</option>
+                          <option value="block">block</option>
+                        </select>
+                      </Field>
+                      <Field label="Label">
+                        <Input
+                          name="label"
+                          defaultValue={`${item.key}-${v.outcome}`}
+                          className="h-8 text-xs"
+                        />
+                      </Field>
+                      <Button type="submit" size="sm" variant="secondary">
+                        Add to golden set
+                      </Button>
+                    </form>
+                  ) : null}
+                </div>
+              ))}
+            </PanelBody>
+          </Panel>
+        ) : null}
+
         <WhyCantMove
           stages={stages.map((s) => ({ id: s.id, name: s.name }))}
           currentStageId={item.currentStageId}
@@ -552,7 +667,10 @@ export default async function ItemPage({
               </PanelHeader>
               <PanelBody className="space-y-4">
                 <p className="text-xs text-fg-subtle">
-                  Write what matters. Acceptance criteria are optional.
+                  Write what matters.
+                  {acEnabled
+                    ? ' Acceptance criteria are enabled for this project.'
+                    : ' Acceptance criteria are off for this project.'}
                 </p>
                 {currentSpec ? (
                   <div className="space-y-3 text-sm">
@@ -582,6 +700,24 @@ export default async function ItemPage({
                         <p className="mt-1 whitespace-pre-wrap">
                           {specText(specContent, 'approach')}
                         </p>
+                      </div>
+                    ) : null}
+                    {acEnabled &&
+                    Array.isArray(
+                      (specContent as { acceptanceCriteria?: string[] })
+                        .acceptanceCriteria,
+                    ) ? (
+                      <div>
+                        <div className="text-xs text-fg-subtle">
+                          Acceptance criteria
+                        </div>
+                        <ul className="mt-1 list-inside list-disc">
+                          {(
+                            specContent as { acceptanceCriteria: string[] }
+                          ).acceptanceCriteria.map((line) => (
+                            <li key={line}>{line}</li>
+                          ))}
+                        </ul>
                       </div>
                     ) : null}
                     {prevSpec ? (
@@ -626,6 +762,18 @@ export default async function ItemPage({
                         defaultValue={specText(specContent, 'approach')}
                       />
                     </Field>
+                    {acEnabled ? (
+                      <Field label="Acceptance criteria (one per line)">
+                        <Textarea
+                          name="acceptanceCriteria"
+                          rows={3}
+                          defaultValue={specLines(
+                            specContent,
+                            'acceptanceCriteria',
+                          )}
+                        />
+                      </Field>
+                    ) : null}
                     <Field label="Open questions (one per line)">
                       <Textarea
                         name="openQuestions"

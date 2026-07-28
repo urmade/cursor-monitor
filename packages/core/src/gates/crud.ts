@@ -9,6 +9,7 @@ import {
   BudgetConfigSchema,
   AgenticConfigSchema,
   LoopBudgetConfigSchema,
+  VisualConfirmationConfigSchema,
   conditionDepth,
   unwrapCondition,
   type GateEvaluatorKind,
@@ -48,6 +49,9 @@ function parseConfig(
       break;
     case 'agentic':
       parsed = AgenticConfigSchema.safeParse(config ?? {});
+      break;
+    case 'visual_confirmation':
+      parsed = VisualConfirmationConfigSchema.safeParse(config ?? {});
       break;
     default:
       return err(coreError('validation', `Unknown evaluator: ${evaluator}`));
@@ -104,6 +108,8 @@ export async function createGate(
     config: unknown;
     onFailure?: 'block' | 'warn';
     enabled?: boolean;
+    remediationBindingId?: string | null;
+    remediationMaxAttempts?: number;
   },
 ): Promise<Result<Gate, CoreError>> {
   const role = await getProjectRole(ctx, input.projectId);
@@ -221,6 +227,35 @@ export async function createGate(
     }
   }
 
+  // Visual confirmation only when project concept is enabled
+  if (input.evaluator === 'visual_confirmation') {
+    const { projects } = await import('@nexus/db');
+    const { isVisualConfirmationEnabled } = await import(
+      '../rubrics/optional-concepts'
+    );
+    const project = await ctx.db.query.projects.findFirst({
+      where: eq(projects.id, input.projectId),
+    });
+    if (!isVisualConfirmationEnabled(project?.optionalConcepts)) {
+      return err(
+        coreError(
+          'validation',
+          'Enable visual confirmation in project settings before creating this gate',
+        ),
+      );
+    }
+  }
+
+  // Enabling an agentic gate requires owner (enforcing judgement)
+  if (input.enabled && input.evaluator === 'agentic' && role !== 'owner') {
+    return err(
+      coreError(
+        'forbidden',
+        'Only project owners may enable enforcing agentic gates',
+      ),
+    );
+  }
+
   const applies = validateAppliesWhen(input.appliesWhen ?? null);
   if (!applies.ok) return applies;
 
@@ -249,6 +284,8 @@ export async function createGate(
       // Created disabled by default — enabling is a deliberate second action.
       enabled: input.enabled ?? false,
       version: 1,
+      remediationBindingId: input.remediationBindingId ?? null,
+      remediationMaxAttempts: input.remediationMaxAttempts ?? 2,
       createdByUserId: ctx.actor.kind === 'human' ? ctx.actor.userId : null,
     })
     .returning();
@@ -282,6 +319,8 @@ export async function updateGate(
     config?: unknown;
     onFailure?: 'block' | 'warn';
     enabled?: boolean;
+    remediationBindingId?: string | null;
+    remediationMaxAttempts?: number;
   },
 ): Promise<Result<Gate, CoreError>> {
   const existing = await ctx.db.query.gates.findFirst({
@@ -298,6 +337,19 @@ export async function updateGate(
     })
   ) {
     return err(coreError('forbidden', 'Cannot manage gates'));
+  }
+
+  if (
+    patch.enabled === true &&
+    existing.evaluator === 'agentic' &&
+    role !== 'owner'
+  ) {
+    return err(
+      coreError(
+        'forbidden',
+        'Only project owners may enable enforcing agentic gates',
+      ),
+    );
   }
 
   let trigger = existing.trigger as GateTrigger;
@@ -333,6 +385,12 @@ export async function updateGate(
       config,
       onFailure: patch.onFailure ?? existing.onFailure,
       enabled: patch.enabled ?? existing.enabled,
+      remediationBindingId:
+        patch.remediationBindingId !== undefined
+          ? patch.remediationBindingId
+          : existing.remediationBindingId,
+      remediationMaxAttempts:
+        patch.remediationMaxAttempts ?? existing.remediationMaxAttempts,
       version: existing.version + 1,
       updatedAt: new Date(),
     })

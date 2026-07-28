@@ -63,8 +63,10 @@ export async function loadStatusFacts(
 
   let pendingApprovals = 0;
   let blockingGateResults = 0;
+  let awaitingEvaluations = 0;
   try {
-    const { approvals, gateEvaluations, gates } = await import('@nexus/db');
+    const { approvals, gateEvaluations, gates, pendingEvaluations } =
+      await import('@nexus/db');
     const pending = await ctx.db.query.approvals.findMany({
       where: and(
         eq(approvals.workItemId, workItemId),
@@ -73,6 +75,15 @@ export async function loadStatusFacts(
     });
     pendingApprovals = pending.length;
 
+    const pendingEvals = await ctx.db.query.pendingEvaluations.findMany({
+      where: and(
+        eq(pendingEvaluations.workItemId, workItemId),
+        inArray(pendingEvaluations.status, ['pending', 'running']),
+      ),
+    });
+    awaitingEvaluations = pendingEvals.length;
+
+    // Also count recent gate evals with awaiting_evaluation reason.
     // Only evaluations at/after the current stage instance matter. A successful
     // transition (including override) creates a new instance, clearing old blocks.
     let enteredAt: Date | null = null;
@@ -100,6 +111,10 @@ export async function loadStatusFacts(
     for (const ev of recent) {
       if (seen.has(ev.gateId)) continue;
       seen.add(ev.gateId);
+      if (ev.reason === 'awaiting_evaluation') {
+        awaitingEvaluations += 1;
+        continue;
+      }
       if (ev.outcome === 'block' || ev.outcome === 'error') {
         blockingGateIds.push(ev.gateId);
       }
@@ -152,6 +167,7 @@ export async function loadStatusFacts(
     openBlockingQuestions: openBlocking.length,
     failedRunsSinceLastSuccess,
     pendingApprovals,
+    awaitingEvaluations,
     blockingGateResults,
     override: override
       ? {

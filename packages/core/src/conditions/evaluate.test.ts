@@ -56,7 +56,7 @@ describe('evaluateCondition — operators', () => {
       currentStageInstanceId: null,
     },
     labels: ['risk:high', 'area:api'],
-    spec: { exists: true, acceptanceCriteriaCount: 2 },
+    spec: { exists: true, acceptanceCriteriaCount: 2, acceptanceCriteriaEnabled: true },
     warnings: { openCount: 1, openInCurrentStageCount: 0, openCodes: ['spec.thin'] },
   });
 

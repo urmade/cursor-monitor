@@ -9,10 +9,12 @@ import {
   createGate,
   createProject,
   createPromptTemplate,
+  createRubric,
   createSpecVersion,
   createWorkItem,
   decideApproval,
   dismissWarning,
+  enableRubric,
   evaluateGates,
   launchRun,
   resolveBinding,
@@ -26,6 +28,9 @@ import {
   updateWorkItem,
   upsertBinding,
   upsertLabel,
+  addGoldenCase,
+  runGoldenSet,
+  SEEDED_RUBRIC_TEMPLATES,
 } from '@nexus/core';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
@@ -190,7 +195,8 @@ export async function actionCreateGate(formData: FormData) {
     | 'human_approval'
     | 'budget'
     | 'loop_budget'
-    | 'agentic';
+    | 'agentic'
+    | 'visual_confirmation';
   const triggerKind = String(formData.get('triggerKind') ?? 'on_transition');
   const toStageId = String(formData.get('toStageId') ?? '');
   const fromStageId = String(formData.get('fromStageId') ?? '') || undefined;
@@ -273,9 +279,28 @@ export async function actionCreateGate(formData: FormData) {
         ? { toStageId: String(formData.get('loopToStageId')) }
         : {}),
     };
+  } else if (evaluator === 'agentic') {
+    config = {
+      rubricId: String(formData.get('rubricId') ?? ''),
+      warningCode: String(formData.get('warningCode') ?? '') || undefined,
+    };
+  } else if (evaluator === 'visual_confirmation') {
+    config = {
+      evidenceKinds: String(formData.get('evidenceKinds') ?? 'preview,artifact')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      requireApproval: formData.get('requireApproval') === 'on',
+      message: String(
+        formData.get('message') ?? 'Visual confirmation evidence required',
+      ),
+    };
   } else {
     config = {};
   }
+
+  const remediationBindingId =
+    String(formData.get('remediationBindingId') ?? '') || null;
 
   const result = await createGate(ctx, {
     projectId,
@@ -286,6 +311,7 @@ export async function actionCreateGate(formData: FormData) {
     config,
     onFailure,
     enabled: formData.get('enabled') === 'on',
+    remediationBindingId,
   });
   if (!result.ok) throw new Error(result.error.message);
   revalidatePath(`/projects/${projectKey}/policies`);
@@ -358,6 +384,7 @@ export async function actionSaveSpec(formData: FormData) {
   const projectKey = String(formData.get('projectKey') ?? '');
   const itemKey = String(formData.get('itemKey') ?? '');
   const note = String(formData.get('note') ?? '') || undefined;
+  const acRaw = String(formData.get('acceptanceCriteria') ?? '');
   const content = {
     summary: String(formData.get('summary') ?? ''),
     context: String(formData.get('context') ?? '') || undefined,
@@ -366,6 +393,14 @@ export async function actionSaveSpec(formData: FormData) {
       .split('\n')
       .map((s) => s.trim())
       .filter(Boolean),
+    ...(acRaw.trim()
+      ? {
+          acceptanceCriteria: acRaw
+            .split('\n')
+            .map((s) => s.trim())
+            .filter(Boolean),
+        }
+      : {}),
   };
   const result = await createSpecVersion(ctx, workItemId, content, note);
   if (!result.ok) {
@@ -417,15 +452,103 @@ export async function actionUpdateProject(formData: FormData) {
   const { ctx } = await requireSession();
   const id = String(formData.get('projectId') ?? '');
   const projectKey = String(formData.get('projectKey') ?? '');
+  const ac = formData.get('acceptanceCriteria');
+  const vc = formData.get('visualConfirmation');
+  const conceptsPresent = formData.get('optionalConceptsPresent') === '1';
   const result = await updateProject(ctx, id, {
     name: String(formData.get('name') ?? '') || undefined,
     description: String(formData.get('description') ?? '') || undefined,
+    ...(conceptsPresent
+      ? {
+          optionalConcepts: {
+            acceptanceCriteria: ac === 'on',
+            visualConfirmation: vc === 'on',
+          },
+        }
+      : {}),
   });
   if (!result.ok) {
     throw new Error(result.error.message);
   }
   revalidatePath(`/projects/${projectKey}/settings`);
   revalidatePath('/projects');
+}
+
+export async function actionCreateRubric(formData: FormData) {
+  const { ctx } = await requireSession();
+  const projectId = String(formData.get('projectId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const templateKey = String(formData.get('template') ?? '');
+  const tpl = SEEDED_RUBRIC_TEMPLATES.find((t) => t.name === templateKey);
+
+  const result = await createRubric(ctx, {
+    projectId,
+    name: String(formData.get('name') ?? tpl?.name ?? 'Untitled rubric'),
+    target: (String(formData.get('target') ?? tpl?.target ?? 'spec') as
+      | 'spec'
+      | 'stage_report'),
+    question: String(formData.get('question') ?? tpl?.question ?? ''),
+    criteria: tpl
+      ? [...tpl.criteria]
+      : [
+          {
+            key: 'criterion_one',
+            statement: String(formData.get('criterion') ?? 'Must be clear'),
+            weight: 'must' as const,
+          },
+        ],
+    passWhen: String(formData.get('passWhen') ?? tpl?.passWhen ?? 'Pass'),
+    blockWhen: String(formData.get('blockWhen') ?? tpl?.blockWhen ?? 'Block'),
+    guidance: String(formData.get('guidance') ?? tpl?.guidance ?? ''),
+    uncertaintyPolicy: (String(
+      formData.get('uncertaintyPolicy') ?? tpl?.uncertaintyPolicy ?? 'warn',
+    ) as 'warn' | 'pass' | 'block'),
+    model: String(formData.get('model') ?? 'gpt-4o-mini'),
+    maxOutputTokens: Number(formData.get('maxOutputTokens') ?? 1200),
+  });
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/policies`);
+}
+
+export async function actionEnableRubric(formData: FormData) {
+  const { ctx } = await requireSession();
+  const rubricId = String(formData.get('rubricId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const ack = formData.get('acknowledgeSkippedRegression') === 'on';
+  const result = await enableRubric(ctx, {
+    rubricId,
+    acknowledgeSkippedRegression: ack,
+  });
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/policies`);
+}
+
+export async function actionRunGoldenSet(formData: FormData) {
+  const { ctx } = await requireSession();
+  const rubricId = String(formData.get('rubricId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const result = await runGoldenSet(ctx, rubricId);
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/policies`);
+}
+
+export async function actionAddGoldenFromVerdict(formData: FormData) {
+  const { ctx } = await requireSession();
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const itemKey = String(formData.get('itemKey') ?? '');
+  const result = await addGoldenCase(ctx, {
+    rubricId: String(formData.get('rubricId') ?? ''),
+    fromVerdictId: String(formData.get('verdictId') ?? ''),
+    label: String(formData.get('label') ?? 'from verdict'),
+    expectedOutcome: String(formData.get('expectedOutcome') ?? 'pass') as
+      | 'pass'
+      | 'warn'
+      | 'block',
+    note: String(formData.get('note') ?? '') || undefined,
+  });
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/items/${itemKey}`);
+  revalidatePath(`/projects/${projectKey}/policies`);
 }
 
 export async function actionAddStage(formData: FormData) {

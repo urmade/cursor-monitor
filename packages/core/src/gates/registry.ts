@@ -4,6 +4,7 @@ import type {
   GateTrigger,
 } from '@nexus/contracts';
 import type { GateContext } from '../conditions/evaluate';
+import type { ServiceContext } from '../context';
 
 export type GateRow = {
   id: string;
@@ -17,6 +18,8 @@ export type GateRow = {
   onFailure: 'block' | 'warn';
   enabled: boolean;
   version: number;
+  remediationBindingId?: string | null;
+  remediationMaxAttempts?: number;
 };
 
 export type GateEvalResult = {
@@ -41,6 +44,8 @@ export type EvaluatorFn = (input: {
   trigger: GateTrigger;
   /** Pending approval id if one already exists for this gate+item. */
   existingPendingApprovalId?: string | null;
+  /** Service context for evaluators that need DB / flags (agentic, visual). */
+  serviceCtx?: ServiceContext;
 }) => Promise<GateEvalResult> | GateEvalResult;
 
 const registry = new Map<GateEvaluatorKind, EvaluatorFn>();

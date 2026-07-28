@@ -19,7 +19,7 @@ export {
 } from './status/facts';
 export { upsertUserFromPassport, type PassportClaims } from './identity/upsert';
 export { createFlagReader } from './flags';
-export { checkRateLimit, resetMemoryRateLimits } from './redis/rate-limit';
+export { checkRateLimit, checkRateLimitWindow, resetMemoryRateLimits } from './redis/rate-limit';
 export * from './projects';
 export * from './workitems';
 export * from './specs';
@@ -66,6 +66,7 @@ export * from './cost';
 export * from './budgets';
 export * from './loops';
 export * from './attention';
+export * from './rubrics';
 export type {
   TransitionInput,
   AdvanceTransitionInput,

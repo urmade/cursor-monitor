@@ -29,7 +29,9 @@ type ApprovalRow = {
 
 function outcomeTone(
   outcome: string,
+  reason?: string,
 ): 'success' | 'warning' | 'danger' | 'neutral' | 'active' {
+  if (reason === 'awaiting_evaluation') return 'warning';
   switch (outcome) {
     case 'pass':
       return 'success';
@@ -43,6 +45,11 @@ function outcomeTone(
     default:
       return 'active';
   }
+}
+
+function outcomeLabel(outcome: string, reason?: string): string {
+  if (reason === 'awaiting_evaluation') return 'awaiting evaluation';
+  return outcome;
 }
 
 export function ChecksPanel({
@@ -176,23 +183,42 @@ export function ChecksPanel({
             <div className="text-xs font-medium uppercase tracking-wide text-fg-muted">
               Latest gate results
             </div>
-            {checks.map((c) => (
+            {checks.map((c) => {
+              const policy = c.evidence?.policyOverride as
+                | { from?: string; to?: string; policy?: string }
+                | null
+                | undefined;
+              return (
               <div
                 key={`${c.gateId}-${c.outcome}-${c.reason}`}
                 className="rounded-md border border-border p-3"
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone={outcomeTone(c.outcome)}>{c.outcome}</Badge>
+                  <Badge tone={outcomeTone(c.outcome, c.reason)}>
+                    {outcomeLabel(c.outcome, c.reason)}
+                  </Badge>
                   <span className="text-sm font-medium text-fg">{c.gateName}</span>
                   {c.gateVersion != null ? (
                     <span className="font-mono text-[10px] text-fg-muted">
                       v{c.gateVersion}
                     </span>
                   ) : null}
+                  {policy?.from && policy?.to && policy.from !== policy.to ? (
+                    <span className="rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning">
+                      uncertainty policy ({policy.policy}): model {policy.from} →{' '}
+                      {policy.to}
+                    </span>
+                  ) : null}
                 </div>
                 <p className="mt-1 text-xs text-fg-muted">{c.reason}</p>
+                {c.reason === 'awaiting_evaluation' ? (
+                  <p className="mt-1 text-xs text-fg-subtle">
+                    Clears automatically when the evaluation job finishes.
+                  </p>
+                ) : null}
               </div>
-            ))}
+              );
+            })}
           </div>
         ) : null}
       </PanelBody>
