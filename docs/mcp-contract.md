@@ -44,7 +44,7 @@ Errors are returned as tool results (not transport errors) so agents can read an
 { "ticket_id": "<uuid>" }
 ```
 
-Returns: `id`, `key`, `title`, `description`, `complexity`, `stage`, `labels`, `owner_class`, `status`, `spec` meta, `warnings` (open warnings with `id`/`code`/`message`/`status`/`created_at` — populated in Phase 3), `budget` (null until P4), `links.ui_url`.
+Returns: `id`, `key`, `title`, `description`, `complexity`, `stage`, `labels`, `owner_class`, `status`, `spec` meta, `warnings` (open warnings with `id`/`code`/`message`/`status`/`created_at` — populated in Phase 3), `budget` (Phase 4 spend/budget snapshot or null when budgets flag off), `loops` (Phase 5: `count`, `escalated`, `rework_cost_micro_usd`, `rework_ms`, `edges[]` with reason/trigger/cost, or null when `p5.loops` is off), `links.ui_url`.
 
 ### `get_spec`
 

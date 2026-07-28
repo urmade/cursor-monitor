@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LoopBudgetConfigSchema } from './loops';
 
 /**
  * Versioned Condition DSL (D11). Envelope is always `{ v: 1, ... }`.
@@ -146,6 +147,7 @@ export const GateEvaluatorKindSchema = z.enum([
   'human_approval',
   'budget',
   'agentic',
+  'loop_budget',
 ]);
 export type GateEvaluatorKind = z.infer<typeof GateEvaluatorKindSchema>;
 
@@ -210,11 +212,15 @@ export const AgenticConfigSchema = z
   .passthrough();
 export type AgenticConfig = z.infer<typeof AgenticConfigSchema>;
 
+export { LoopBudgetConfigSchema } from './loops';
+export type { LoopBudgetConfig } from './loops';
+
 export const GateConfigSchema = z.union([
   FieldRuleConfigSchema,
   HumanApprovalConfigSchema,
   BudgetConfigSchema,
   AgenticConfigSchema,
+  LoopBudgetConfigSchema,
 ]);
 export type GateConfig = z.infer<typeof GateConfigSchema>;
 

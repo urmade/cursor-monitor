@@ -86,6 +86,7 @@ export async function createWorkItem(
       workItemId,
       stageId: initial.id,
       seq: 1,
+      visitIndex: 1,
     });
 
     await tx

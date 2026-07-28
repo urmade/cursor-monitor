@@ -5,11 +5,13 @@ import {
   getProjectByKey,
   getProjectRole,
   listLabels,
+  listReasonCodes,
   listStages,
   listWorkItems,
   loadActiveRunElapsed,
   can,
   parseProjectBudgetSettings,
+  projectReworkStats,
 } from '@nexus/core';
 import { eq, inArray } from 'drizzle-orm';
 import { workItemLabels, labels as labelsTable } from '@nexus/db';
@@ -27,6 +29,7 @@ import {
   formatMicroUsdDisplay,
   CostSourceBadge,
   LiveDuration,
+  LoopBadge,
 } from '@nexus/ui';
 import { notFound } from 'next/navigation';
 import { TransitionWorkItemMenu } from '../../../../../src/components/TransitionWorkItemMenu';
@@ -48,16 +51,25 @@ export default async function BoardPage({
   const project = await getProjectByKey(ctx, projectKey);
   if (!project.ok) notFound();
 
-  const [stagesResult, itemsResult, labelsResult, role] = await Promise.all([
-    listStages(ctx, project.value.id),
-    listWorkItems(ctx, project.value.id),
-    listLabels(ctx, project.value.id),
-    getProjectRole(ctx, project.value.id),
-  ]);
+  const [stagesResult, itemsResult, labelsResult, role, reasonCodesR, reworkR] =
+    await Promise.all([
+      listStages(ctx, project.value.id),
+      listWorkItems(ctx, project.value.id),
+      listLabels(ctx, project.value.id),
+      getProjectRole(ctx, project.value.id),
+      listReasonCodes(ctx, project.value.id),
+      projectReworkStats(ctx, project.value.id, 30),
+    ]);
 
   const stages = stagesResult.ok ? stagesResult.value : [];
   const items = itemsResult.ok ? itemsResult.value : [];
   const labels = labelsResult.ok ? labelsResult.value : [];
+  const reasonCodes = (reasonCodesR.ok ? reasonCodesR.value : []).map((r) => ({
+    code: r.code,
+    label: r.label,
+    requiresNote: r.requiresNote,
+  }));
+  const stagePos = new Map(stages.map((s) => [s.id, s.position]));
   const canCreate = can(ctx.actor, 'work_item.create', {
     type: 'work_item',
     projectId: project.value.id,
@@ -115,6 +127,28 @@ export default async function BoardPage({
 
   return (
     <div className="space-y-4">
+      {reworkR.ok ? (
+        <Panel>
+          <PanelBody className="flex flex-wrap items-center justify-between gap-3 text-sm">
+            <div>
+              <div className="font-medium">Rework rate (30d)</div>
+              <div className="text-fg-muted text-xs">
+                Share of items with at least one loop — process signal, not a
+                people score.
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-lg font-medium">
+                {Math.round(reworkR.value.reworkRate * 100)}%
+              </div>
+              <div className="text-xs text-fg-muted">
+                {reworkR.value.loopedItemCount}/{reworkR.value.itemCount} items
+              </div>
+            </div>
+          </PanelBody>
+        </Panel>
+      ) : null}
+
       {canCreate ? (
         <Panel>
           <PanelBody>
@@ -207,7 +241,11 @@ export default async function BoardPage({
                             {item.key}
                           </div>
                           <div className="mt-1 text-sm leading-snug text-fg">
-                            {item.title}
+                            {item.title}{' '}
+                            <LoopBadge
+                              count={item.loopCount ?? 0}
+                              escalated={item.loopEscalated ?? false}
+                            />
                           </div>
                         </Link>
                         {active ? (
@@ -258,7 +296,13 @@ export default async function BoardPage({
                             projectKey={projectKey}
                             itemKey={item.key}
                             currentStageId={stage.id}
-                            stages={stages}
+                            currentStagePosition={stagePos.get(stage.id) ?? 0}
+                            stages={stages.map((s) => ({
+                              id: s.id,
+                              name: s.name,
+                              position: s.position,
+                            }))}
+                            reasonCodes={reasonCodes}
                             action={actionTransitionWorkItem}
                           />
                         ) : null}

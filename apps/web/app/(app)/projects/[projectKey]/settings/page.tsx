@@ -5,6 +5,7 @@ import {
   listBindings,
   listLabels,
   listPromptTemplates,
+  listReasonCodes,
   listStages,
   listWorkItems,
   parseProjectBudgetSettings,
@@ -23,6 +24,7 @@ import { notFound } from 'next/navigation';
 import {
   actionAddStage,
   actionArchiveBinding,
+  actionArchiveReasonCode,
   actionCreateDefaultPrompt,
   actionRenameStage,
   actionTestResolveBinding,
@@ -30,6 +32,7 @@ import {
   actionUpdateProject,
   actionUpsertBinding,
   actionUpsertLabel,
+  actionUpsertReasonCode,
 } from '../../../../../src/server/actions';
 import { requireSession } from '../../../../../src/server/session';
 
@@ -70,18 +73,21 @@ export default async function SettingsPage({
     role,
   });
 
-  const [stagesR, labelsR, bindingsR, templatesR, itemsR] = await Promise.all([
-    listStages(ctx, project.value.id),
-    listLabels(ctx, project.value.id),
-    listBindings(ctx, project.value.id),
-    listPromptTemplates(ctx, project.value.id),
-    listWorkItems(ctx, project.value.id),
-  ]);
+  const [stagesR, labelsR, bindingsR, templatesR, itemsR, reasonsR] =
+    await Promise.all([
+      listStages(ctx, project.value.id),
+      listLabels(ctx, project.value.id),
+      listBindings(ctx, project.value.id),
+      listPromptTemplates(ctx, project.value.id),
+      listWorkItems(ctx, project.value.id),
+      listReasonCodes(ctx, project.value.id),
+    ]);
   const stages = stagesR.ok ? stagesR.value : [];
   const labels = labelsR.ok ? labelsR.value : [];
   const bindings = bindingsR.ok ? bindingsR.value : [];
   const templates = templatesR.ok ? templatesR.value : [];
   const items = itemsR.ok ? itemsR.value : [];
+  const reasons = reasonsR.ok ? reasonsR.value : [];
   const budgetSettings = parseProjectBudgetSettings(
     project.value.settings as Record<string, unknown>,
   );
@@ -229,6 +235,63 @@ export default async function SettingsPage({
           </PanelBody>
         </Panel>
       ) : null}
+
+      <Panel>
+        <PanelHeader>
+          <span className="text-sm font-medium">Loop reason codes</span>
+        </PanelHeader>
+        <PanelBody className="space-y-3">
+          <ul className="space-y-2 text-sm">
+            {reasons.map((r) => (
+              <li
+                key={r.id}
+                className="flex flex-wrap items-center justify-between gap-2 border-b border-border py-2"
+              >
+                <div>
+                  <div className="font-medium">{r.label}</div>
+                  <div className="font-mono text-[11px] text-fg-subtle">
+                    {r.code}
+                    {r.requiresNote ? ' · note required' : ''}
+                  </div>
+                </div>
+                {canUpdate ? (
+                  <form action={actionArchiveReasonCode}>
+                    <input type="hidden" name="id" value={r.id} />
+                    <input type="hidden" name="projectKey" value={projectKey} />
+                    <Button type="submit" variant="ghost" size="sm">
+                      Archive
+                    </Button>
+                  </form>
+                ) : null}
+              </li>
+            ))}
+            {reasons.length === 0 ? (
+              <li className="text-sm text-fg-muted">No reason codes seeded yet.</li>
+            ) : null}
+          </ul>
+          {canUpdate ? (
+            <form
+              action={actionUpsertReasonCode}
+              className="grid gap-2 border-t border-border pt-3"
+            >
+              <input type="hidden" name="projectId" value={project.value.id} />
+              <input type="hidden" name="projectKey" value={projectKey} />
+              <Field label="Code">
+                <Input name="code" required placeholder="custom_reason" className="font-mono text-xs" />
+              </Field>
+              <Field label="Label">
+                <Input name="label" required placeholder="Custom reason" />
+              </Field>
+              <label className="flex items-center gap-2 text-xs text-fg-muted">
+                <input type="checkbox" name="requiresNote" /> Requires note
+              </label>
+              <Button type="submit" className="w-fit" size="sm">
+                Add / update reason
+              </Button>
+            </form>
+          ) : null}
+        </PanelBody>
+      </Panel>
 
       <Panel>
         <PanelHeader>

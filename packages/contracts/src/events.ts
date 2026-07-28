@@ -62,6 +62,10 @@ export const EventTypeSchema = z.enum([
   'cost.rollup_drift',
   'budget.item_overridden',
   'budget.threshold_crossed',
+  // Phase 5
+  'loop.detected',
+  'loop.escalated',
+  'loop.edge_closed',
 ]);
 
 export type EventType = z.infer<typeof EventTypeSchema>;

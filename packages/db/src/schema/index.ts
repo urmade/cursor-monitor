@@ -7,3 +7,4 @@ export * from './bindings';
 export * from './runs';
 export * from './gates';
 export * from './cost';
+export * from './loops';

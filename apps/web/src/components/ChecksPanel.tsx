@@ -308,6 +308,8 @@ export function WhyCantMove({
                 <input type="hidden" name="expectedVersion" value={expectedVersion} />
                 <input type="hidden" name="projectKey" value={projectKey} />
                 <input type="hidden" name="itemKey" value={itemKey} />
+                <input type="hidden" name="kind" value="advance" />
+                <input type="hidden" name="reasonCode" value="gate_override" />
                 <input
                   name="overrideReason"
                   required

@@ -2,6 +2,9 @@ import {
   BudgetConfigSchema,
   FieldRuleConfigSchema,
   HumanApprovalConfigSchema,
+  LoopBudgetConfigSchema,
+  countForLoopBudgetScope,
+  resolveLoopBudgetOutcome,
   unwrapCondition,
   type GateTrigger,
 } from '@nexus/contracts';
@@ -192,6 +195,110 @@ function budgetGate(input: {
   };
 }
 
+/**
+ * Loop budget gate — warn / escalate / optional block based on return counts.
+ * Counts come from the gate's configured scope (item / stage / pair), not
+ * whichever transition happens to be pending.
+ */
+function loopBudgetGate(input: {
+  gate: GateRow;
+  ctx: import('../conditions/evaluate').GateContext;
+}): GateEvalResult {
+  const started = Date.now();
+  const parsed = LoopBudgetConfigSchema.safeParse(input.gate.config);
+  if (!parsed.success) {
+    return {
+      gateId: input.gate.id,
+      gateName: input.gate.name,
+      gateVersion: input.gate.version,
+      outcome: 'error',
+      reason: 'Invalid loop_budget config',
+      evidence: { issues: parsed.error.flatten() },
+      durationMs: Date.now() - started,
+    };
+  }
+  const config = parsed.data;
+  const count = countForLoopBudgetScope({
+    scope: config.scope,
+    itemLoopCount: input.ctx.loops.itemLoopCount ?? input.ctx.loops.count,
+    edges: input.ctx.loops.edges ?? [],
+    stageId: config.stageId,
+    fromStageId: config.fromStageId,
+    toStageId: config.toStageId,
+    prospectiveReturn: input.ctx.loops.prospectiveReturn ?? null,
+  });
+
+  const message =
+    config.message ||
+    `Loop budget (${config.scope}) at ${count} return${count === 1 ? '' : 's'}`;
+
+  const evidence = {
+    scope: config.scope,
+    count,
+    warnAt: config.warnAt,
+    escalateAt: config.escalateAt,
+    blockAt: config.blockAt ?? null,
+    stageId: config.stageId ?? null,
+    fromStageId: config.fromStageId ?? null,
+    toStageId: config.toStageId ?? null,
+  };
+
+  const outcome = resolveLoopBudgetOutcome({
+    count,
+    warnAt: config.warnAt,
+    escalateAt: config.escalateAt,
+    blockAt: config.blockAt,
+  });
+
+  if (outcome === 'block') {
+    return {
+      gateId: input.gate.id,
+      gateName: input.gate.name,
+      gateVersion: input.gate.version,
+      outcome: 'block',
+      reason: message,
+      evidence: { ...evidence, escalate: true },
+      durationMs: Date.now() - started,
+    };
+  }
+
+  if (outcome === 'escalate') {
+    return {
+      gateId: input.gate.id,
+      gateName: input.gate.name,
+      gateVersion: input.gate.version,
+      outcome: 'warn',
+      reason: message,
+      evidence: { ...evidence, escalate: true },
+      warningCode: 'loop.escalated',
+      durationMs: Date.now() - started,
+    };
+  }
+
+  if (outcome === 'warn') {
+    return {
+      gateId: input.gate.id,
+      gateName: input.gate.name,
+      gateVersion: input.gate.version,
+      outcome: 'warn',
+      reason: message,
+      evidence: { ...evidence, escalate: false },
+      warningCode: 'loop.budget',
+      durationMs: Date.now() - started,
+    };
+  }
+
+  return {
+    gateId: input.gate.id,
+    gateName: input.gate.name,
+    gateVersion: input.gate.version,
+    outcome: 'pass',
+    reason: 'Within loop budget',
+    evidence,
+    durationMs: Date.now() - started,
+  };
+}
+
 function stubEvaluator(
   kind: 'agentic',
 ): (input: { gate: GateRow }) => GateEvalResult {
@@ -210,6 +317,7 @@ export function ensureDefaultEvaluatorsRegistered(): void {
   registerEvaluator('field_rule', fieldRule);
   registerEvaluator('human_approval', humanApproval);
   registerEvaluator('budget', budgetGate);
+  registerEvaluator('loop_budget', loopBudgetGate);
   registerEvaluator('agentic', stubEvaluator('agentic'));
 }
 

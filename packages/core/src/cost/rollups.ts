@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import {
+  loopEdges,
   projects,
   stageInstances,
   workItems,
@@ -45,6 +46,20 @@ export async function applyCostRollups(
     })
     .where(eq(stageInstances.id, input.stageInstanceId));
 
+  const stageInstance = await db.query.stageInstances.findFirst({
+    where: eq(stageInstances.id, input.stageInstanceId),
+  });
+  const isRework = (stageInstance?.visitIndex ?? 1) > 1;
+
+  // Keep per-edge cost in sync with the stage instance — including late
+  // provider-actual deltas that land after the item already left the stage.
+  if (stageInstance) {
+    await db
+      .update(loopEdges)
+      .set({ costMicroUsd: stageInstance.costMicroUsd })
+      .where(eq(loopEdges.toStageInstanceId, input.stageInstanceId));
+  }
+
   const item = await db.query.workItems.findFirst({
     where: eq(workItems.id, input.workItemId),
   });
@@ -54,6 +69,9 @@ export async function applyCostRollups(
     .update(workItems)
     .set({
       spendMicroUsd: sql`${workItems.spendMicroUsd} + ${delta}`,
+      ...(isRework
+        ? { reworkCostMicroUsd: sql`${workItems.reworkCostMicroUsd} + ${delta}` }
+        : {}),
       spendSource: nextItemSource,
       updatedAt: new Date(),
     })
@@ -167,6 +185,37 @@ export async function recomputeRollupsForProject(
       });
     }
   }
+
+  const reworkSums = await db.execute(sql`
+    select w.id,
+      w.rework_cost_micro_usd::bigint as stored,
+      coalesce(sum(si.cost_micro_usd), 0)::bigint as recomputed
+    from work_items w
+    left join stage_instances si
+      on si.work_item_id = w.id and si.visit_index > 1
+    where w.project_id = ${projectId}
+    group by w.id, w.rework_cost_micro_usd
+  `);
+  const reworkArr = reworkSums as unknown as Array<{
+    id: string;
+    stored: bigint;
+    recomputed: bigint;
+  }>;
+  for (const row of reworkArr) {
+    const stored = BigInt(row.stored);
+    const recomputed = BigInt(row.recomputed);
+    const d = stored - recomputed;
+    if (d !== BigInt(0)) {
+      drift.push({
+        scope: 'work_item_rework',
+        subjectId: row.id,
+        drift: d,
+        storedMicroUsd: stored,
+        recomputedMicroUsd: recomputed,
+      });
+    }
+  }
+
   if (projArr[0]) {
     const stored = BigInt(projArr[0].stored);
     const recomputed = BigInt(projArr[0].recomputed);
@@ -181,5 +230,41 @@ export async function recomputeRollupsForProject(
       });
     }
   }
+
+  // Per-edge costs must match their stage instance (repair late deltas / drift).
+  const edgeSums = await db.execute(sql`
+    select le.id,
+      coalesce(le.cost_micro_usd, 0)::bigint as stored,
+      coalesce(si.cost_micro_usd, 0)::bigint as recomputed
+    from loop_edges le
+    join work_items w on w.id = le.work_item_id
+    left join stage_instances si on si.id = le.to_stage_instance_id
+    where w.project_id = ${projectId}
+      and le.to_stage_instance_id is not null
+  `);
+  const edgeArr = edgeSums as unknown as Array<{
+    id: string;
+    stored: bigint;
+    recomputed: bigint;
+  }>;
+  for (const row of edgeArr) {
+    const stored = BigInt(row.stored);
+    const recomputed = BigInt(row.recomputed);
+    const d = stored - recomputed;
+    if (d !== BigInt(0)) {
+      drift.push({
+        scope: 'loop_edge',
+        subjectId: row.id,
+        drift: d,
+        storedMicroUsd: stored,
+        recomputedMicroUsd: recomputed,
+      });
+      await db
+        .update(loopEdges)
+        .set({ costMicroUsd: recomputed })
+        .where(eq(loopEdges.id, row.id));
+    }
+  }
+
   return { drift };
 }

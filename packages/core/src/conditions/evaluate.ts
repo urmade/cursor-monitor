@@ -41,8 +41,18 @@ export type GateContext = {
     openCodes: string[];
   };
   loops: {
+    /** Stored item loop_count (no prospective +1). */
     count: number;
     countFromStage: number;
+    /** Same as count — kept for older condition refs. */
+    itemLoopCount?: number;
+    /** Prospective count after a pending return edge (for loop_budget item scope). */
+    prospectiveCount?: number;
+    /** Deprecated precomputed fields — prefer edges + countForLoopBudgetScope. */
+    countForStage?: number;
+    countForPair?: number;
+    edges?: Array<{ fromStageId: string; toStageId: string }>;
+    prospectiveReturn?: { fromStageId: string; toStageId: string } | null;
   };
   budget: {
     itemSpentRatio: number | null;

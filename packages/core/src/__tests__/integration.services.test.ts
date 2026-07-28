@@ -120,15 +120,20 @@ describe.runIf(hasDb)('phase 1 services integration', () => {
       version = moved.value.version;
     }
 
-    // deliberate backward move from last to previous
+    // deliberate backward move from last to previous (return edge — reason required)
     const backward = await transitionWorkItem(
       ownerCtx,
       item.value.id,
-      { toStageId: ordered[ordered.length - 2]!.id, note: 'rework' },
+      {
+        kind: 'return',
+        toStageId: ordered[ordered.length - 2]!.id,
+        reasonCode: 'human_direction',
+        note: 'rework',
+      },
       version,
     );
     expect(backward.ok).toBe(true);
-    if (!backward.ok) return;
+    if (!backward.ok) throw new Error(backward.error.message);
 
     const history = await listProjectEvents(ownerCtx, alpha.value.id, {
       workItemId: item.value.id,

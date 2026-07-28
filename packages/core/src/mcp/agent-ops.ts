@@ -313,6 +313,27 @@ export async function getTicketForAgent(
     budgetPayload = null;
   }
 
+  let loopsPayload: Record<string, unknown> | null = null;
+  try {
+    const { getLoopSummary } = await import('../loops');
+    const summary = await getLoopSummary(ctx, ticketId);
+    if (summary.ok) {
+      const last = summary.value.edges.at(-1);
+      loopsPayload = {
+        count: summary.value.count,
+        last_reason: last?.reasonCode ?? null,
+        escalated: summary.value.escalated,
+        rework_cost_micro_usd: summary.value.reworkCostMicroUsd.toString(),
+      };
+    }
+  } catch {
+    loopsPayload = {
+      count: item.loopCount ?? 0,
+      last_reason: null,
+      escalated: item.loopEscalated ?? false,
+    };
+  }
+
   return ok({
     id: item.id,
     key: item.key,
@@ -328,6 +349,7 @@ export async function getTicketForAgent(
     spec: specMeta,
     warnings: warningPayload,
     budget: budgetPayload,
+    loops: loopsPayload,
     links: {
       ui_url: `${base.replace(/\/$/, '')}/projects/${project?.key}/items/${item.key}`,
     },

@@ -76,6 +76,13 @@ export {
 export { AppShell, Breadcrumb } from './patterns/AppShell';
 export { LiveDuration, type LiveDurationProps } from './patterns/LiveDuration';
 export {
+  JourneyRibbon,
+  type JourneyRibbonProps,
+  type JourneyRibbonNode,
+  type JourneyRibbonArc,
+} from './patterns/JourneyRibbon';
+export { LoopBadge } from './patterns/LoopBadge';
+export {
   CostSourceBadge,
   formatMicroUsdDisplay,
   type CostSourceLabel,

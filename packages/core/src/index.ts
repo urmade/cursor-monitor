@@ -64,3 +64,9 @@ export {
 } from './approvals';
 export * from './cost';
 export * from './budgets';
+export * from './loops';
+export type {
+  TransitionInput,
+  AdvanceTransitionInput,
+  ReturnTransitionInput,
+} from './workitems/transition';

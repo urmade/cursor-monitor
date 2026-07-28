@@ -72,6 +72,7 @@ Every phase document uses the same shape so they can be diffed, reviewed, and pi
 | 2 — The agent loop | Done (PR #13; stacked base for Phase 3) |
 | 3 — Process enforcement | Done |
 | 4 — Economics | Done |
-| 5–9 | Planned |
+| 5 — Loops and rework | In progress |
+| 6–9 | Planned |
 
 Update this table as phases move to In progress / Done, and record deviations in the phase document rather than in a separate changelog — the plan is the living document.

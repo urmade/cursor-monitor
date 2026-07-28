@@ -160,6 +160,7 @@ export async function loadStatusFacts(
         }
       : null,
     budgetState,
+    loopEscalated: item?.loopEscalated ?? false,
   };
 }
 

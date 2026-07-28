@@ -25,7 +25,7 @@ export const gates = pgTable(
     name: text('name').notNull(),
     description: text('description').notNull().default(''),
     evaluator: text('evaluator')
-      .$type<'field_rule' | 'human_approval' | 'budget' | 'agentic'>()
+      .$type<'field_rule' | 'human_approval' | 'budget' | 'agentic' | 'loop_budget'>()
       .notNull(),
     trigger: jsonb('trigger').$type<Record<string, unknown>>().notNull(),
     appliesWhen: jsonb('applies_when').$type<Record<string, unknown> | null>(),

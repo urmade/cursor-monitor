@@ -80,16 +80,27 @@ export async function actionTransitionWorkItem(formData: FormData) {
   const itemKey = String(formData.get('itemKey') ?? '');
   const note = String(formData.get('note') ?? '') || undefined;
   const overrideReason = String(formData.get('overrideReason') ?? '').trim();
-  const result = await transitionWorkItem(
-    ctx,
-    id,
-    {
-      toStageId,
-      note,
-      ...(overrideReason ? { override: { reason: overrideReason } } : {}),
-    },
-    expectedVersion,
-  );
+  const kind = String(formData.get('kind') ?? 'advance');
+  const reasonCode = String(formData.get('reasonCode') ?? '') || undefined;
+
+  const input =
+    kind === 'return'
+      ? {
+          kind: 'return' as const,
+          toStageId,
+          reasonCode: reasonCode ?? '',
+          note,
+          ...(overrideReason ? { override: { reason: overrideReason } } : {}),
+        }
+      : {
+          kind: 'advance' as const,
+          toStageId,
+          reasonCode,
+          note,
+          ...(overrideReason ? { override: { reason: overrideReason } } : {}),
+        };
+
+  const result = await transitionWorkItem(ctx, id, input, expectedVersion);
   if (!result.ok) {
     if (result.error.code === 'gate_blocked') {
       const blocked = (result.error.details?.blockedBy as Array<{ reason: string }>) ?? [];
@@ -109,11 +120,41 @@ export async function actionDryRunGates(formData: FormData) {
   const { ctx } = await requireSession();
   const workItemId = String(formData.get('workItemId') ?? '');
   const toStageId = String(formData.get('toStageId') ?? '');
-  const { getWorkItem } = await import('@nexus/core');
+  const {
+    getWorkItem,
+    countPriorVisits,
+    isReturnEdge,
+    listStages,
+  } = await import('@nexus/core');
   const item = await getWorkItem(ctx, workItemId);
   if (!item.ok) {
     return { ok: false as const, error: item.error.message };
   }
+
+  let prospectiveReturn:
+    | { fromStageId: string; toStageId: string }
+    | undefined;
+  const stages = await listStages(ctx, item.value.projectId);
+  if (stages.ok && item.value.currentStageId) {
+    const from = stages.value.find((s) => s.id === item.value.currentStageId);
+    const to = stages.value.find((s) => s.id === toStageId);
+    if (from && to) {
+      const direction =
+        to.position > from.position
+          ? 'forward'
+          : to.position < from.position
+            ? 'backward'
+            : 'lateral';
+      const prior = await countPriorVisits(ctx.db, workItemId, toStageId);
+      if (isReturnEdge({ direction, priorVisitCount: prior })) {
+        prospectiveReturn = {
+          fromStageId: item.value.currentStageId,
+          toStageId,
+        };
+      }
+    }
+  }
+
   const batch = await evaluateGates(ctx, {
     workItemId,
     trigger: {
@@ -122,6 +163,7 @@ export async function actionDryRunGates(formData: FormData) {
       toStageId,
     },
     dryRun: true,
+    prospectiveReturn,
   });
   if (!batch.ok) {
     return { ok: false as const, error: batch.error.message };
@@ -147,9 +189,11 @@ export async function actionCreateGate(formData: FormData) {
     | 'field_rule'
     | 'human_approval'
     | 'budget'
+    | 'loop_budget'
     | 'agentic';
   const triggerKind = String(formData.get('triggerKind') ?? 'on_transition');
   const toStageId = String(formData.get('toStageId') ?? '');
+  const fromStageId = String(formData.get('fromStageId') ?? '') || undefined;
   const labelKey = String(formData.get('labelKey') ?? '');
   const onFailure = String(formData.get('onFailure') ?? 'block') as 'block' | 'warn';
 
@@ -159,7 +203,11 @@ export async function actionCreateGate(formData: FormData) {
   } else if (triggerKind === 'on_run_finished') {
     trigger = { kind: 'on_run_finished' as const };
   } else {
-    trigger = { kind: 'on_transition' as const, toStageId };
+    trigger = {
+      kind: 'on_transition' as const,
+      toStageId,
+      ...(fromStageId ? { fromStageId } : {}),
+    };
   }
 
   let config: Record<string, unknown>;
@@ -201,6 +249,30 @@ export async function actionCreateGate(formData: FormData) {
         code,
       };
     }
+  } else if (evaluator === 'loop_budget') {
+    const scope = String(formData.get('loopScope') ?? 'item') as
+      | 'item'
+      | 'stage'
+      | 'stage_pair';
+    const warnAt = Number(formData.get('warnAt') ?? 2);
+    const escalateAt = Number(formData.get('escalateAt') ?? 3);
+    const blockAtRaw = String(formData.get('blockAt') ?? '').trim();
+    config = {
+      scope,
+      warnAt: Number.isFinite(warnAt) ? warnAt : 2,
+      escalateAt: Number.isFinite(escalateAt) ? escalateAt : 3,
+      ...(blockAtRaw ? { blockAt: Number(blockAtRaw) } : {}),
+      message: String(formData.get('message') ?? 'Loop budget exceeded'),
+      ...(formData.get('loopStageId')
+        ? { stageId: String(formData.get('loopStageId')) }
+        : {}),
+      ...(formData.get('loopFromStageId')
+        ? { fromStageId: String(formData.get('loopFromStageId')) }
+        : {}),
+      ...(formData.get('loopToStageId')
+        ? { toStageId: String(formData.get('loopToStageId')) }
+        : {}),
+    };
   } else {
     config = {};
   }
@@ -656,4 +728,30 @@ export async function actionSetItemBudget(formData: FormData) {
   if (!result.ok) throw new Error(result.error.message);
   revalidatePath(`/projects/${projectKey}/items/${itemKey}`);
   revalidatePath(`/projects/${projectKey}/board`);
+}
+
+export async function actionUpsertReasonCode(formData: FormData) {
+  const { ctx } = await requireSession();
+  const { upsertReasonCode } = await import('@nexus/core');
+  const projectId = String(formData.get('projectId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const result = await upsertReasonCode(ctx, {
+    projectId,
+    code: String(formData.get('code') ?? ''),
+    label: String(formData.get('label') ?? ''),
+    requiresNote: formData.get('requiresNote') === 'on',
+    position: Number(formData.get('position') ?? 100),
+  });
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/settings`);
+}
+
+export async function actionArchiveReasonCode(formData: FormData) {
+  const { ctx } = await requireSession();
+  const { archiveReasonCode } = await import('@nexus/core');
+  const id = String(formData.get('id') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const result = await archiveReasonCode(ctx, id);
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/settings`);
 }

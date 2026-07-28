@@ -1,5 +1,5 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import type { GateTrigger } from '@nexus/contracts';
+import type { GateTrigger, LoopTrigger } from '@nexus/contracts';
 import {
   interventions,
   newId,
@@ -14,6 +14,17 @@ import { coreError, type CoreError } from '../errors';
 import { emit } from '../events/emit';
 import { evaluateGates } from '../gates/evaluate';
 import { withdrawPendingApprovals } from '../approvals';
+import {
+  clearLoopEscalationInTx,
+  closeOpenLoopEdgesInTx,
+  countPriorVisits,
+  isReturnEdge,
+  nextVisitIndex,
+  recordReturnEdgeInTx,
+  recomputeReworkMsInTx,
+  resolveReturnReason,
+  setLoopEscalatedInTx,
+} from '../loops';
 import { getProjectRole } from '../projects/members';
 import { err, ok, type Result } from '../result';
 import type { WorkItem } from './create';
@@ -21,19 +32,45 @@ import { computeTransitionDirection } from './transition-direction';
 
 export type TransitionError = CoreError;
 
-/** Public transition input — adapters must never pass internal gate-skip flags. */
-export type TransitionInput = {
+type TransitionBase = {
   toStageId: string;
   note?: string;
-  reasonCode?: string;
   /** Owner/maintainer override — skips blocking gates; records intervention. */
   override?: { reason: string };
 };
+
+/**
+ * Discriminated union: explicit returns require a reason code at the type level.
+ * Callers that do not know direction yet may use AdvanceTransitionInput; the
+ * service still rejects unexplained return edges at runtime.
+ */
+export type AdvanceTransitionInput = TransitionBase & {
+  kind?: 'advance';
+  reasonCode?: string;
+};
+
+export type ReturnTransitionInput = TransitionBase & {
+  kind: 'return';
+  reasonCode: string;
+};
+
+export type TransitionInput = AdvanceTransitionInput | ReturnTransitionInput;
+
+/** Public transition input — adapters must never pass internal gate-skip flags. */
+export type { TransitionInput as PublicTransitionInput };
 
 type AfterGatesOpts = {
   gateBatchId?: string;
   gateEvaluationId?: string;
 };
+
+/** Thrown inside a drizzle transaction so the whole tx rolls back (B5). */
+class StaleVersionConflict extends Error {
+  constructor() {
+    super('stale_version');
+    this.name = 'StaleVersionConflict';
+  }
+}
 
 export async function transitionWorkItem(
   ctx: ServiceContext,
@@ -64,6 +101,22 @@ export async function transitionWorkItemAfterGates(
   });
 }
 
+/**
+ * Internal-only: gate/system-initiated return with a trusted trigger.
+ * Not on the public TransitionInput — adapters cannot forge gate_block reasons.
+ */
+export async function transitionWorkItemInternal(
+  ctx: ServiceContext,
+  id: string,
+  input: TransitionInput & { loopTrigger: LoopTrigger },
+  expectedVersion: number,
+): Promise<Result<WorkItem, TransitionError>> {
+  return transitionWorkItemImpl(ctx, id, input, expectedVersion, {
+    skipGateEvaluation: false,
+    loopTrigger: input.loopTrigger,
+  });
+}
+
 async function transitionWorkItemImpl(
   ctx: ServiceContext,
   id: string,
@@ -73,6 +126,8 @@ async function transitionWorkItemImpl(
     skipGateEvaluation: boolean;
     gateBatchId?: string;
     gateEvaluationId?: string;
+    /** Trusted internal trigger only — never from public adapters. */
+    loopTrigger?: LoopTrigger;
   },
 ): Promise<Result<WorkItem, TransitionError>> {
   const existing = await ctx.db.query.workItems.findFirst({
@@ -115,6 +170,31 @@ async function transitionWorkItemImpl(
     toStage.position,
   );
 
+  const loopsEnabled = await ctx.flags.isEnabled('p5.loops', existing.projectId);
+
+  const priorVisits = await countPriorVisits(ctx.db, id, toStage.id);
+  const willBeReturn =
+    loopsEnabled &&
+    isReturnEdge({ direction, priorVisitCount: priorVisits });
+
+  const loopTrigger: LoopTrigger = opts.loopTrigger ?? {
+    kind: 'human',
+    by: ctx.actor.kind === 'human' ? ctx.actor.userId : ctx.actor.kind,
+  };
+
+  let resolvedReason: { reasonCode: string; note: string | null } | null = null;
+  if (willBeReturn || input.kind === 'return') {
+    const reasonResult = await resolveReturnReason(ctx, existing.projectId, {
+      reasonCode: input.reasonCode,
+      note: input.note,
+      triggerKind: loopTrigger.kind,
+    });
+    if (!reasonResult.ok) return reasonResult;
+    if (willBeReturn) {
+      resolvedReason = reasonResult.value;
+    }
+  }
+
   const trigger: GateTrigger = {
     kind: 'on_transition',
     fromStageId: existing.currentStageId,
@@ -124,10 +204,38 @@ async function transitionWorkItemImpl(
   let gateEvaluationId: string | null = opts.gateEvaluationId ?? null;
   let gateBatchId: string | null = opts.gateBatchId ?? null;
   let overridden = false;
+  let escalateFromGate: {
+    gateId: string;
+    count: number;
+    message: string;
+  } | null = null;
 
   if (!opts.skipGateEvaluation) {
-    const batch = await evaluateGates(ctx, { workItemId: id, trigger });
+    const batch = await evaluateGates(ctx, {
+      workItemId: id,
+      trigger,
+      prospectiveReturn: willBeReturn
+        ? {
+            fromStageId: existing.currentStageId,
+            toStageId: toStage.id,
+          }
+        : undefined,
+    });
     if (!batch.ok) return batch;
+
+    for (const r of batch.value.results) {
+      if (
+        r.evaluator === 'loop_budget' &&
+        r.evidence?.escalate === true &&
+        typeof r.gateId === 'string'
+      ) {
+        escalateFromGate = {
+          gateId: r.gateId,
+          count: Number(r.evidence.count ?? 0),
+          message: r.reason,
+        };
+      }
+    }
 
     const shouldBlock =
       batch.value.outcome === 'block' && !batch.value.observeOnly;
@@ -204,89 +312,162 @@ async function transitionWorkItemImpl(
     }
   }
 
-  const updated = await ctx.db.transaction(async (tx) => {
-    const now = new Date();
+  let updated: WorkItem;
+  try {
+    updated = await ctx.db.transaction(async (tx) => {
+      const now = ctx.clock();
+      const leavingInstanceId = existing.currentStageInstanceId;
 
-    if (existing.currentStageInstanceId) {
-      await tx
-        .update(stageInstances)
-        .set({ exitedAt: now })
-        .where(eq(stageInstances.id, existing.currentStageInstanceId));
-    }
+      if (leavingInstanceId) {
+        await tx
+          .update(stageInstances)
+          .set({ exitedAt: now })
+          .where(eq(stageInstances.id, leavingInstanceId));
 
-    const last = await tx.query.stageInstances.findFirst({
-      where: eq(stageInstances.workItemId, id),
-      orderBy: [desc(stageInstances.seq)],
-    });
-    const nextSeq = (last?.seq ?? 0) + 1;
-    const instanceId = newId();
+        // Absolute recompute — never increment (B2).
+        await recomputeReworkMsInTx(tx, id, now);
 
-    await tx.insert(stageInstances).values({
-      id: instanceId,
-      workItemId: id,
-      stageId: toStage.id,
-      seq: nextSeq,
-      enteredAt: now,
-    });
+        if (loopsEnabled) {
+          await closeOpenLoopEdgesInTx(tx, {
+            orgId: ctx.orgId,
+            projectId: existing.projectId,
+            workItemId: id,
+            stageInstanceId: leavingInstanceId,
+            actor: ctx.actor,
+            closedAt: now,
+          });
+        }
+      }
 
-    await tx.insert(transitions).values({
-      id: newId(),
-      workItemId: id,
-      fromStageId: existing.currentStageId,
-      toStageId: toStage.id,
-      direction,
-      reasonCode: overridden
+      if (loopsEnabled && direction === 'forward' && existing.loopEscalated) {
+        await clearLoopEscalationInTx(tx, id);
+      }
+
+      const last = await tx.query.stageInstances.findFirst({
+        where: eq(stageInstances.workItemId, id),
+        orderBy: [desc(stageInstances.seq)],
+      });
+      const nextSeq = (last?.seq ?? 0) + 1;
+      const instanceId = newId();
+      const visitIndex = await nextVisitIndex(tx, id, toStage.id);
+
+      await tx.insert(stageInstances).values({
+        id: instanceId,
+        workItemId: id,
+        stageId: toStage.id,
+        seq: nextSeq,
+        visitIndex,
+        isRework: visitIndex > 1,
+        enteredAt: now,
+      });
+
+      const transitionId = newId();
+      const reasonCode = overridden
         ? 'gate_override'
-        : (input.reasonCode ?? null),
-      note: overridden
+        : resolvedReason?.reasonCode ?? input.reasonCode ?? null;
+      const note = overridden
         ? input.override!.reason
-        : (input.note ?? null),
-      actor: {
-        ...ctx.actor,
-        ...(overridden ? { override: true } : {}),
-      },
-      gateEvaluationId,
-      gateBatchId,
-    });
+        : resolvedReason?.note ?? (input.note ?? null);
 
-    const [row] = await tx
-      .update(workItems)
-      .set({
-        currentStageId: toStage.id,
-        currentStageInstanceId: instanceId,
-        ownerClass: toStage.defaultOwnerClass,
-        version: existing.version + 1,
-        updatedAt: now,
-      })
-      .where(and(eq(workItems.id, id), eq(workItems.version, expectedVersion)))
-      .returning();
-
-    if (!row) return null;
-
-    await emit(tx, {
-      orgId: ctx.orgId,
-      projectId: existing.projectId,
-      type: 'work_item.stage_changed',
-      subjectType: 'work_item',
-      subjectId: id,
-      actor: ctx.actor,
-      payload: {
+      await tx.insert(transitions).values({
+        id: transitionId,
+        workItemId: id,
         fromStageId: existing.currentStageId,
         toStageId: toStage.id,
         direction,
-        note: input.note ?? null,
-        reasonCode: input.reasonCode ?? null,
+        reasonCode,
+        note,
+        actor: {
+          ...ctx.actor,
+          ...(overridden ? { override: true } : {}),
+        },
         gateEvaluationId,
         gateBatchId,
-        overridden,
-      },
+        isReturnEdge: false,
+      });
+
+      if (willBeReturn && resolvedReason && existing.currentStageId) {
+        // Override path: same reason on transition + edge (not free-text forge).
+        const edgeReason = overridden
+          ? 'gate_override'
+          : resolvedReason.reasonCode;
+        const edgeNote = overridden
+          ? input.override!.reason
+          : resolvedReason.note;
+        await recordReturnEdgeInTx(tx, {
+          orgId: ctx.orgId,
+          projectId: existing.projectId,
+          workItemId: id,
+          transitionId,
+          fromStageId: existing.currentStageId,
+          toStageId: toStage.id,
+          toStageInstanceId: instanceId,
+          reasonCode: edgeReason,
+          note: edgeNote,
+          trigger: loopTrigger,
+          actor: ctx.actor,
+          occurredAt: now,
+        });
+      }
+
+      // Escalation only after a successful transition (inside the same tx).
+      if (escalateFromGate && !overridden) {
+        await setLoopEscalatedInTx(tx, {
+          orgId: ctx.orgId,
+          workItemId: id,
+          projectId: existing.projectId,
+          gateId: escalateFromGate.gateId,
+          count: escalateFromGate.count,
+          message: escalateFromGate.message,
+          actor: ctx.actor,
+          now,
+        });
+      }
+
+      const [row] = await tx
+        .update(workItems)
+        .set({
+          currentStageId: toStage.id,
+          currentStageInstanceId: instanceId,
+          ownerClass: toStage.defaultOwnerClass,
+          version: existing.version + 1,
+          updatedAt: now,
+        })
+        .where(and(eq(workItems.id, id), eq(workItems.version, expectedVersion)))
+        .returning();
+
+      // Must throw — drizzle commits on return null (B5).
+      if (!row) throw new StaleVersionConflict();
+
+      await emit(tx, {
+        orgId: ctx.orgId,
+        projectId: existing.projectId,
+        type: 'work_item.stage_changed',
+        subjectType: 'work_item',
+        subjectId: id,
+        actor: ctx.actor,
+        payload: {
+          fromStageId: existing.currentStageId,
+          toStageId: toStage.id,
+          direction,
+          note: input.note ?? null,
+          reasonCode: reasonCode,
+          gateEvaluationId,
+          gateBatchId,
+          overridden,
+          isReturnEdge: willBeReturn,
+        },
+      });
+
+      return row;
     });
-
-    return row;
-  });
-
-  if (!updated) {
-    return err(coreError('stale_version', 'Work item was modified by someone else'));
+  } catch (e) {
+    if (e instanceof StaleVersionConflict) {
+      return err(
+        coreError('stale_version', 'Work item was modified by someone else'),
+      );
+    }
+    throw e;
   }
 
   await withdrawPendingApprovals(

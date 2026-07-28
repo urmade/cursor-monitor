@@ -117,6 +117,28 @@ Only `owner`/`maintainer` (`gate.override`). Reason required. Visible forever on
 4. Admin reconciliation requires a valid team Admin key; on our tier it 401s (ADR-0007) — rely on usage-endpoint `chargedCents`.
 5. Unknown models produce `price.model_unknown` warnings and zero estimates until `model_prices` is updated.
 
+## Phase 5 — loops and rework
+
+| Surface | URL | Notes |
+|---|---|---|
+| Ticket journey + loops | `/projects/[key]/items/[itemKey]` | Ribbon, Loops panel, rework vs total spend |
+| Board badges | `/projects/[key]/board` | `↻N` / escalated `↻!`; rework-rate card |
+| Reason taxonomy | `/projects/[key]/settings` | Default codes + editor |
+| Loop budget gate | `/projects/[key]/policies` | `loop_budget` evaluator (warn / escalate / optional block) |
+
+### Feature flags
+
+- `p5.loops` — when off, transitions behave as Phase 1–4 (no reason required, no `loop_edges`). When on, return edges require a reason and counters update.
+
+### Loop counts look wrong
+
+1. Confirm `p5.loops` is enabled for the project.
+2. A backward move into a **never-visited** stage is **not** a loop (pipeline skip / reorder) — only revisits count.
+3. Compare `work_items.loop_count` to `select count(*) from loop_edges where work_item_id = …` — they must match.
+4. `visit_index` on `stage_instances` is materialised at insert; re-run `backfillLoopsForProject` if historical rows look off after a restore. The backfill **absolutely recomputes** `loop_count` / `rework_ms` (closed visits only) and inserts missing edges with deterministic ids — it is safe to re-run, but it is not a no-op on counters that were incrementally corrupted by older builds; compare `rework_ms` before/after and expect equality once the absolute formula is in place.
+5. Rework cost is spend on visits with `visit_index > 1` — it must be ≤ total `spend_micro_usd`. Reopening a stage creates a **new** stage instance; Phase 4 rollups never double-count the first visit.
+6. Escalation (`loop_escalated`) clears on the next **forward** move by design — it is attention, not a freeze.
+
 ### Running DB-backed tests locally
 
 Cloud agent VMs do **not** have Docker. Use apt Postgres (installs in ~10s):
@@ -132,4 +154,4 @@ pnpm db:exec-migrations
 pnpm test
 ```
 
-Integration suites (`integration.services.test.ts`, `gates.integration.test.ts`, `cost.integration.test.ts`, `cost.rollups.property.test.ts`) require `DB_POSTGRES_URL`; without it they are skipped.
+Integration suites (`integration.services.test.ts`, `gates.integration.test.ts`, `cost.integration.test.ts`, `cost.rollups.property.test.ts`, `loops.integration.test.ts`) require `DB_POSTGRES_URL`; without it they are skipped.

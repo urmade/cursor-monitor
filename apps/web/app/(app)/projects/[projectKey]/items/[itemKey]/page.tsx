@@ -3,6 +3,9 @@ import {
   can,
   deriveWorkItemStatus,
   getLatestGateResultsByGate,
+  getLoopSummary,
+  buildJourneyRibbonModel,
+  listReasonCodes,
   getProjectByKey,
   getProjectRole,
   getWorkItemByKey,
@@ -40,11 +43,14 @@ import {
   TabsTrigger,
   Textarea,
   LiveDuration,
+  JourneyRibbon,
+  LoopBadge,
 } from '@nexus/ui';
 import { notFound } from 'next/navigation';
 import { ChecksPanel, WhyCantMove } from '../../../../../../src/components/ChecksPanel';
 import { RunTimeline } from '../../../../../../src/components/RunTimeline';
 import { TicketBudgetBar } from '../../../../../../src/components/TicketBudgetBar';
+import { TransitionWorkItemMenu } from '../../../../../../src/components/TransitionWorkItemMenu';
 import {
   actionAnswerQuestion,
   actionCancelRun,
@@ -142,6 +148,9 @@ export default async function ItemPage({
     artifactsR,
     warningsR,
     pendingApprovals,
+    loopSummaryR,
+    journeyR,
+    reasonCodesR,
   ] = await Promise.all([
     listStages(ctx, project.value.id),
     listSpecVersions(ctx, item.id),
@@ -158,6 +167,9 @@ export default async function ItemPage({
     listArtifactRefs(ctx, item.id),
     listWarnings(ctx, item.id, { status: 'open' }),
     listPendingApprovalsForItem(ctx, item.id),
+    getLoopSummary(ctx, item.id),
+    buildJourneyRibbonModel(ctx, item.id),
+    listReasonCodes(ctx, project.value.id),
   ]);
 
   const stages = stagesR.ok ? stagesR.value : [];
@@ -264,7 +276,11 @@ export default async function ItemPage({
           </Link>
           <div className="mt-2 font-mono text-xs text-fg-muted">{item.key}</div>
           <h2 className="text-xl font-medium tracking-tight text-fg">
-            {item.title}
+            {item.title}{' '}
+            <LoopBadge
+              count={item.loopCount ?? 0}
+              escalated={item.loopEscalated ?? false}
+            />
           </h2>
           <div className="mt-2">
             <TicketBudgetBar
@@ -272,6 +288,16 @@ export default async function ItemPage({
               budgetMicro={item.budgetMicroUsd?.toString() ?? null}
               spendSource={item.spendSource ?? 'estimated'}
             />
+            {(item.loopCount ?? 0) > 0 ? (
+              <p className="mt-1 text-xs text-fg-muted">
+                Rework (visits after the first):{' '}
+                {formatMicroUsdDisplay(item.reworkCostMicroUsd ?? 0)}
+                {item.reworkMs
+                  ? ` · ${Math.round(Number(item.reworkMs) / 3_600_000)}h`
+                  : ''}{' '}
+                of {formatMicroUsdDisplay(item.spendMicroUsd ?? 0)} total
+              </p>
+            ) : null}
           </div>
           {item.pausedReason === 'budget' && canWrite ? (
             <form
@@ -312,6 +338,64 @@ export default async function ItemPage({
             </form>
           ) : null}
         </div>
+
+        {journeyR.ok ? (
+          <Panel>
+            <PanelHeader>
+              <span className="text-sm font-medium">Journey</span>
+            </PanelHeader>
+            <PanelBody>
+              <JourneyRibbon
+                nodes={journeyR.value.nodes.map((n) => ({
+                  ...n,
+                  costMicroUsd: n.costMicroUsd,
+                }))}
+                arcs={journeyR.value.arcs.map((a) => ({
+                  loopEdgeId: a.loopEdgeId,
+                  fromSeq: a.fromSeq,
+                  toSeq: a.toSeq,
+                  reasonCode: a.reasonCode,
+                  costMicroUsd: a.costMicroUsd,
+                  costComplete: a.costComplete,
+                }))}
+                collapsedPairs={journeyR.value.collapsedPairs}
+                accessibleSummary={journeyR.value.accessibleSummary}
+              />
+            </PanelBody>
+          </Panel>
+        ) : null}
+
+        {loopSummaryR.ok && loopSummaryR.value.edges.length > 0 ? (
+          <Panel>
+            <PanelHeader>
+              <span className="text-sm font-medium">Loops</span>
+            </PanelHeader>
+            <PanelBody>
+              <ul className="space-y-2 text-sm">
+                {loopSummaryR.value.edges.map((e) => (
+                  <li key={e.id} className="border-b border-border pb-2 last:border-0">
+                    <div className="font-medium">
+                      {e.fromStageName} → {e.toStageName}
+                    </div>
+                    <div className="text-xs text-fg-muted">
+                      {e.reasonCode}
+                      {e.note ? ` — ${e.note}` : ''}
+                      {' · '}
+                      {e.trigger.kind}
+                      {' · '}
+                      {e.costMicroUsd != null
+                        ? `${formatMicroUsdDisplay(e.costMicroUsd)}${e.costComplete ? '' : ' (provisional)'}`
+                        : 'cost pending'}
+                      {e.durationMs != null
+                        ? ` · ${Math.round(Number(e.durationMs) / 60_000)}m`
+                        : ''}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </PanelBody>
+          </Panel>
+        ) : null}
 
         {openBlocking.length > 0 ? (
           <Panel className="border-warning-border bg-warning-bg/30">
@@ -658,29 +742,29 @@ export default async function ItemPage({
               <span className="text-sm font-medium">Move stage</span>
             </PanelHeader>
             <PanelBody>
-              <form
+              <TransitionWorkItemMenu
+                workItemId={item.id}
+                expectedVersion={item.version}
+                projectKey={projectKey}
+                itemKey={itemKey}
+                currentStageId={item.currentStageId}
+                currentStagePosition={
+                  stageById.get(item.currentStageId)?.position ?? 0
+                }
+                stages={stages.map((s) => ({
+                  id: s.id,
+                  name: s.name,
+                  position: s.position,
+                }))}
+                reasonCodes={(reasonCodesR.ok ? reasonCodesR.value : []).map(
+                  (r) => ({
+                    code: r.code,
+                    label: r.label,
+                    requiresNote: r.requiresNote,
+                  }),
+                )}
                 action={actionTransitionWorkItem}
-                className="flex flex-wrap gap-2"
-              >
-                <input type="hidden" name="workItemId" value={item.id} />
-                <input type="hidden" name="expectedVersion" value={item.version} />
-                <input type="hidden" name="projectKey" value={projectKey} />
-                <input type="hidden" name="itemKey" value={itemKey} />
-                <select
-                  name="toStageId"
-                  defaultValue=""
-                  className="rounded-md border border-border bg-surface px-2.5 py-2 text-sm"
-                >
-                  <option value="" disabled>Select stage…</option>
-                  {stages
-                    .filter((s) => s.id !== item.currentStageId)
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                </select>
-                <Input name="note" placeholder="Optional note" className="max-w-xs" />
-                <Button type="submit">Transition</Button>
-              </form>
+              />
             </PanelBody>
           </Panel>
         ) : null}

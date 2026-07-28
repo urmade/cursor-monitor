@@ -318,6 +318,8 @@ export async function evaluateGates(
     workItemId: string;
     trigger: GateTrigger;
     dryRun?: boolean;
+    /** When the pending transition is a return edge, enrich loop counts prospectively. */
+    prospectiveReturn?: { fromStageId: string; toStageId: string };
   },
 ): Promise<Result<GateBatchResult, CoreError>> {
   const dryRun = input.dryRun ?? false;
@@ -351,7 +353,9 @@ export async function evaluateGates(
     });
   }
 
-  const gateContext = await buildGateContext(ctx, input.workItemId);
+  const gateContext = await buildGateContext(ctx, input.workItemId, {
+    prospectiveReturn: input.prospectiveReturn,
+  });
   if (!gateContext) return err(coreError('not_found', 'Work item not found'));
   const contextSnapshot = snapshotContext(gateContext);
   const observeOnly = gateContext.project.enforcementMode === 'observe';
@@ -470,6 +474,7 @@ export async function evaluateGates(
         gateId: g.id,
         gateName: g.name,
         gateVersion: g.version,
+        evaluator: row.evaluator,
         outcome: 'error',
         reason: `No evaluator registered for ${row.evaluator}`,
         evidence: {},
@@ -497,6 +502,7 @@ export async function evaluateGates(
       trigger: input.trigger,
       existingPendingApprovalId,
     });
+    result.evaluator = row.evaluator;
     results.push(result);
 
     let evaluationId = 'dry-run';
@@ -525,6 +531,9 @@ export async function evaluateGates(
       });
       if (w) warningRefs.push(w);
     }
+
+    // Escalation is persisted inside the successful transition transaction
+    // (setLoopEscalatedInTx) so a gate-blocked return cannot leave a sticky flag.
 
     if (result.outcome === 'pass' && row.evaluator === 'field_rule') {
       await resolveWarningsOnPass(ctx, {

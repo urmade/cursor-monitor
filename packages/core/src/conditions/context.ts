@@ -18,6 +18,9 @@ import type { GateContext } from './evaluate';
 export async function buildGateContext(
   ctx: ServiceContext,
   workItemId: string,
+  opts?: {
+    prospectiveReturn?: { fromStageId: string; toStageId: string };
+  },
 ): Promise<GateContext | null> {
   const item = await ctx.db.query.workItems.findFirst({
     where: and(eq(workItems.id, workItemId), isNull(workItems.archivedAt)),
@@ -114,6 +117,41 @@ export async function buildGateContext(
 
   const reportBody = latestReport?.raw as Record<string, unknown> | undefined;
 
+  let loopCount = 0;
+  let countFromStage = 0;
+  let edges: Array<{ fromStageId: string; toStageId: string }> = [];
+  const prospectiveReturn = opts?.prospectiveReturn ?? null;
+  try {
+    loopCount = item.loopCount ?? 0;
+    const { loopEdges } = await import('@nexus/db');
+    const edgeRows = await ctx.db
+      .select({
+        fromStageId: loopEdges.fromStageId,
+        toStageId: loopEdges.toStageId,
+      })
+      .from(loopEdges)
+      .where(eq(loopEdges.workItemId, workItemId));
+    edges = edgeRows;
+    if (item.currentStageId) {
+      countFromStage = edges.filter(
+        (e) => e.fromStageId === item.currentStageId,
+      ).length;
+      if (prospectiveReturn) countFromStage += 1;
+    }
+  } catch (e) {
+    // Fail closed when loops are expected — do not silently zero counts.
+    const loopsOn = await ctx.flags
+      .isEnabled('p5.loops', item.projectId)
+      .catch(() => false);
+    if (loopsOn) {
+      throw e instanceof Error
+        ? e
+        : new Error(`Failed to load loop edges: ${String(e)}`);
+    }
+  }
+
+  const prospectiveCount = prospectiveReturn ? loopCount + 1 : loopCount;
+
   return {
     ticket: {
       id: item.id,
@@ -161,8 +199,12 @@ export async function buildGateContext(
       openCodes,
     },
     loops: {
-      count: 0,
-      countFromStage: 0,
+      count: prospectiveCount,
+      itemLoopCount: loopCount,
+      countFromStage,
+      prospectiveCount,
+      edges,
+      prospectiveReturn,
     },
     budget: {
       itemSpentRatio,

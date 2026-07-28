@@ -177,7 +177,8 @@ export default async function PoliciesPage({
                     >
                       <option value="field_rule">field_rule</option>
                       <option value="human_approval">human_approval</option>
-                      <option value="budget">budget (stub)</option>
+                      <option value="budget">budget</option>
+                      <option value="loop_budget">loop_budget</option>
                       <option value="agentic">agentic (stub)</option>
                     </select>
                   </Field>
@@ -192,12 +193,74 @@ export default async function PoliciesPage({
                       <option value="on_label_added">on_label_added</option>
                     </select>
                   </Field>
+                  <Field label="From stage (optional)">
+                    <select
+                      name="fromStageId"
+                      className="h-9 w-full rounded border border-border bg-surface px-2 text-sm"
+                      defaultValue=""
+                    >
+                      <option value="">Any</option>
+                      {stages.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
                   <Field label="To stage (transition)">
                     <select
                       name="toStageId"
                       className="h-9 w-full rounded border border-border bg-surface px-2 text-sm"
                       defaultValue={stages[0]?.id}
                     >
+                      {stages.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Loop scope">
+                    <select
+                      name="loopScope"
+                      className="h-9 w-full rounded border border-border bg-surface px-2 text-sm"
+                      defaultValue="item"
+                    >
+                      <option value="item">item</option>
+                      <option value="stage">stage</option>
+                      <option value="stage_pair">stage_pair</option>
+                    </select>
+                  </Field>
+                  <Field label="Warn at (loop_budget)">
+                    <Input name="warnAt" type="number" defaultValue={2} />
+                  </Field>
+                  <Field label="Escalate at">
+                    <Input name="escalateAt" type="number" defaultValue={3} />
+                  </Field>
+                  <Field label="Block at (optional)">
+                    <Input name="blockAt" type="number" placeholder="omit = never" />
+                  </Field>
+                  <Field label="Loop from stage (pair)">
+                    <select
+                      name="loopFromStageId"
+                      className="h-9 w-full rounded border border-border bg-surface px-2 text-sm"
+                      defaultValue=""
+                    >
+                      <option value="">—</option>
+                      {stages.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Loop to stage (pair/stage)">
+                    <select
+                      name="loopToStageId"
+                      className="h-9 w-full rounded border border-border bg-surface px-2 text-sm"
+                      defaultValue=""
+                    >
+                      <option value="">—</option>
                       {stages.map((s) => (
                         <option key={s.id} value={s.id}>
                           {s.name}

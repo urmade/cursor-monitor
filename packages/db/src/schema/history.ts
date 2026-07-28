@@ -1,5 +1,6 @@
 import {
   bigint,
+  boolean,
   integer,
   jsonb,
   pgTable,
@@ -24,6 +25,10 @@ export const stageInstances = pgTable(
       .notNull()
       .references(() => stages.id),
     seq: integer('seq').notNull(),
+    /** Ordinal of this visit to the stage (1 = first). Materialised at insert. */
+    visitIndex: integer('visit_index').notNull().default(1),
+    /** visitIndex > 1 — maintained by the app (not a generated column). */
+    isRework: boolean('is_rework').notNull().default(false),
     enteredAt: timestamp('entered_at', { withTimezone: true }).notNull().defaultNow(),
     exitedAt: timestamp('exited_at', { withTimezone: true }),
     outcome: text('outcome'),
@@ -55,6 +60,8 @@ export const transitions = pgTable(
     actor: jsonb('actor').$type<Record<string, unknown>>().notNull(),
     gateEvaluationId: uuid('gate_evaluation_id'),
     gateBatchId: uuid('gate_batch_id'),
+    isReturnEdge: boolean('is_return_edge').notNull().default(false),
+    loopEdgeId: uuid('loop_edge_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('transitions_work_item_idx').on(t.workItemId, t.createdAt)],

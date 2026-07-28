@@ -21,7 +21,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests",
-    "seed": "tsx ../core/src/seed.ts"
+    "seed": "tsx ../core/src/seed.ts",
+    "check-old-shape": "bash scripts/check-old-shape-convergence.sh"
   },
   "dependencies": {
     "drizzle-orm": "^0.44.2",

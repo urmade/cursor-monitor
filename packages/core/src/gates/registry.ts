@@ -23,6 +23,8 @@ export type GateEvalResult = {
   gateId: string;
   gateName: string;
   gateVersion: number;
+  /** Evaluator kind that produced this result (for transition-side filtering). */
+  evaluator?: GateEvaluatorKind;
   outcome: GateOutcome;
   reason: string;
   evidence: Record<string, unknown>;

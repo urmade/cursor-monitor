@@ -291,17 +291,44 @@ Phase 1's `transitionWorkItem` gains a required `reasonCode` when the move is a 
 
 ## 11. Exit criteria
 
-- [ ] Every return edge carries a reason code and a trigger; none can be created without one.
-- [ ] Loop counts are correct per item, per stage, and per stage pair, and exclude backward moves into never-visited stages.
-- [ ] Rework cost and time are attributed and reconcile with total spend.
-- [ ] Per-edge cost is finalised on forward departure and provisional before it.
-- [ ] A loop budget warns, escalates, and (optionally) blocks, using the Phase 3 engine rather than parallel logic.
-- [ ] The journey ribbon renders the historical path and survives pipeline edits.
-- [ ] `get_ticket` exposes loop context to agents.
-- [ ] Rework-rate views return verified numbers for Phase 9.
+- [~] Every return edge carries a reason code and a trigger; none can be created without one. *(Partial: public adapters cannot forge `loopTrigger`; gate/system triggers are internal-only. Manual returns still require a taxonomy reason.)*
+- [x] Loop counts are correct per item, per stage, and per stage pair, and exclude backward moves into never-visited stages.
+- [x] Rework cost and time are attributed and reconcile with total spend.
+- [x] Per-edge cost is finalised from the edge's own `to_stage_instance_id` on any departure; late run cost after departure propagates via `applyCostRollups` (and reconciler repair).
+- [~] A loop budget warns, escalates, and (optionally) blocks, using the Phase 3 engine rather than parallel logic. *(Configured-scope counts and false→true escalation in the transition tx are closed; criterion left partial only for optional blockAt product polish.)*
+- [x] The journey ribbon renders the historical path and survives pipeline edits.
+- [x] `get_ticket` exposes loop context to agents.
+- [x] Rework-rate stats (`projectReworkStats`) return verified numbers for Phase 9.
 
 ## 12. Open questions for this phase
 
-- **Local:** should a loop escalation notify immediately, or wait for Phase 6's inbox? Recommendation: emit the event now and, if a Slack channel is already wired, post there; the inbox is the real home.
-- **Local:** should returning to a stage *skip* re-running its bound automation, or re-run it automatically? Recommendation: never auto-run on a return in the PoC — a loop is precisely the moment a human should choose what happens next.
-- **Local:** do we count a resume run (Phase 2's answer-to-question follow-up) as rework? Recommendation: no. It is a continuation within the same stage visit, not a return; conflating them would make every answered question look like a loop.
+- **Local:** should a loop escalation notify immediately, or wait for Phase 6's inbox? Recommendation: emit the event now and, if a Slack channel is already wired, post there; the inbox is the real home. **Decision for PoC:** emit `loop.escalated` only; no Slack (repo hard rule). Inbox is Phase 6.
+- **Local:** should returning to a stage *skip* re-running its bound automation, or re-run it automatically? Recommendation: never auto-run on a return in the PoC — a loop is precisely the moment a human should choose what happens next. **Accepted.**
+- **Local:** do we count a resume run (Phase 2's answer-to-question follow-up) as rework? Recommendation: no. It is a continuation within the same stage visit, not a return; conflating them would make every answered question look like a loop. **Accepted.**
+
+---
+
+## 13. Deviations recorded during implementation (2026-07-27)
+
+- **Discriminated union on `TransitionInput`.** Shipped as `AdvanceTransitionInput | ReturnTransitionInput` (`kind: 'return'` requires `reasonCode`). Callers that omit `kind` still hit a runtime reason check when the server detects a return edge — direction is computed server-side from stage positions, so a purely static union cannot cover every adapter without a `kind` discriminant.
+- **Escalation notifications.** Emit `loop.escalated` only on false→true inside the successful transition transaction; no Slack (hard repo rule). Escalation clears on the next forward move. Not written during gate evaluation (avoids sticky flags on gate-blocked returns).
+- **`is_rework` column.** Plain boolean maintained by the app (not `GENERATED … STORED`) to avoid AccessExclusiveLock table rewrites on migrate. Drizzle schema exposes `isRework`.
+- **No SQL rework views.** `projectReworkStats` queries inline; dead views from the first ship were removed.
+- **Migration number.** Spec §4 named `0012_loops.sql`; shipped as `0014_loops.sql` after Phase 4 claimed `0013`.
+- **Board return dialog.** Board cards use the same reason-required return dialog as the ticket page (not a bare dropdown).
+- **Override path.** Transition + loop edge both record `gate_override` (ChecksPanel no longer posts free-text `human_direction` on override).
+- **`loopTrigger`.** Removed from public `TransitionInput`; internal `transitionWorkItemInternal` only.
+- **Concurrent transitions.** Optimistic-lock miss throws inside the drizzle transaction so loop edges / visit rows roll back (returning `null` previously committed phantoms).
+- **Flag `p5.loops`.** Kept per plan §8 (observe-before-enforce); not removed in 5.7.
+- **`other` requires note.** Enforced via taxonomy `requires_note` on the seeded `other` code.
+- **Open questions.** Accepted the three local recommendations above; Slack path declined by hard rule.
+
+### Rework round (post Opus 5 review)
+
+Blockers B1–B6 addressed: ISO binds in `projectReworkStats`, closed-only absolute `rework_ms`, configured-scope loop budget counts, per-instance edge finalisation, transactional rollback on stale version, mutation-killing tests. Should-fixes: internal `loopTrigger`, seed taxonomy in `createProject` tx, no fail-open on loop load when flag on, `created_at` + trigger parse, default privileges revoke, escalation transition-gated.
+
+### Follow-up (late edge cost + coverage)
+
+- `applyCostRollups` syncs `loop_edges.cost_micro_usd` from the matching `to_stage_instance_id` so provider-actual deltas after departure update the edge; `recomputeRollupsForProject` reports and repairs `loop_edge` drift.
+- M08/M12 coverage: escalation persists on ungated backward moves; B4 asserts exact visit-2 cost; DB-backed property tests use an independent history oracle and real rollups.
+- Deleted dead non-transactional `setLoopEscalated`; escalate only from `loop_budget` results; dropped unused `closeOpenLoopEdgesInTx` params.

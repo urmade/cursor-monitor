@@ -8,6 +8,7 @@ import {
   HumanApprovalConfigSchema,
   BudgetConfigSchema,
   AgenticConfigSchema,
+  LoopBudgetConfigSchema,
   conditionDepth,
   unwrapCondition,
   type GateEvaluatorKind,
@@ -41,6 +42,9 @@ function parseConfig(
       break;
     case 'budget':
       parsed = BudgetConfigSchema.safeParse(config ?? {});
+      break;
+    case 'loop_budget':
+      parsed = LoopBudgetConfigSchema.safeParse(config ?? {});
       break;
     case 'agentic':
       parsed = AgenticConfigSchema.safeParse(config ?? {});

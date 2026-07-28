@@ -94,6 +94,11 @@ export async function createProject(
       });
     }
 
+    // Seed loop reason taxonomy in the same transaction so a failed seed
+    // cannot leave a project that can never record a return.
+    const { seedDefaultReasonCodes } = await import('../loops/reasons');
+    await seedDefaultReasonCodes(tx, projectId);
+
     await emit(tx, {
       orgId: ctx.orgId,
       projectId,
