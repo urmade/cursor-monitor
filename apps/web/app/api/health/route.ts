@@ -37,6 +37,7 @@ export async function GET() {
     lastCronTick = null;
   }
 
+  let webhookPending: number | null = null;
   if (dbOk) {
     try {
       const depth = await queueDepth(getDb());
@@ -71,6 +72,8 @@ export async function GET() {
     } catch {
       attention = null;
     }
+
+    webhookPending = await loadWebhookPending();
   }
 
   return NextResponse.json({
@@ -82,7 +85,25 @@ export async function GET() {
     queue,
     mcp,
     attention,
+    webhooks: { pendingDeliveries: webhookPending },
   });
+}
+
+async function loadWebhookPending(): Promise<number | null> {
+  try {
+    const org = await getDb().query.orgs.findFirst();
+    if (!org) return null;
+    const { createContext, countPendingDeliveries, createFlagReader } = await import('@nexus/core');
+    const ctx = createContext({
+      db: getDb(),
+      orgId: org.id,
+      actor: { kind: 'system', reason: 'health' },
+      flags: createFlagReader(getDb()),
+    });
+    return await countPendingDeliveries(ctx);
+  } catch {
+    return null;
+  }
 }
 
 void mcpCallLog;

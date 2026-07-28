@@ -127,12 +127,13 @@ export async function scrubOldRawResponses(
   olderThanDays = 30,
 ): Promise<number> {
   const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
+  const cutoffIso = cutoff.toISOString();
   const result = await ctx.db
     .update(rubricVerdicts)
     .set({ rawResponse: null })
     .where(
       and(
-        lt(rubricVerdicts.createdAt, cutoff),
+        sql`${rubricVerdicts.createdAt} < ${cutoffIso}::timestamptz`,
         sql`${rubricVerdicts.rawResponse} is not null`,
       ),
     )

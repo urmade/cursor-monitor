@@ -1,5 +1,7 @@
 export * from './actor';
 export * from './events';
+export * from './events/catalog';
+export * from './api/scopes';
 export * from './project';
 export * from './spec';
 export * from './status';

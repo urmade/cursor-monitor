@@ -67,6 +67,37 @@ export * from './budgets';
 export * from './loops';
 export * from './attention';
 export * from './rubrics';
+export * from './webhooks';
+export {
+  createApiToken,
+  revokeApiToken,
+  verifyApiToken,
+  listApiTokens,
+  tokenHasScope,
+} from './api-tokens';
+export { missingScopeForAction, apiScopeAllowsAction } from './api-tokens/scopes';
+export {
+  verifyWebhookSignature,
+  buildSignatureHeader,
+  signWebhookPayload,
+  classifyHttpStatus,
+  nextBackoffSec,
+  AUTO_DISABLE_CONSECUTIVE_FAILURES,
+  SIGNATURE_TOLERANCE_SEC,
+} from './webhooks/signing';
+export {
+  readOutboxCursor,
+  writeOutboxCursor,
+  advanceOutboxCursorToLatest,
+  advanceWebhookOutboxCursorToLatest,
+  ensureWebhookDispatcherCursorInitialized,
+  resolveWebhookDispatcherCursor,
+  migrateLegacyWebhookDispatcherCursor,
+  webhookDispatcherCursorKey,
+  compareEventOrder,
+  ATTENTION_DISPATCHER_CURSOR_KEY,
+  WEBHOOK_DISPATCHER_CURSOR_KEY_LEGACY,
+} from './events/outbox-cursor';
 export type {
   TransitionInput,
   AdvanceTransitionInput,

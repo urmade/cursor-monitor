@@ -15,6 +15,7 @@ export const EventTypeSchema = z.enum([
   'work_item.updated',
   'work_item.archived',
   'work_item.stage_changed',
+  'work_item.status_changed',
   'spec.version_created',
   'member.added',
   'member.role_changed',

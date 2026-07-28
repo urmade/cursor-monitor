@@ -10,6 +10,8 @@ import {
   listReasonCodes,
   listStages,
   listWorkItems,
+  listWebhookEndpoints,
+  listWebhookDeliveries,
   parseProjectBudgetSettings,
 } from '@nexus/core';
 import {
@@ -35,7 +37,10 @@ import {
   actionUpsertBinding,
   actionUpsertLabel,
   actionUpsertReasonCode,
+  actionReplayWebhookDelivery,
+  actionReEnableWebhookEndpoint,
 } from '../../../../../src/server/actions';
+import { WebhookEndpointRegisterForm } from './webhook-endpoint-form';
 import { requireSession } from '../../../../../src/server/session';
 
 export const dynamic = 'force-dynamic';
@@ -99,6 +104,17 @@ export default async function SettingsPage({
     budgetSettings.burnCapMicroUsd != null
       ? Number(budgetSettings.burnCapMicroUsd) / 1_000_000
       : 100;
+
+  const endpointsR = canUpdate
+    ? await listWebhookEndpoints(ctx, project.value.id)
+    : null;
+  const endpoints = endpointsR?.ok ? endpointsR.value : [];
+  const deliveriesByEndpoint = await Promise.all(
+    endpoints.map(async (ep) => {
+      const d = await listWebhookDeliveries(ctx, ep.id, { limit: 20 });
+      return { ep, deliveries: d.ok ? d.value : [] };
+    }),
+  );
 
   const inputClass =
     'flex h-[var(--nx-control-md)] w-full rounded-md border border-border bg-surface px-2.5 text-sm';
@@ -583,6 +599,81 @@ export default async function SettingsPage({
           ) : null}
         </PanelBody>
       </Panel>
+
+      {canUpdate ? (
+        <Panel className="lg:col-span-2">
+          <PanelHeader>
+            <h2 className="text-lg font-semibold">Webhooks &amp; deliveries</h2>
+            <p className="text-sm text-muted-foreground">
+              Outbound events (flag <code className="text-xs">p8.webhooks</code>). Secret shown once on create.
+            </p>
+          </PanelHeader>
+          <PanelBody className="grid gap-6">
+            <WebhookEndpointRegisterForm
+              projectId={project.value.id}
+              projectKey={projectKey}
+            />
+
+            {deliveriesByEndpoint.map(({ ep, deliveries }) => (
+              <div key={ep.id} className="rounded-md border border-border p-4">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-sm">{ep.url}</span>
+                  {!ep.enabled ? (
+                    <Badge tone="danger">disabled: {ep.disabledReason ?? 'off'}</Badge>
+                  ) : (
+                    <Badge tone="neutral">enabled</Badge>
+                  )}
+                </div>
+                {!ep.enabled && ep.disabledAt ? (
+                  <form action={actionReEnableWebhookEndpoint} className="mb-3">
+                    <input type="hidden" name="endpointId" value={ep.id} />
+                    <input type="hidden" name="projectKey" value={projectKey} />
+                    <Button type="submit" size="sm" variant="secondary">
+                      Re-enable (sends test event first)
+                    </Button>
+                  </form>
+                ) : null}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="py-1 pr-2">Status</th>
+                        <th className="py-1 pr-2">Event</th>
+                        <th className="py-1 pr-2">Attempts</th>
+                        <th className="py-1 pr-2">Error</th>
+                        <th className="py-1" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {deliveries.map((d) => (
+                        <tr key={d.id} className="border-b border-border/60">
+                          <td className="py-1 pr-2">{d.status}</td>
+                          <td className="py-1 pr-2 font-mono text-xs">{d.eventType}</td>
+                          <td className="py-1 pr-2">{d.attempts}</td>
+                          <td className="py-1 pr-2 text-xs text-muted-foreground">
+                            {d.error ?? d.responseStatus ?? '—'}
+                          </td>
+                          <td className="py-1">
+                            {d.status === 'failed' || d.status === 'dead' ? (
+                              <form action={actionReplayWebhookDelivery}>
+                                <input type="hidden" name="deliveryId" value={d.id} />
+                                <input type="hidden" name="projectKey" value={projectKey} />
+                                <Button type="submit" size="sm" variant="ghost">
+                                  Replay
+                                </Button>
+                              </form>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </PanelBody>
+        </Panel>
+      ) : null}
 
     </div>
   );

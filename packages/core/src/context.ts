@@ -18,6 +18,8 @@ export type ServiceContext = {
   clock: () => Date;
   logger: Logger;
   flags: FeatureFlags;
+  /** Test-only: allow loopback webhook URLs despite SSRF checks. */
+  webhookSsrfAllowLoopback?: boolean;
 };
 
 export const silentLogger: Logger = {

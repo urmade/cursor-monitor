@@ -1,0 +1,22 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`public event catalogue freeze > has a stable hash per public event schema version 1`] = `
+{
+  "approval.decided": "5d0957e024a7b98db7ce826e61b47c50109ebb7253fb52a958b806943ef7bd4b",
+  "budget.blocked": "d9279b7fd150ce65647ff648b89e2fab4601312dd05bfbffd439f64660e67c98",
+  "budget.threshold_crossed": "9a67f325f687e1efe97069bd80c130bce2a32f7b1b6cf6f575b9dee6d0809bf6",
+  "gate.evaluated": "865598ad3e0b6b017eae808ce65bce3857354be58195bee81e015f077bbd1844",
+  "loop.detected": "00d87380884d889ca2f095ad7383c84d591954c49780c8e1b3443d3bd068d87d",
+  "loop.escalated": "00d87380884d889ca2f095ad7383c84d591954c49780c8e1b3443d3bd068d87d",
+  "question.answered": "db0ffa35eb35b27272f1a5452c8ce970bb9c119328df19bcd9b02a2aaa1e9782",
+  "question.asked": "ff85d9b4f47c1e24661596fd9eb0fdb9450e3cedeb40e224f2f273beff74114e",
+  "run.finished": "389e9f23d85a77817661a2428f2a5166d9b0944311f829cf18e35c30dddafa73",
+  "run.started": "30b1039b1c23d13f9e41e61d38b4b836f6070cbb6cc8fff522f27143e9d34cac",
+  "spec.version_created": "edcb243e193620e3119e90267473361e8c3a46913821cd722168d14f7016dfff",
+  "stage_report.posted": "7034e7c0093d3a632f58b06aba48db339b2cc5ac3934c0f9830a641746ec23e6",
+  "work_item.created": "96c1d53701a110fd57edb43b45777543cfea3be8bc258a65f16e56cd2026d05a",
+  "work_item.stage_changed": "0733d950698ce461c372ddca7a54fe3c8a106719bc4051265fbe0cca533d3538",
+  "work_item.status_changed": "234b71184ece4fc8b3bacec42d08a1b418bdf26b0b8f02fc02006f56cb7ae2be",
+  "work_item.updated": "5272b57e13c3b76c09aa3c0d9bf2b78518f4b91bfb9a315789ee2fd47590929a",
+}
+`;

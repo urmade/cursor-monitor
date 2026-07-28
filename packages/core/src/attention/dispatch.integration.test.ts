@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { and, eq } from 'drizzle-orm';
-import { attentionItems, closeDb, getDb } from '@nexus/db';
+import { attentionItems, closeDb, events } from '@nexus/db';
 import {
   createContext,
   createProject,
@@ -9,41 +9,32 @@ import {
   upsertUserFromPassport,
 } from '../index';
 import { testProjectKey } from '../cost/test-helpers';
+import { testDb } from '../test-helpers/db';
 import { askQuestion } from '../questions';
-import { readAttentionDispatchCursor } from './dispatch-cursor';
+import { readAttentionDispatchCursor, writeAttentionDispatchCursor } from './dispatch-cursor';
 
 const hasDb = Boolean(process.env.DB_POSTGRES_URL);
 
 describe.runIf(hasDb)('attention dispatch (M20)', () => {
-  const db = hasDb ? getDb() : (null as unknown as ReturnType<typeof getDb>);
-  let orgId = '';
-  let userId = '';
-
   afterAll(async () => {
     await closeDb();
   });
 
-  beforeAll(async () => {
+  it('M20: dispatchAttentionEvents projects event → inbox row and advances cursor', async () => {
+    const db = testDb();
     const u = await upsertUserFromPassport(db, {
-      externalSub: `p6-dispatch-${Date.now()}`,
+      externalSub: `p6-dispatch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       email: `p6-dispatch-${Date.now()}@example.com`,
       name: 'Dispatch',
     });
-    orgId = u.orgId;
-    userId = u.userId;
-  });
 
-  function ctx() {
-    return createContext({
+    const c = createContext({
       db,
-      orgId,
-      actor: { kind: 'human', userId },
+      orgId: u.orgId,
+      actor: { kind: 'human', userId: u.userId },
       flags: { async isEnabled() { return true; } },
     });
-  }
 
-  it('M20: dispatchAttentionEvents projects event → inbox row and advances cursor', async () => {
-    const c = ctx();
     const project = await createProject(c, {
       key: testProjectKey('DSP'),
       name: 'Dispatch',
@@ -73,6 +64,21 @@ describe.runIf(hasDb)('attention dispatch (M20)', () => {
       ),
     });
     expect(openBefore.length).toBe(0);
+
+    const qEvent = await db.query.events.findFirst({
+      where: and(
+        eq(events.orgId, u.orgId),
+        eq(events.type, 'question.asked'),
+        eq(events.subjectId, questionId),
+      ),
+    });
+    expect(qEvent).toBeDefined();
+    if (!qEvent) throw new Error('question.asked event');
+
+    await writeAttentionDispatchCursor(c, {
+      occurredAt: new Date(qEvent.occurredAt.getTime() - 1000).toISOString(),
+      id: '00000000-0000-0000-0000-000000000000',
+    });
 
     const cursorBefore = await readAttentionDispatchCursor(c);
 

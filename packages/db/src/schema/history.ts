@@ -82,6 +82,7 @@ export const events = pgTable(
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
     publishedAt: timestamp('published_at', { withTimezone: true }),
+    publicType: text('public_type'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

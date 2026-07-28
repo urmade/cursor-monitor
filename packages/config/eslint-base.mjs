@@ -1,5 +1,6 @@
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
+import { sqlDateGuardPlugin } from "./eslint-sql-dates.mjs";
 
 /**
  * Shared TypeScript ESLint flat config for Nexus workspace packages.
@@ -28,6 +29,9 @@ export function createNexusEslintConfig(options) {
           tsconfigRootDir,
         },
       },
+      plugins: {
+        "sql-dates": sqlDateGuardPlugin,
+      },
       rules: {
         "no-unused-vars": "off",
         "@typescript-eslint/no-unused-vars": [
@@ -39,6 +43,7 @@ export function createNexusEslintConfig(options) {
           },
         ],
         "@typescript-eslint/no-explicit-any": "error",
+        "sql-dates/no-raw-date-bindings": "error",
       },
     },
   );

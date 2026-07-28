@@ -1,5 +1,6 @@
 import type { Actor, ProjectRole } from '@nexus/contracts';
 import type { AuthzAction, AuthzResource } from './actions';
+import { apiScopeAllowsAction } from '../api-tokens/scopes';
 
 const ROLE_RANK: Record<ProjectRole, number> = {
   viewer: 1,
@@ -41,7 +42,16 @@ export function can(
   }
 
   if (actor.kind === 'api_token') {
-    return action.endsWith('.read') || action === 'audit.read';
+    if (resource.type === 'project' && resource.projectId !== actor.projectId) {
+      return false;
+    }
+    if (resource.type === 'work_item' && resource.projectId !== actor.projectId) {
+      return false;
+    }
+    if (action === 'audit.read') {
+      return apiScopeAllowsAction(actor.scopes, 'work_item.read');
+    }
+    return apiScopeAllowsAction(actor.scopes, action);
   }
 
   // human

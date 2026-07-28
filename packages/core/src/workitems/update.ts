@@ -5,6 +5,8 @@ import { can } from '../authz/can';
 import type { ServiceContext } from '../context';
 import { coreError, type CoreError } from '../errors';
 import { emit } from '../events/emit';
+import { deriveWorkItemStatus } from '../status/facts';
+import { emitWorkItemStatusChangedIfNeeded } from './status-changed';
 import { getProjectRole } from '../projects/members';
 import { err, ok, type Result } from '../result';
 import type { WorkItem } from './create';
@@ -42,6 +44,8 @@ export async function updateWorkItem(
       actualVersion: existing.version,
     }));
   }
+
+  const statusBefore = await deriveWorkItemStatus(ctx, id);
 
   const updated = await ctx.db.transaction(async (tx) => {
     const [row] = await tx
@@ -87,6 +91,15 @@ export async function updateWorkItem(
       // best-effort when budget tables absent
     }
   }
+
+  const statusAfter = await deriveWorkItemStatus(ctx, id);
+  await emitWorkItemStatusChangedIfNeeded(ctx, {
+    workItemId: id,
+    workItemKey: updated.key,
+    projectId: existing.projectId,
+    from: statusBefore,
+    to: statusAfter,
+  });
 
   return ok(updated);
 }

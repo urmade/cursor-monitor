@@ -46,6 +46,11 @@ const CORE_QUERY_RELATIONS = [
   'rubricGoldenCases',
   'rubricRegressionRuns',
   'pendingEvaluations',
+  'apiTokens',
+  'webhookEndpoints',
+  'webhookDeliveries',
+  'apiRequestLog',
+  'idempotencyKeys',
 ] as const;
 
 describe.runIf(hasDb)('drizzle relational query API', () => {

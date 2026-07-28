@@ -12,6 +12,7 @@
     "test:e2e": "pnpm exec tsx e2e/seed-blocking-question.ts && playwright test"
   },
   "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^7.3.4",
     "@modelcontextprotocol/sdk": "^1.17.0",
     "@nexus/contracts": "workspace:*",
     "@nexus/core": "workspace:*",
@@ -31,6 +32,7 @@
   "devDependencies": {
     "@next/eslint-plugin-next": "^16.2.12",
     "@nexus/config": "workspace:*",
+    "@playwright/test": "^1.54.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^22.20.1",
     "@types/react": "^19",
@@ -42,7 +44,6 @@
     "tailwindcss": "^4",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.65.0",
-    "vitest": "^3.2.4",
-    "@playwright/test": "^1.54.1"
+    "vitest": "^3.2.4"
   }
 }

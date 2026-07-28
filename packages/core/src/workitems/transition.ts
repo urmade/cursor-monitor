@@ -29,6 +29,8 @@ import { getProjectRole } from '../projects/members';
 import { err, ok, type Result } from '../result';
 import type { WorkItem } from './create';
 import { computeTransitionDirection } from './transition-direction';
+import { deriveWorkItemStatus } from '../status/facts';
+import { emitWorkItemStatusChangedIfNeeded } from './status-changed';
 
 export type TransitionError = CoreError;
 
@@ -149,6 +151,8 @@ async function transitionWorkItemImpl(
   if (existing.version !== expectedVersion) {
     return err(coreError('stale_version', 'Work item was modified by someone else'));
   }
+
+  const statusBefore = await deriveWorkItemStatus(ctx, id);
 
   const toStage = await ctx.db.query.stages.findFirst({
     where: and(
@@ -475,6 +479,15 @@ async function transitionWorkItemImpl(
     id,
     `Withdrawn because item moved to stage ${toStage.key}`,
   );
+
+  const statusAfter = await deriveWorkItemStatus(ctx, id);
+  await emitWorkItemStatusChangedIfNeeded(ctx, {
+    workItemId: id,
+    workItemKey: updated.key,
+    projectId: existing.projectId,
+    from: statusBefore,
+    to: statusAfter,
+  });
 
   return ok(updated);
 }

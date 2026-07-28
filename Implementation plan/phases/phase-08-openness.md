@@ -131,6 +131,8 @@ GET    /api/v1/webhooks/{id}/deliveries                  ?status=
 POST   /api/v1/webhooks/{id}/deliveries/{deliveryId}/replay
 ```
 
+**PoC HTTP surface (implemented vs deferred).** Shipped on the openness branch: project/work-item/stage listing, create/update/transition, `POST …/runs`, paginated work-item lists, and `GET /api/v1/openapi.json`. Deferred past this PoC (UI or jobs only today): webhook CRUD over HTTP, gate/attention/spec HTTP writes, aggregate `/reports`, and inbound partner webhooks. Document any new route here before adding it.
+
 Conventions: bearer token auth (Phase 2's token infrastructure with scopes); `Idempotency-Key` honoured on every POST/PUT (D17); keyset pagination (`?cursor=`, `next_cursor` omitted when exhausted — matching the convention Cursor's own API uses, since our users read both); RFC 9457 problem-detail error bodies; `X-Request-Id` echoed on every response; explicit `429` with `Retry-After`.
 
 **Read broad, write narrow.** Everything readable is exposed. Writes cover exactly what an external tool needs to drive work: create and update items, transition, write specs, answer questions, start runs. Gate and budget *configuration* is read-only over the API because policy is a human, audited act in the PoC and API-driven policy edits would need a governance story we do not have yet.
@@ -350,6 +352,18 @@ revokeToken(ctx, id): Result<void>
 - [ ] OpenAPI is generated from the implementation and validated in CI.
 - [ ] API writes are subject to the same gates and budgets as the UI, proven by paired tests.
 - [ ] SSRF protections and secret handling pass a security review.
+
+## Deviations recorded during implementation
+
+- **Webhook signing secret storage:** Plan SQL shows `secret_hash` only; reversible signing requires the plaintext at delivery time. Implemented `secret_encrypted` (AES-256-GCM using `MCP_TOKEN_SIGNING_KEY` / `WEBHOOK_SECRET_ENCRYPTION_KEY`) alongside `secret_hash` (SHA-256 of `whsec_*`).
+- **Shared `published_at`:** Replaced with per-consumer cursors in `app_meta` (`attention_dispatcher_cursor`, `webhook_dispatcher_cursor`). Attention no longer writes `published_at`.
+- **Migration number:** Openness schema is `0018_openness.sql` (stack renumbering reserves 0016–0017).
+- **OpenAPI:** Served at `/api/v1/openapi.json` via `@asteasolutions/zod-to-openapi` from zod schemas in `apps/web/src/server/openapi-v1.ts` (paths grow with the API surface).
+- **Webhook backlog latency:** A single `dispatchWebhookEvents` call advances the cursor by at most `limit` rows in global `occurred_at` order **within one org**. With a deep backlog, delivery latency scales with backlog depth in per-batch cron ticks (measured: 2,500 filler events + `limit=100` → 25 ticks). The `dispatch_webhook_events` job uses `dispatchWebhookEventsDrain` (up to 50×200 events per org per tick).
+- **Per-org webhook cursor (tenancy fix):** Replaced global `webhook_dispatcher_cursor` with `webhook_dispatcher_cursor:<orgId>` and `eq(events.orgId, ctx.orgId)` on the poll. `migrateLegacyWebhookDispatcherCursor` copies the legacy global row to every org on job tick so preview deploys do not replay history. New orgs without a legacy row start at null (org-scoped only). Regression: `tenancy.integration.test.ts` (fails on global cursor — org A sees 100 cross-tenant rows in one pass).
+- **Mutation table (`classifyHttpStatus(500)`):** Applying `if (status === 500) return 'permanent_failure'` makes `packages/core/src/webhooks/mutation.test.ts` fail (`expected 'permanent_failure' to be 'retry'`) — probe is Red, not mental-only.
+- **`work_item.status_changed`:** Emitted from `transitionWorkItem` and `updateWorkItem` when derived status changes (`packages/core/src/workitems/status-changed.ts`).
+- **Removed delivery integration test (interim):** `packages/core/src/webhooks/delivery.integration.test.ts` was added locally during the first push, deleted before commit when flaky, then **restored** with loopback listener + `advanceOutboxCursorToLatest` so only the new event is dispatched. Manual verification: signing unit tests + outbox cursor test + HTTP delivery integration test.
 
 ## 12. Open questions for this phase
 

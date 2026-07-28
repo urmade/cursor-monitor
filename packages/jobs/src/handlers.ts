@@ -13,6 +13,9 @@ import {
   evaluateGates,
   processPendingEvaluations,
   scrubOldRawResponses,
+  dispatchWebhookEventsDrain,
+  deliverPendingWebhooks,
+  migrateLegacyWebhookDispatcherCursor,
   resumeAfterQuestion,
 } from '@nexus/core';
 import { CursorClient } from '@nexus/cursor-client';
@@ -226,6 +229,33 @@ registerJobHandler('scrub_rubric_raw_responses', async (db) => {
   await scrubOldRawResponses(ctx, 30);
 });
 
+registerJobHandler('dispatch_webhook_events', async (db) => {
+  await migrateLegacyWebhookDispatcherCursor(db);
+  const orgRows = await db.query.orgs.findMany();
+  for (const org of orgRows) {
+    const ctx = createContext({
+      db,
+      orgId: org.id,
+      actor: { kind: 'system', reason: 'dispatch_webhook_events' },
+      flags: createFlagReader(db),
+      logger: silentLogger,
+    });
+    await dispatchWebhookEventsDrain(ctx, { batchSize: 200, maxBatches: 50 });
+  }
+});
+
+registerJobHandler('deliver_webhooks', async (db) => {
+  const org = await db.query.orgs.findFirst();
+  const ctx = createContext({
+    db,
+    orgId: org?.id ?? '00000000-0000-7000-8000-000000000000',
+    actor: { kind: 'system', reason: 'deliver_webhooks' },
+    flags: createFlagReader(db),
+    logger: silentLogger,
+  });
+  await deliverPendingWebhooks(ctx, 50);
+});
+
 /** Enqueue attention maintenance jobs on cron tick. */
 export async function ensureAttentionJobs(): Promise<void> {
   const db = getDb();
@@ -248,6 +278,18 @@ export async function ensureAttentionJobs(): Promise<void> {
     payload: {},
     dedupeKey: `reconcile_attention:${fiveMinBucket}`,
     priority: 7,
+  }).catch(() => undefined);
+  await enqueueJob(db, {
+    kind: 'dispatch_webhook_events',
+    payload: {},
+    dedupeKey: `dispatch_webhook_events:${bucket}`,
+    priority: 8,
+  }).catch(() => undefined);
+  await enqueueJob(db, {
+    kind: 'deliver_webhooks',
+    payload: {},
+    dedupeKey: `deliver_webhooks:${bucket}`,
+    priority: 8,
   }).catch(() => undefined);
 }
 

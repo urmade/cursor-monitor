@@ -899,3 +899,46 @@ export async function actionSnoozeAttention(id: string, untilIso: string) {
   if (!result.ok) throw new Error(result.error.message);
   revalidatePath('/inbox');
 }
+
+export async function actionCreateWebhookEndpoint(
+  formData: FormData,
+): Promise<{ ok: true; secret: string } | { ok: false; error: string }> {
+  const { ctx } = await requireSession();
+  const { createWebhookEndpoint } = await import('@nexus/core');
+  const projectId = String(formData.get('projectId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const url = String(formData.get('url') ?? '');
+  const types = String(formData.get('eventTypes') ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean) as import('@nexus/contracts').PublicEventType[];
+  const result = await createWebhookEndpoint(ctx, {
+    projectId,
+    url,
+    eventTypes: types,
+    description: String(formData.get('description') ?? '') || undefined,
+  });
+  if (!result.ok) return { ok: false, error: result.error.message };
+  revalidatePath(`/projects/${projectKey}/settings`);
+  return { ok: true, secret: result.value.secret };
+}
+
+export async function actionReplayWebhookDelivery(formData: FormData) {
+  const { ctx } = await requireSession();
+  const { replayWebhookDelivery } = await import('@nexus/core');
+  const deliveryId = String(formData.get('deliveryId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const result = await replayWebhookDelivery(ctx, deliveryId);
+  if (!result.ok) throw new Error(result.message);
+  revalidatePath(`/projects/${projectKey}/settings`);
+}
+
+export async function actionReEnableWebhookEndpoint(formData: FormData) {
+  const { ctx } = await requireSession();
+  const { reEnableWebhookEndpoint } = await import('@nexus/core');
+  const endpointId = String(formData.get('endpointId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const result = await reEnableWebhookEndpoint(ctx, endpointId);
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/settings`);
+}

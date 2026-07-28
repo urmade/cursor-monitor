@@ -19,6 +19,8 @@ export const SystemActorSchema = z.object({
 export const ApiTokenActorSchema = z.object({
   kind: z.literal('api_token'),
   tokenId: z.string().uuid(),
+  projectId: z.string().uuid(),
+  scopes: z.array(z.string()),
 });
 
 export const ActorSchema = z.discriminatedUnion('kind', [

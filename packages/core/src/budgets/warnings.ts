@@ -48,4 +48,19 @@ export async function persistBudgetWarning(
     actor: { kind: 'system', reason: 'budget' },
     payload: { code: input.code, workItemId: input.workItemId },
   });
+
+  if (input.code.includes('soft') && item?.projectId) {
+    await emit(ctx.db, {
+      orgId: ctx.orgId,
+      projectId: item.projectId,
+      type: 'budget.threshold_crossed',
+      subjectType: 'work_item',
+      subjectId: input.workItemId,
+      actor: { kind: 'system', reason: 'budget' },
+      payload: {
+        scope: input.code.includes('project') ? 'project' : 'item',
+        threshold: input.code,
+      },
+    });
+  }
 }

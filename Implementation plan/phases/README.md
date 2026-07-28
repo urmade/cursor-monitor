@@ -32,7 +32,7 @@ Nothing here changes scope. Where a technical decision was needed that the visio
 | 5 — Loops and rework | [`phase-05-loops-and-rework.md`](./phase-05-loops-and-rework.md) | — | P1, P2, P4 |
 | 6 — Attention | [`phase-06-attention.md`](./phase-06-attention.md) | M4 Product | P2–P5 |
 | 7 — Judgment assist | [`phase-07-judgment-assist.md`](./phase-07-judgment-assist.md) | — | P2, P3 |
-| 8 — Openness | [`phase-08-openness.md`](./phase-08-openness.md) | — | P1–P5 (parallelisable) |
+| 8 — Openness | [`phase-08-openness.md`](./phase-08-openness.md) | — | P1–P5 (parallelisable) | In progress on `cursor/phase-08-openness-8f3c` |
 | 9 — Estimation, insight, PoC exit | [`phase-09-estimation-insight-and-poc-exit.md`](./phase-09-estimation-insight-and-poc-exit.md) | M5 PoC complete | P4, P5, P7 |
 
 ## How each plan is structured
