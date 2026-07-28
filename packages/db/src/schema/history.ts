@@ -1,4 +1,5 @@
 import {
+  bigint,
   integer,
   jsonb,
   pgTable,
@@ -26,6 +27,7 @@ export const stageInstances = pgTable(
     enteredAt: timestamp('entered_at', { withTimezone: true }).notNull().defaultNow(),
     exitedAt: timestamp('exited_at', { withTimezone: true }),
     outcome: text('outcome'),
+    costMicroUsd: bigint('cost_micro_usd', { mode: 'bigint' }).notNull().default(BigInt(0)),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

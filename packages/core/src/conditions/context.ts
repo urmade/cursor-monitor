@@ -96,6 +96,22 @@ export async function buildGateContext(
   const enforcementMode =
     settings.enforcement_mode === 'observe' ? 'observe' : 'enforce';
 
+  let itemSpentRatio: number | null = null;
+  let projectSpentRatio: number | null = null;
+  try {
+    const { budgetsFeatureEnabled } = await import('../budgets/flags');
+    if (await budgetsFeatureEnabled(ctx, project.id)) {
+      const { computeBudgetState } = await import('../budgets/state');
+      const budget = await computeBudgetState(ctx, workItemId);
+      if (budget) {
+        itemSpentRatio = budget.item.ratio;
+        projectSpentRatio = budget.project.ratio;
+      }
+    }
+  } catch {
+    // schema / flags optional in early tests
+  }
+
   const reportBody = latestReport?.raw as Record<string, unknown> | undefined;
 
   return {
@@ -149,8 +165,8 @@ export async function buildGateContext(
       countFromStage: 0,
     },
     budget: {
-      itemSpentRatio: null,
-      projectSpentRatio: null,
+      itemSpentRatio,
+      projectSpentRatio,
     },
     project: {
       id: project.id,

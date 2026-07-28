@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { BatchOutcome, GateOutcome, GateTrigger } from '@nexus/contracts';
 import {
   approvals,

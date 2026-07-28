@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   integer,
   jsonb,
@@ -10,6 +11,7 @@ import {
   unique,
   index,
 } from 'drizzle-orm/pg-core';
+import { modelPrices } from './cost';
 import { users } from './identity';
 import { projects } from './projects';
 import { workItems } from './work-items';
@@ -52,6 +54,15 @@ export const runs = pgTable(
     errorDetail: text('error_detail'),
     lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
     pollAttempts: integer('poll_attempts').notNull().default(0),
+    costEstimateMicroUsd: bigint('cost_estimate_micro_usd', { mode: 'bigint' }),
+    costActualMicroUsd: bigint('cost_actual_micro_usd', { mode: 'bigint' }),
+    costMicroUsd: bigint('cost_micro_usd', { mode: 'bigint' }),
+    costSource: text('cost_source').$type<
+      'estimated' | 'provider' | 'admin_reconciled' | 'mixed'
+    >(),
+    priceRowId: uuid('price_row_id').references(() => modelPrices.id),
+    reconciledAt: timestamp('reconciled_at', { withTimezone: true }),
+    allocationMethod: text('allocation_method'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

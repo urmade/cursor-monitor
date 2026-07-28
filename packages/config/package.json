@@ -3,6 +3,21 @@
   "version": "0.0.0",
   "private": true,
   "files": [
-    "tsconfig.base.json"
-  ]
+    "tsconfig.base.json",
+    "eslint-base.mjs",
+    "eslint-boundaries.mjs"
+  ],
+  "exports": {
+    "./eslint-base.mjs": "./eslint-base.mjs",
+    "./eslint-boundaries.mjs": "./eslint-boundaries.mjs"
+  },
+  "scripts": {
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.5",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.65.0"
+  }
 }

@@ -16,6 +16,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
@@ -40,8 +41,10 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@nexus/config": "workspace:*",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "eslint": "^9.39.5",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "typescript": "^5.8.3",

@@ -294,6 +294,25 @@ export async function getTicketForAgent(
     warningPayload = [];
   }
 
+  let budgetPayload: Record<string, unknown> | null = null;
+  try {
+    const { computeBudgetState } = await import('../budgets/state');
+    const st = await computeBudgetState(ctx, ticketId);
+    if (st) {
+      budgetPayload = {
+        budget_micro_usd: st.item.budgetMicro?.toString() ?? null,
+        spent_micro_usd: st.item.spentMicro.toString(),
+        ratio: st.item.ratio,
+        state: st.item.state,
+        project_state: st.project.state,
+        project_cap_micro_usd: st.project.capMicro?.toString() ?? null,
+        project_spent_micro_usd: st.project.spentMicro.toString(),
+      };
+    }
+  } catch {
+    budgetPayload = null;
+  }
+
   return ok({
     id: item.id,
     key: item.key,
@@ -308,7 +327,7 @@ export async function getTicketForAgent(
     status,
     spec: specMeta,
     warnings: warningPayload,
-    budget: null,
+    budget: budgetPayload,
     links: {
       ui_url: `${base.replace(/\/$/, '')}/projects/${project?.key}/items/${item.key}`,
     },

@@ -1,4 +1,6 @@
 import {
+  bigint,
+  boolean,
   integer,
   jsonb,
   pgTable,
@@ -38,6 +40,13 @@ export const workItems = pgTable(
     createdByUserId: uuid('created_by_user_id').references(() => users.id),
     currentRunId: uuid('current_run_id'),
     lastReportId: uuid('last_report_id'),
+    budgetMicroUsd: bigint('budget_micro_usd', { mode: 'bigint' }),
+    budgetOverridden: boolean('budget_overridden').notNull().default(false),
+    spendMicroUsd: bigint('spend_micro_usd', { mode: 'bigint' }).notNull().default(BigInt(0)),
+    spendSource: text('spend_source').$type<
+      'estimated' | 'provider' | 'admin_reconciled' | 'mixed'
+    >(),
+    pausedReason: text('paused_reason'),
     version: integer('version').notNull().default(1),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

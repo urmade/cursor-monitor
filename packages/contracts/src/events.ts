@@ -55,6 +55,13 @@ export const EventTypeSchema = z.enum([
   'approval.rejected',
   'approval.withdrawn',
   'intervention.recorded',
+  // Phase 4
+  'cost.estimated',
+  'cost.provider',
+  'cost.reconciled',
+  'cost.rollup_drift',
+  'budget.item_overridden',
+  'budget.threshold_crossed',
 ]);
 
 export type EventType = z.infer<typeof EventTypeSchema>;

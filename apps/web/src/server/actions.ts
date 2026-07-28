@@ -19,6 +19,8 @@ import {
   setLabels,
   transitionWorkItem,
   updateGate,
+  raiseProjectCap,
+  resumeItemBudget,
   updateProject,
   updateStage,
   updateWorkItem,
@@ -536,4 +538,122 @@ export async function actionTestResolveBinding(formData: FormData) {
   redirect(
     `/projects/${projectKey}/settings?resolve=${encodeURIComponent(result.value.reason)}`,
   );
+}
+
+export async function actionUpdateBudgetSettings(formData: FormData) {
+  const { ctx } = await requireSession();
+  const projectId = String(formData.get('projectId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+
+  function parseUsdField(name: string): number {
+    const raw = String(formData.get(name) ?? '').trim();
+    if (!raw) {
+      throw new Error(`${name} is required`);
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new Error(`${name} must be a non-negative number`);
+    }
+    return n;
+  }
+
+  const burnCapUsd = parseUsdField('burnCapUsd');
+  const lowSoftUsd = parseUsdField('lowSoftUsd');
+  const lowHardUsd = parseUsdField('lowHardUsd');
+  const mediumSoftUsd = parseUsdField('mediumSoftUsd');
+  const mediumHardUsd = parseUsdField('mediumHardUsd');
+  const highSoftUsd = parseUsdField('highSoftUsd');
+  const highHardUsd = parseUsdField('highHardUsd');
+
+  for (const [soft, hard, label] of [
+    [lowSoftUsd, lowHardUsd, 'Low'],
+    [mediumSoftUsd, mediumHardUsd, 'Medium'],
+    [highSoftUsd, highHardUsd, 'High'],
+  ] as const) {
+    if (soft >= hard) {
+      throw new Error(`${label} soft budget must be less than hard budget`);
+    }
+  }
+  const maxHard = Math.max(lowHardUsd, mediumHardUsd, highHardUsd);
+  if (burnCapUsd < maxHard) {
+    throw new Error('Project burn cap must be at least the largest item hard budget');
+  }
+
+  const { getProjectByKey, fromUsd } = await import('@nexus/core');
+  const project = await getProjectByKey(ctx, projectKey);
+  if (!project.ok) throw new Error('Project not found');
+  const existing = project.value.settings as Record<string, unknown>;
+  const result = await updateProject(ctx, projectId, {
+    settings: {
+      ...existing,
+      budget: {
+        burnCapMicroUsd: fromUsd(burnCapUsd).toString(),
+        complexityDefaults: {
+          low: {
+            softMicroUsd: fromUsd(lowSoftUsd).toString(),
+            hardMicroUsd: fromUsd(lowHardUsd).toString(),
+          },
+          medium: {
+            softMicroUsd: fromUsd(mediumSoftUsd).toString(),
+            hardMicroUsd: fromUsd(mediumHardUsd).toString(),
+          },
+          high: {
+            softMicroUsd: fromUsd(highSoftUsd).toString(),
+            hardMicroUsd: fromUsd(highHardUsd).toString(),
+          },
+        },
+        reserveMicroUsdPerRun: fromUsd(2).toString(),
+        blockOnBurnCap: true,
+      },
+    },
+  });
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/settings`);
+}
+
+export async function actionRaiseProjectCap(formData: FormData) {
+  const { ctx } = await requireSession();
+  const projectId = String(formData.get('projectId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const capUsd = Number(formData.get('capUsd') ?? 0);
+  const reason = String(formData.get('reason') ?? '').trim();
+  const { fromUsd } = await import('@nexus/core');
+  const result = await raiseProjectCap(ctx, projectId, {
+    micro: fromUsd(capUsd),
+    reason,
+  });
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/board`);
+  revalidatePath(`/projects/${projectKey}/spend`);
+}
+
+export async function actionResumeBudgetItem(formData: FormData) {
+  const { ctx } = await requireSession();
+  const workItemId = String(formData.get('workItemId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const itemKey = String(formData.get('itemKey') ?? '');
+  const reason = String(formData.get('reason') ?? '').trim();
+  const result = await resumeItemBudget(ctx, workItemId, reason);
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/items/${itemKey}`);
+}
+
+export async function actionSetItemBudget(formData: FormData) {
+  const { ctx } = await requireSession();
+  const workItemId = String(formData.get('workItemId') ?? '');
+  const projectKey = String(formData.get('projectKey') ?? '');
+  const itemKey = String(formData.get('itemKey') ?? '');
+  const budgetUsd = Number(formData.get('budgetUsd') ?? 0);
+  const reason = String(formData.get('reason') ?? '').trim();
+  if (!Number.isFinite(budgetUsd) || budgetUsd <= 0) {
+    throw new Error('Budget must be a positive USD amount');
+  }
+  const { setItemBudget, fromUsd } = await import('@nexus/core');
+  const result = await setItemBudget(ctx, workItemId, {
+    micro: fromUsd(budgetUsd),
+    reason,
+  });
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath(`/projects/${projectKey}/items/${itemKey}`);
+  revalidatePath(`/projects/${projectKey}/board`);
 }

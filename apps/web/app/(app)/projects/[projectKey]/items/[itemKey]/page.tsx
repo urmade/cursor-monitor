@@ -24,8 +24,10 @@ import { labels as labelsTable, workItemLabels } from '@nexus/db';
 import {
   Badge,
   Button,
+  CostSourceBadge,
   complexityToTone,
   Field,
+  formatMicroUsdDisplay,
   Input,
   Panel,
   PanelBody,
@@ -37,10 +39,12 @@ import {
   TabsList,
   TabsTrigger,
   Textarea,
+  LiveDuration,
 } from '@nexus/ui';
 import { notFound } from 'next/navigation';
 import { ChecksPanel, WhyCantMove } from '../../../../../../src/components/ChecksPanel';
 import { RunTimeline } from '../../../../../../src/components/RunTimeline';
+import { TicketBudgetBar } from '../../../../../../src/components/TicketBudgetBar';
 import {
   actionAnswerQuestion,
   actionCancelRun,
@@ -48,7 +52,9 @@ import {
   actionDismissWarning,
   actionDryRunGates,
   actionLaunchRun,
+  actionResumeBudgetItem,
   actionSaveSpec,
+  actionSetItemBudget,
   actionTransitionWorkItem,
   actionUpdateWorkItem,
 } from '../../../../../../src/server/actions';
@@ -99,6 +105,11 @@ export default async function ItemPage({
   });
   const canMove = can(ctx.actor, 'work_item.transition', {
     type: 'work_item',
+    projectId: project.value.id,
+    role,
+  });
+  const canProjectUpdate = can(ctx.actor, 'project.update', {
+    type: 'project',
     projectId: project.value.id,
     role,
   });
@@ -192,7 +203,7 @@ export default async function ItemPage({
   const stageById = new Map(stages.map((s) => [s.id, s]));
   const reportByRun = new Map(reports.map((r) => [r.runId, r]));
   // eslint-disable-next-line react-hooks/purity -- SSR wall-clock snapshot for open-stage duration
-  const pageRenderedAtMs = Date.now();
+  const _pageRenderedAtMs = Date.now();
 
   const currentLabels = await ctx.db
     .select({
@@ -209,6 +220,10 @@ export default async function ItemPage({
   const specContent = currentSpec?.content as Record<string, unknown> | undefined;
   const openBlocking = qs.filter((q) => q.status === 'open' && q.blocking);
 
+  const currentStageInstance = item.currentStageInstanceId
+    ? instances.find((si) => si.id === item.currentStageInstanceId)
+    : undefined;
+
   const runRows = runs.map((r) => {
     const report = reportByRun.get(r.id);
     return {
@@ -221,6 +236,9 @@ export default async function ItemPage({
       errorCode: r.errorCode,
       errorDetail: r.errorDetail,
       createdAt: r.createdAt.toISOString(),
+      costMicroUsd: r.costMicroUsd?.toString() ?? null,
+      costSource: r.costSource ?? null,
+      costEstimateMicroUsd: r.costEstimateMicroUsd?.toString() ?? null,
       report: report
         ? {
             headline: report.headline,
@@ -248,6 +266,51 @@ export default async function ItemPage({
           <h2 className="text-xl font-medium tracking-tight text-fg">
             {item.title}
           </h2>
+          <div className="mt-2">
+            <TicketBudgetBar
+              spentMicro={item.spendMicroUsd?.toString() ?? '0'}
+              budgetMicro={item.budgetMicroUsd?.toString() ?? null}
+              spendSource={item.spendSource ?? 'estimated'}
+            />
+          </div>
+          {item.pausedReason === 'budget' && canWrite ? (
+            <form
+              action={actionResumeBudgetItem}
+              className="mt-3 grid max-w-md gap-2 rounded-md border border-border p-3"
+            >
+              <input type="hidden" name="workItemId" value={item.id} />
+              <input type="hidden" name="projectKey" value={projectKey} />
+              <input type="hidden" name="itemKey" value={itemKey} />
+              <p className="text-sm text-warning-fg">
+                Item paused for budget. Raise the item budget or project cap, then resume.
+              </p>
+              <Field label="Resume reason">
+                <Textarea name="reason" required rows={2} />
+              </Field>
+              <Button type="submit" size="sm" className="w-fit">
+                Resume after budget fix
+              </Button>
+            </form>
+          ) : null}
+          {canProjectUpdate ? (
+            <form
+              action={actionSetItemBudget}
+              className="mt-3 grid max-w-md gap-2 rounded-md border border-border p-3"
+            >
+              <input type="hidden" name="workItemId" value={item.id} />
+              <input type="hidden" name="projectKey" value={projectKey} />
+              <input type="hidden" name="itemKey" value={itemKey} />
+              <Field label="Override item hard budget (USD)">
+                <Input name="budgetUsd" type="number" step="0.01" min="0" required />
+              </Field>
+              <Field label="Reason">
+                <Textarea name="reason" required rows={2} />
+              </Field>
+              <Button type="submit" size="sm" variant="secondary" className="w-fit">
+                Set item budget
+              </Button>
+            </form>
+          ) : null}
         </div>
 
         {openBlocking.length > 0 ? (
@@ -470,9 +533,6 @@ export default async function ItemPage({
                 <ul className="space-y-2 text-sm">
                   {[...instances].reverse().map((inst) => {
                     const stage = stageById.get(inst.stageId);
-                    const durationMs = inst.exitedAt
-                      ? inst.exitedAt.getTime() - inst.enteredAt.getTime()
-                      : pageRenderedAtMs - inst.enteredAt.getTime();
                     return (
                       <li
                         key={inst.id}
@@ -488,9 +548,11 @@ export default async function ItemPage({
                           </span>
                         </div>
                         <div className="text-xs text-fg-muted">
-                          {inst.exitedAt == null
-                            ? `${Math.round(durationMs / 1000)}s (open)`
-                            : `${Math.round(durationMs / 1000)}s`}
+                          <LiveDuration
+                            since={inst.enteredAt}
+                            until={inst.exitedAt}
+                            liveSuffix=" (open)"
+                          />
                         </div>
                       </li>
                     );
@@ -644,6 +706,22 @@ export default async function ItemPage({
         <PropertyRow
           label="Stage"
           value={stageById.get(item.currentStageId)?.name ?? '—'}
+        />
+        <PropertyRow
+          label="Stage spend"
+          value={
+            currentStageInstance ? (
+              <span className="inline-flex items-center gap-1">
+                {formatMicroUsdDisplay(currentStageInstance.costMicroUsd)}
+                <CostSourceBadge
+                  source={item.spendSource ?? 'estimated'}
+                  className="inline-flex"
+                />
+              </span>
+            ) : (
+              '—'
+            )
+          }
         />
         <PropertyRow
           label="Labels"

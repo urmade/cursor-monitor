@@ -211,6 +211,12 @@ export async function answerQuestion(
         .update(questions)
         .set({ resumeRunId })
         .where(eq(questions.id, questionId));
+    } else if (
+      launch.error.code === 'budget_burn' ||
+      launch.error.code === 'budget_hard' ||
+      launch.error.code === 'budget_paused'
+    ) {
+      return err(launch.error);
     } else {
       ctx.logger.warn(
         { err: launch.error, questionId },

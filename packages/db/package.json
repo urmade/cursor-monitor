@@ -19,6 +19,7 @@
     "exec-migrations": "tsx src/exec-migrations.ts",
     "build": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
     "test": "vitest run --passWithNoTests",
     "seed": "tsx ../core/src/seed.ts"
   },
@@ -28,8 +29,10 @@
     "uuid": "^11.1.1"
   },
   "devDependencies": {
+    "@nexus/config": "workspace:*",
     "@types/node": "^22.20.1",
     "@types/uuid": "^10.0.0",
+    "eslint": "^9.39.5",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"

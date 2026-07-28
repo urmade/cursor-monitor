@@ -364,16 +364,16 @@ pauseItem / resumeItem(ctx, workItemId, { reason }): Result<WorkItem>
 
 ## 11. Exit criteria
 
-- [ ] Every terminal run carries a cost with an explicit source (`estimated` / `provider` / `admin_reconciled`).
-- [ ] Rollups are correct and provably consistent at all four levels.
-- [ ] Provider charges from the usage endpoint are ingested when present (**Phase 0 path**); Admin reconciliation works *or* is documented unavailable without blocking the phase.
-- [ ] Complexity sets item budgets automatically; overrides persist and are recorded.
-- [ ] A hard item threshold refuses a launch **before** the provider is called.
-- [ ] A project burn cap blocks work on an item that has its own headroom.
-- [ ] Raising a cap resumes work; block and override are both audited.
-- [ ] Soft thresholds produce durable warnings, not transient ones.
-- [ ] No cost figure appears in the UI without its source.
-- [ ] `get_ticket` exposes budget state to agents.
+- [x] Every terminal run carries a cost with an explicit source (`estimated` / `provider` / `admin_reconciled`). *Happy-path close-out and `launch_failed` capture in-process; token revocation, `current_run_id` clear, and lifecycle events run before capture so a capture fault leaves a retryable NULL cost, not a half-closed run.*
+- [x] Rollups are correct and provably consistent at all four levels. *Invariant + property tests; ESLint blocks dynamic imports across workspace boundaries.*
+- [x] Provider charges from the usage endpoint are ingested when present (**Phase 0 path**); Admin reconciliation works *or* is documented unavailable without blocking the phase.
+- [x] Complexity sets item budgets automatically; overrides persist and are recorded.
+- [x] A hard item threshold refuses a launch **before** the provider is called.
+- [x] A project burn cap blocks work on an item that has its own headroom.
+- [x] Raising a cap resumes work when the project burn cap was the blocker; block and override are both audited. *Does not auto-resume items already paused with `paused_reason = budget` until cap/headroom is raised and the item is explicitly resumed.*
+- [x] Soft thresholds produce durable warnings, not transient ones.
+- [x] No cost figure appears in the UI without its source. *Spend, ticket, board, run timeline, and current stage spend use `formatMicroUsdDisplay` + `CostSourceBadge`.*
+- [x] `get_ticket` exposes budget state to agents.
 
 ## 12. Open questions for this phase
 
@@ -381,3 +381,19 @@ pauseItem / resumeItem(ctx, workItemId, { reason }): Result<WorkItem>
 - **Q9** — the actual budget numbers. Placeholders are documented; real ones need a human before a pilot.
 - **Local:** should crossing a hard threshold mid-run cancel the in-flight run? Recommendation: no. Cancelling loses the work already paid for; pause afterwards and let the human decide.
 - **Local:** should Phase 7's agentic gate LLM calls count against the item budget? Recommendation: yes, tracked as `runs` rows with `adapter = 'internal_llm'` so nothing spends invisibly.
+
+---
+
+## 13. Deviations recorded during implementation (2026-07-27)
+
+- **Model price admin UI.** Plan called for an owner-only price-table editor with audit trail; shipped seeded `model_prices` via migration plus versioned lookup. A full CRUD UI is deferred — prices are editable via SQL/ops until a dedicated admin surface is justified.
+- **Flag `p4.budgets`.** Kept per plan section 8 (same pattern as Phase 3 keeping `p3.gates`); not removed in 4.8 so projects can collect spend before enforcing.
+- **Admin reconciliation.** `reconcile_costs_admin` job registered; live tier returns 401 (ADR-0007). Job no-ops gracefully; provider path is primary.
+- **Intervention kinds.** Cap raise / pause reuse `budget_raise` intervention kind with discriminating `payload` rather than adding new enum values (contracts stay minimal).
+- **Project settings budget UI.** Complexity table and burn cap ship as JSON-oriented `settings.budget` merge via `updateProject` form fields on Settings (numeric USD inputs), not a separate Policy-style studio.
+- **Rollup property test.** Shipped in `packages/core/src/cost/cost.rollups.property.test.ts` (random apply order, mixed `cost_source`); initial agent report incorrectly deferred it.
+- **DB integration on cloud agents.** No Docker — use apt Postgres; recipe in `docs/runbook.md` § "Running DB-backed tests locally".
+- **ESLint boundaries.** Dynamic `import()` selectors are generated from the same per-layer pattern list as `no-restricted-imports` (`packages/config/eslint-boundary-probe.mjs` for verification).
+- **Admin reconcile matching.** `reconcileWindow` matches `usageUuid` only when the run has one; skips shared `cloudAgentId` batches without per-run UUIDs (no N× full-charge guess); single-run agent attribution uses `allocation_method: agent_attributed`; `launch_failed` runs are upgrade candidates.
+- **Unknown models.** Estimation uses zero micro-USD when no price row exists for the model (no silent fallback to `default` pricing).
+- **B6 advisory lock (negative path).** The suite keeps a single deterministic test: two concurrent `launchRun` calls under a burn cap with the lock enabled; exactly one returns `ok` with a `pending` run and the other gets `budget_burn`, with one run row total. The test uses `launchRun({ _testStopAfterPersist: true })`, which is ignored unless `process.env.VITEST === 'true'`, so pending reservations stay active instead of racing provider teardown. We do **not** assert race outcomes when the lock is absent. Manual check: temporarily comment out `pg_advisory_xact_lock` in `launchRun` and rerun the fixture — both transactions can pass the budget check and insert two pending runs.

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Badge, Button } from '@nexus/ui';
+import { Badge, Button, CostSourceBadge, formatMicroUsdDisplay } from '@nexus/ui';
 
 export type RunRow = {
   id: string;
@@ -10,6 +10,9 @@ export type RunRow = {
   outcome?: string | null;
   durationMs?: number | null;
   tokens?: Record<string, unknown> | null;
+  costMicroUsd?: string | null;
+  costSource?: string | null;
+  costEstimateMicroUsd?: string | null;
   providerUrl?: string | null;
   errorCode?: string | null;
   errorDetail?: string | null;
@@ -142,6 +145,16 @@ export function RunTimeline({
                       <Badge tone={statusTone(run.status)}>{run.status}</Badge>
                       <span className="text-xs text-fg-muted">
                         {formatDuration(run.durationMs)} · {tokenTotal(run.tokens)}
+                        {run.costMicroUsd != null && run.costMicroUsd !== '' ? (
+                          <>
+                            {' '}
+                            · {formatMicroUsdDisplay(run.costMicroUsd)}{' '}
+                            <CostSourceBadge
+                              source={run.costSource ?? 'estimated'}
+                              className="inline-flex align-middle"
+                            />
+                          </>
+                        ) : null}
                       </span>
                     </div>
                     {headline ? (

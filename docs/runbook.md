@@ -96,3 +96,40 @@ Per binding: `maxDurationMinutes`. Global: `orchestration.enabled` flag.
 ### Overrides
 
 Only `owner`/`maintainer` (`gate.override`). Reason required. Visible forever on the transition (`reasonCode: gate_override`) and in `interventions`.
+
+## Phase 4 — economics
+
+| Surface | URL | Notes |
+|---|---|---|
+| Ticket spend | `/projects/[key]/items/[itemKey]` | Budget bar, per-run cost with source badge |
+| Spend audit | `/projects/[key]/spend` | `budget_events` timeline |
+| Project settings | `/projects/[key]/settings` | Burn cap & complexity defaults (`settings.budget`) |
+
+### Feature flags
+
+- `p4.budgets` — when off, estimation/rollups still run; enforcement (pre-launch block + budget gate blocks) is skipped.
+
+### Costs look wrong
+
+1. Check each run's `cost_source` on the ticket timeline (`Provider` vs `Estimate` badge).
+2. Compare `cost_estimate_micro_usd` vs `cost_micro_usd` on the run row (provider drift).
+3. Run or wait for `recompute_cost_rollups` — non-zero drift is written to `cost_rollup_checks` and emitted as `cost.rollup_drift` (not auto-repaired).
+4. Admin reconciliation requires a valid team Admin key; on our tier it 401s (ADR-0007) — rely on usage-endpoint `chargedCents`.
+5. Unknown models produce `price.model_unknown` warnings and zero estimates until `model_prices` is updated.
+
+### Running DB-backed tests locally
+
+Cloud agent VMs do **not** have Docker. Use apt Postgres (installs in ~10s):
+
+```bash
+sudo apt-get update -qq && sudo apt-get install -y -q postgresql
+sudo pg_ctlcluster 16 main start
+sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+sudo -u postgres psql -c "CREATE DATABASE nexus_test;"
+export DB_POSTGRES_URL="postgres://postgres:postgres@127.0.0.1:5432/nexus_test"
+export DB_SSL=disable
+pnpm db:exec-migrations
+pnpm test
+```
+
+Integration suites (`integration.services.test.ts`, `gates.integration.test.ts`, `cost.integration.test.ts`, `cost.rollups.property.test.ts`) require `DB_POSTGRES_URL`; without it they are skipped.

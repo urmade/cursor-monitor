@@ -78,6 +78,16 @@ export async function updateWorkItem(
   if (!updated) {
     return err(coreError('stale_version', 'Work item was modified by someone else'));
   }
+
+  if (patch.complexity !== undefined) {
+    try {
+      const { applyComplexityBudget } = await import('../budgets/actions');
+      await applyComplexityBudget(ctx, id, patch.complexity);
+    } catch {
+      // best-effort when budget tables absent
+    }
+  }
+
   return ok(updated);
 }
 

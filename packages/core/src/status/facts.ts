@@ -119,6 +119,34 @@ export async function loadStatusFacts(
     // tables may be absent in very early tests
   }
 
+  let budgetState: 'ok' | 'warn' | 'blocked' = 'ok';
+  try {
+    const itemRow = await ctx.db.query.workItems.findFirst({
+      where: eq(workItems.id, workItemId),
+    });
+    const { budgetsFeatureEnabled } = await import('../budgets/flags');
+    if (
+      itemRow &&
+      (await budgetsFeatureEnabled(ctx, itemRow.projectId))
+    ) {
+      if (itemRow.pausedReason === 'budget') {
+        budgetState = 'blocked';
+      } else {
+        const { computeBudgetState } = await import('../budgets/state');
+        const st = await computeBudgetState(ctx, workItemId);
+        if (st) {
+          if (st.item.state === 'blocked' || st.project.state === 'blocked') {
+            budgetState = 'blocked';
+          } else if (st.item.state === 'warn' || st.project.state === 'warn') {
+            budgetState = 'warn';
+          }
+        }
+      }
+    }
+  } catch {
+    budgetState = 'ok';
+  }
+
   return {
     activeRuns: activeRuns.length,
     openBlockingQuestions: openBlocking.length,
@@ -131,6 +159,7 @@ export async function loadStatusFacts(
           reason: override.reason,
         }
       : null,
+    budgetState,
   };
 }
 
@@ -178,7 +207,6 @@ export async function loadActiveRunElapsed(
 export async function countMcpCallsLastMinute(
   ctx: ServiceContext,
 ): Promise<number> {
-  const { mcpCallLog } = await import('@nexus/db');
   const rows = await ctx.db.execute(sql`
     select count(*)::int as c from mcp_call_log
     where created_at > now() - interval '1 minute'

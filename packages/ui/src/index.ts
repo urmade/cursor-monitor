@@ -74,3 +74,9 @@ export {
   useCommandPaletteShortcut,
 } from './patterns/CommandPalette';
 export { AppShell, Breadcrumb } from './patterns/AppShell';
+export { LiveDuration, type LiveDurationProps } from './patterns/LiveDuration';
+export {
+  CostSourceBadge,
+  formatMicroUsdDisplay,
+  type CostSourceLabel,
+} from './cost/CostDisplay';

@@ -9,6 +9,7 @@ import {
   listWorkItems,
   loadActiveRunElapsed,
   can,
+  parseProjectBudgetSettings,
 } from '@nexus/core';
 import { eq, inArray } from 'drizzle-orm';
 import { workItemLabels, labels as labelsTable } from '@nexus/db';
@@ -23,6 +24,9 @@ import {
   PanelBody,
   PanelHeader,
   statusToTone,
+  formatMicroUsdDisplay,
+  CostSourceBadge,
+  LiveDuration,
 } from '@nexus/ui';
 import { notFound } from 'next/navigation';
 import { TransitionWorkItemMenu } from '../../../../../src/components/TransitionWorkItemMenu';
@@ -103,7 +107,11 @@ export default async function BoardPage({
     .map((i) => i.id);
   const blockReasonByItem = await getLatestBlockingReasonsForItems(ctx, blockedIds);
   // eslint-disable-next-line react-hooks/purity -- SSR wall-clock snapshot for elapsed readout
-  const boardRenderedAtMs = Date.now();
+  const _boardRenderedAtMs = Date.now();
+
+  const budgetSettings = parseProjectBudgetSettings(
+    project.value.settings as Record<string, unknown>,
+  );
 
   return (
     <div className="space-y-4">
@@ -177,14 +185,17 @@ export default async function BoardPage({
                   const status = statusByItem.get(item.id) ?? 'idle';
                   const itemLabels = labelsByItem.get(item.id) ?? [];
                   const active = activeRuns.get(item.id);
-                  const elapsedSec = active
-                    ? Math.max(
-                        0,
-                        Math.round(
-                          (boardRenderedAtMs - active.startedAt.getTime()) / 1000,
-                        ),
-                      )
-                    : null;
+                  const hard =
+                    item.budgetMicroUsd ??
+                    (item.complexity
+                      ? budgetSettings.complexityDefaults[item.complexity]
+                          .hardMicroUsd
+                      : null);
+                  const spent = item.spendMicroUsd ?? BigInt(0);
+                  const spendWarn =
+                    hard && hard > BigInt(0)
+                      ? Number(spent) / Number(hard) >= 0.8
+                      : false;
                   return (
                     <Panel key={item.id} className="bg-surface-sunken">
                       <PanelBody className="p-3">
@@ -201,7 +212,8 @@ export default async function BoardPage({
                         </Link>
                         {active ? (
                           <div className="mt-1 text-[11px] text-accent">
-                            AI working · {elapsedSec}s
+                            AI working ·{' '}
+                            <LiveDuration since={active.startedAt} />
                           </div>
                         ) : null}
                         <div className="mt-2 flex flex-wrap gap-1">
@@ -211,6 +223,15 @@ export default async function BoardPage({
                             </Badge>
                           ) : null}
                           <Badge tone={statusToTone(status)}>{status}</Badge>
+                          {spendWarn ? (
+                            <Badge tone="warning" title="Item spend past soft budget">
+                              {formatMicroUsdDisplay(spent)}{' '}
+                              <CostSourceBadge
+                                source={item.spendSource ?? 'estimated'}
+                                className="inline-flex"
+                              />
+                            </Badge>
+                          ) : null}
                           {blockReasonByItem.has(item.id) ? (
                             <Badge
                               tone="blocked"

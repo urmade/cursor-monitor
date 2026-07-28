@@ -48,6 +48,19 @@ async function main(): Promise<void> {
       set: { enabled: true, updatedAt: new Date() },
     });
 
+  await db
+    .insert(featureFlags)
+    .values({
+      key: 'p4.budgets',
+      enabled: true,
+      enabledForProjectIds: [],
+      updatedBy: userId,
+    })
+    .onConflictDoUpdate({
+      target: featureFlags.key,
+      set: { enabled: true, updatedAt: new Date() },
+    });
+
   const alpha = await createProject(ctx, {
     key: 'ALPHA',
     name: 'Alpha',
@@ -55,6 +68,22 @@ async function main(): Promise<void> {
     template: 'default',
   });
   if (!alpha.ok) throw new Error(alpha.error.message);
+
+  const { updateProject } = await import('./projects');
+  await updateProject(ctx, alpha.value.id, {
+    settings: {
+      budget: {
+        burnCapMicroUsd: String(100_000_000n),
+        complexityDefaults: {
+          low: { softMicroUsd: '2000000', hardMicroUsd: '5000000' },
+          medium: { softMicroUsd: '5000000', hardMicroUsd: '15000000' },
+          high: { softMicroUsd: '15000000', hardMicroUsd: '50000000' },
+        },
+        reserveMicroUsdPerRun: '2000000',
+        blockOnBurnCap: true,
+      },
+    },
+  });
 
   const beta = await createProject(ctx, {
     key: 'BETA',

@@ -7,6 +7,7 @@ import {
   listPromptTemplates,
   listStages,
   listWorkItems,
+  parseProjectBudgetSettings,
 } from '@nexus/core';
 import {
   Badge,
@@ -25,6 +26,7 @@ import {
   actionCreateDefaultPrompt,
   actionRenameStage,
   actionTestResolveBinding,
+  actionUpdateBudgetSettings,
   actionUpdateProject,
   actionUpsertBinding,
   actionUpsertLabel,
@@ -80,6 +82,13 @@ export default async function SettingsPage({
   const bindings = bindingsR.ok ? bindingsR.value : [];
   const templates = templatesR.ok ? templatesR.value : [];
   const items = itemsR.ok ? itemsR.value : [];
+  const budgetSettings = parseProjectBudgetSettings(
+    project.value.settings as Record<string, unknown>,
+  );
+  const capUsd =
+    budgetSettings.burnCapMicroUsd != null
+      ? Number(budgetSettings.burnCapMicroUsd) / 1_000_000
+      : 100;
 
   const inputClass =
     'flex h-[var(--nx-control-md)] w-full rounded-md border border-border bg-surface px-2.5 text-sm';
@@ -113,6 +122,113 @@ export default async function SettingsPage({
           <p className="mt-4 text-xs text-fg-subtle">Your role: {role ?? 'none'}</p>
         </PanelBody>
       </Panel>
+
+      {canUpdate ? (
+        <Panel>
+          <PanelHeader>
+            <span className="text-sm font-medium">Budget defaults</span>
+          </PanelHeader>
+          <PanelBody>
+            <form action={actionUpdateBudgetSettings} className="grid gap-3">
+              <input type="hidden" name="projectId" value={project.value.id} />
+              <input type="hidden" name="projectKey" value={projectKey} />
+              <Field label="Project burn cap (USD)">
+                <Input
+                  name="burnCapUsd"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  required
+                  defaultValue={capUsd}
+                />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Low soft (USD)">
+                  <Input
+                    name="lowSoftUsd"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    defaultValue={
+                      Number(budgetSettings.complexityDefaults.low.softMicroUsd) /
+                      1_000_000
+                    }
+                  />
+                </Field>
+                <Field label="Low hard (USD)">
+                  <Input
+                    name="lowHardUsd"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    defaultValue={
+                      Number(budgetSettings.complexityDefaults.low.hardMicroUsd) /
+                      1_000_000
+                    }
+                  />
+                </Field>
+                <Field label="Medium soft (USD)">
+                  <Input
+                    name="mediumSoftUsd"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    defaultValue={
+                      Number(budgetSettings.complexityDefaults.medium.softMicroUsd) /
+                      1_000_000
+                    }
+                  />
+                </Field>
+                <Field label="Medium hard (USD)">
+                  <Input
+                    name="mediumHardUsd"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    defaultValue={
+                      Number(budgetSettings.complexityDefaults.medium.hardMicroUsd) /
+                      1_000_000
+                    }
+                  />
+                </Field>
+                <Field label="High soft (USD)">
+                  <Input
+                    name="highSoftUsd"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    defaultValue={
+                      Number(budgetSettings.complexityDefaults.high.softMicroUsd) /
+                      1_000_000
+                    }
+                  />
+                </Field>
+                <Field label="High hard (USD)">
+                  <Input
+                    name="highHardUsd"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    defaultValue={
+                      Number(budgetSettings.complexityDefaults.high.hardMicroUsd) /
+                      1_000_000
+                    }
+                  />
+                </Field>
+              </div>
+              <Button type="submit" className="w-fit">
+                Save budget settings
+              </Button>
+            </form>
+          </PanelBody>
+        </Panel>
+      ) : null}
 
       <Panel>
         <PanelHeader>

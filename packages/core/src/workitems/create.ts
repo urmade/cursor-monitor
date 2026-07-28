@@ -143,6 +143,15 @@ export async function createWorkItem(
     return final!;
   });
 
+  if (input.complexity) {
+    try {
+      const { applyComplexityBudget } = await import('../budgets/actions');
+      await applyComplexityBudget(ctx, item.id, input.complexity);
+    } catch {
+      // optional
+    }
+  }
+
   return ok(item);
 }
 

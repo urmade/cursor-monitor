@@ -3,6 +3,7 @@
   "globalPassThroughEnv": [
     "DB_POSTGRES_URL",
     "DB_POSTGRES_URL_NON_POOLING",
+    "DB_SSL",
     "FLAG_P3_GATES"
   ],
   "tasks": {
@@ -17,6 +18,7 @@
       "passThroughEnv": [
         "DB_POSTGRES_URL",
         "DB_POSTGRES_URL_NON_POOLING",
+        "DB_SSL",
         "FLAG_P3_GATES"
       ]
     },

@@ -208,17 +208,6 @@ export function listToolDefinitions() {
 }
 
 function toolInputJsonSchema(name: string): Record<string, unknown> {
-  const schemas: Record<string, z.ZodType> = {
-    get_ticket: GetTicketArgsSchema,
-    get_spec: GetSpecArgsSchema,
-    update_spec: UpdateSpecArgsSchema,
-    post_stage_report: PostStageReportArgsSchema,
-    set_labels: SetLabelsArgsSchema,
-    ask_question: AskQuestionArgsSchema,
-    attach_artifact_ref: AttachArtifactRefArgsSchema,
-    get_gate_context: GetGateContextArgsSchema,
-    list_questions: ListQuestionsArgsSchema,
-  };
   // Minimal JSON Schema for MCP list_tools — zod-to-json not required for agents.
   return {
     type: 'object',

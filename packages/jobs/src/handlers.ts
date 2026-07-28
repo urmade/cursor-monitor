@@ -2,6 +2,8 @@ import {
   createContext,
   createFlagReader,
   pollRun,
+  recomputeCostRollupsJob,
+  reconcileWindow,
   silentLogger,
   sweepStuckRuns,
 } from '@nexus/core';
@@ -60,6 +62,32 @@ registerJobHandler('cursor_live_smoke', async () => {
  * closeOutRun / setLabels (core cannot depend on @nexus/jobs without a cycle).
  * Dead `gate_on_*` handlers were removed rather than left registered-but-unenqueued.
  */
+
+registerJobHandler('recompute_cost_rollups', async (db) => {
+  const org = await db.query.orgs.findFirst();
+  const ctx = createContext({
+    db,
+    orgId: org?.id ?? '00000000-0000-7000-8000-000000000000',
+    actor: { kind: 'system', reason: 'recompute_cost_rollups' },
+    flags: createFlagReader(db),
+    logger: silentLogger,
+  });
+  await recomputeCostRollupsJob(ctx);
+});
+
+registerJobHandler('reconcile_costs_admin', async (db) => {
+  const org = await db.query.orgs.findFirst();
+  const ctx = createContext({
+    db,
+    orgId: org?.id ?? '00000000-0000-7000-8000-000000000000',
+    actor: { kind: 'system', reason: 'reconcile_costs_admin' },
+    flags: createFlagReader(db),
+    logger: silentLogger,
+  });
+  const to = new Date();
+  const from = new Date(to.getTime() - 72 * 60 * 60 * 1000);
+  await reconcileWindow(ctx, { from, to });
+});
 
 /** Enqueue the hourly stuck sweep if not already pending. */
 export async function ensureSweepJob(): Promise<void> {

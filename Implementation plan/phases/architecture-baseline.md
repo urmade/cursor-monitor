@@ -109,7 +109,9 @@ A pnpm + Turborepo monorepo with one deployable app. The package split exists to
 └── Implementation plan/            # this planning material
 ```
 
-**Dependency rule (enforced by an ESLint boundaries rule in Phase 1):**
+**Dependency rule (enforced by ESLint `no-restricted-imports` in every workspace package):**
+
+Layer definitions live in `packages/config/eslint-boundaries.mjs`; each package’s `eslint.config.mjs` calls `boundariesFor('<layer>')` alongside the shared TypeScript rules in `packages/config/eslint-base.mjs`. Root `pnpm lint` runs `turbo run lint` across `apps/web` and all `packages/*`.
 
 ```
 apps/web (Next.js)  →  mcp, jobs, core, db, contracts, ui, cursor-client

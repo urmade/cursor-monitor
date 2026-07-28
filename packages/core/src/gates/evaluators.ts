@@ -1,4 +1,5 @@
 import {
+  BudgetConfigSchema,
   FieldRuleConfigSchema,
   HumanApprovalConfigSchema,
   unwrapCondition,
@@ -114,15 +115,92 @@ function humanApproval(input: {
   };
 }
 
+function budgetGate(input: {
+  gate: GateRow;
+  ctx: import('../conditions/evaluate').GateContext;
+}): GateEvalResult {
+  const started = Date.now();
+  const parsed = BudgetConfigSchema.safeParse(input.gate.config);
+  if (!parsed.success) {
+    return {
+      gateId: input.gate.id,
+      gateName: input.gate.name,
+      gateVersion: input.gate.version,
+      outcome: 'error',
+      reason: 'Invalid budget config',
+      evidence: { issues: parsed.error.flatten() },
+      durationMs: Date.now() - started,
+    };
+  }
+  const config = parsed.data;
+  const warnAt = config.warnAtRatio ?? config.softRatio ?? 0.8;
+  const blockAt = config.blockAtRatio ?? config.hardRatio ?? 1;
+  const scope = config.scope ?? 'item';
+  const ratio =
+    scope === 'project'
+      ? input.ctx.budget.projectSpentRatio
+      : input.ctx.budget.itemSpentRatio;
+
+  if (ratio == null) {
+    return {
+      gateId: input.gate.id,
+      gateName: input.gate.name,
+      gateVersion: input.gate.version,
+      outcome: 'pass',
+      reason: 'No budget configured for scope',
+      evidence: { scope },
+      durationMs: Date.now() - started,
+    };
+  }
+
+  const message =
+    (typeof config.message === 'string' && config.message) ||
+    `Budget ${scope} at ${Math.round(ratio * 100)}%`;
+
+  if (ratio >= blockAt) {
+    return {
+      gateId: input.gate.id,
+      gateName: input.gate.name,
+      gateVersion: input.gate.version,
+      outcome: 'block',
+      reason: message,
+      evidence: { ratio, warnAt, blockAt, scope },
+      durationMs: Date.now() - started,
+    };
+  }
+  if (ratio >= warnAt) {
+    return {
+      gateId: input.gate.id,
+      gateName: input.gate.name,
+      gateVersion: input.gate.version,
+      outcome: 'warn',
+      reason: message,
+      evidence: { ratio, warnAt, blockAt, scope },
+      warningCode: 'budget.threshold',
+      durationMs: Date.now() - started,
+    };
+  }
+
+  return {
+    gateId: input.gate.id,
+    gateName: input.gate.name,
+    gateVersion: input.gate.version,
+    outcome: 'pass',
+    reason: 'Within budget',
+    evidence: { ratio, scope },
+    durationMs: Date.now() - started,
+  };
+}
+
 function stubEvaluator(
-  kind: 'budget' | 'agentic',
+  kind: 'agentic',
 ): (input: { gate: GateRow }) => GateEvalResult {
   return (input) => ({
     gateId: input.gate.id,
     gateName: input.gate.name,
     gateVersion: input.gate.version,
     outcome: 'skipped',
-    reason: `${kind} evaluator not yet available (Phase ${kind === 'budget' ? '4' : '7'})`,
+    reason: `${kind} evaluator not yet available (Phase 7)`,
     evidence: { stub: true },
     durationMs: 0,
   });
@@ -131,7 +209,7 @@ function stubEvaluator(
 export function ensureDefaultEvaluatorsRegistered(): void {
   registerEvaluator('field_rule', fieldRule);
   registerEvaluator('human_approval', humanApproval);
-  registerEvaluator('budget', stubEvaluator('budget'));
+  registerEvaluator('budget', budgetGate);
   registerEvaluator('agentic', stubEvaluator('agentic'));
 }
 

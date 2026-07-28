@@ -33,7 +33,6 @@ describe.runIf(hasDb)('phase 3 gates integration', () => {
   const db = hasDb ? getDb() : (null as unknown as ReturnType<typeof getDb>);
   let orgId = '';
   let ownerId = '';
-  let memberId = '';
 
   beforeAll(async () => {
     const owner = await upsertUserFromPassport(db, {
@@ -44,12 +43,11 @@ describe.runIf(hasDb)('phase 3 gates integration', () => {
     orgId = owner.orgId;
     ownerId = owner.userId;
 
-    const member = await upsertUserFromPassport(db, {
+    await upsertUserFromPassport(db, {
       externalSub: `p3-member-${Date.now()}`,
       email: 'p3-member@example.com',
       name: 'P3 Member',
     });
-    memberId = member.userId;
   });
 
   afterAll(async () => {
@@ -585,7 +583,9 @@ describe.runIf(hasDb)('phase 3 gates integration', () => {
     if (blocked.ok) return;
     const approvalId = (
       blocked.error.details as { blockedBy: Array<{ approvalId?: string }> }
-    ).blockedBy[0]?.approvalId!;
+    ).blockedBy[0]?.approvalId;
+    expect(approvalId).toBeTruthy();
+    if (!approvalId) return;
 
     const decided = await decideApproval(ctx, approvalId, {
       decision: 'approved',

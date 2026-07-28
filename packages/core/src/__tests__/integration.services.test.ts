@@ -3,7 +3,6 @@ import { and, eq, isNull } from 'drizzle-orm';
 import {
   closeDb,
   getDb,
-  events,
   projectMembers,
   stages,
   workItems,

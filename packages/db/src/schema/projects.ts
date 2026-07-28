@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   integer,
   jsonb,
@@ -29,6 +30,7 @@ export const projects = pgTable(
       .notNull()
       .default({ acceptanceCriteria: false, visualConfirmation: false }),
     settings: jsonb('settings').$type<Record<string, unknown>>().notNull().default({}),
+    spendMicroUsd: bigint('spend_micro_usd', { mode: 'bigint' }).notNull().default(BigInt(0)),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

@@ -191,9 +191,12 @@ export type HumanApprovalConfig = z.infer<typeof HumanApprovalConfigSchema>;
 /** Phase 4 fills this in; Phase 3 accepts the shape so stubs can store config. */
 export const BudgetConfigSchema = z
   .object({
+    scope: z.enum(['item', 'project']).default('item'),
+    warnAtRatio: z.number().min(0).max(2).default(0.8),
+    blockAtRatio: z.number().min(0).max(2).default(1),
+    message: z.string().max(500).default(''),
     softRatio: z.number().min(0).max(2).optional(),
     hardRatio: z.number().min(0).max(2).optional(),
-    scope: z.enum(['item', 'project']).optional(),
   })
   .passthrough();
 export type BudgetConfig = z.infer<typeof BudgetConfigSchema>;

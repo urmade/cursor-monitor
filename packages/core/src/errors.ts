@@ -14,7 +14,11 @@ export type CoreErrorCode =
   | 'item_archived'
   | 'daily_cap_exceeded'
   | 'concurrency_ceiling'
-  | 'gate_blocked';
+  | 'gate_blocked'
+  | 'budget_hard'
+  | 'budget_burn'
+  | 'budget_paused'
+  | 'budget_unavailable';
 
 export type CoreError = {
   code: CoreErrorCode;

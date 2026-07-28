@@ -1,6 +1,7 @@
 import nextPlugin from "@next/eslint-plugin-next";
 import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
+import { boundariesFor } from "@nexus/config/eslint-boundaries.mjs";
 
 /** @type {import('eslint').Linter.Config[]} */
 const eslintConfig = [
@@ -19,11 +20,16 @@ const eslintConfig = [
       ...reactHooks.configs.recommended.rules,
       "@typescript-eslint/no-unused-vars": [
         "error",
-        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
       ],
       "@typescript-eslint/no-explicit-any": "error",
     },
   },
+  ...boundariesFor("web"),
 ];
 
 export default eslintConfig;

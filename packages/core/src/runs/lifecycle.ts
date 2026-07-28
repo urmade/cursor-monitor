@@ -165,6 +165,11 @@ export async function launchRun(
     workItemId: string;
     bindingId?: string;
     trigger?: RunTrigger;
+    /**
+     * Vitest-only: return after the advisory-lock transaction persists a pending run.
+     * Ignored outside `process.env.VITEST === 'true'` so production never skips provider I/O.
+     */
+    _testStopAfterPersist?: boolean;
   },
 ): Promise<Result<Run, CoreError>> {
   const item = await ctx.db.query.workItems.findFirst({
@@ -256,6 +261,7 @@ export async function launchRun(
   if (!item.currentStageInstanceId) {
     return err(coreError('invariant', 'Work item has no current stage instance'));
   }
+  const stageInstanceId = item.currentStageInstanceId;
 
   const stage = await ctx.db.query.stages.findFirst({
     where: eq(stages.id, item.currentStageId),
@@ -273,7 +279,7 @@ export async function launchRun(
   });
   const attempt = previousAttempts.length + 1;
 
-  let promptTemplateId = binding.promptTemplateId;
+  const promptTemplateId = binding.promptTemplateId;
   let promptBody = DEFAULT_PROMPT_TEMPLATE;
   if (promptTemplateId) {
     const tpl = await ctx.db.query.promptTemplates.findFirst({
@@ -291,13 +297,74 @@ export async function launchRun(
     by: ctx.actor,
   };
 
-  // Persist run BEFORE provider call so timeouts leave a record.
-  const [runRow] = await ctx.db
-    .insert(runs)
-    .values({
+  const budgetCheck = await (
+    await import('../budgets/check')
+  ).checkBudget(ctx, { workItemId: item.id });
+  if (!budgetCheck.ok) {
+    return err(budgetCheck.error);
+  }
+  if (!budgetCheck.value.allow) {
+    const code =
+      budgetCheck.value.reason === 'project_burn'
+        ? 'budget_burn'
+        : budgetCheck.value.reason === 'item_paused'
+          ? 'budget_paused'
+          : budgetCheck.value.reason === 'budget_unavailable'
+            ? 'budget_unavailable'
+            : 'budget_hard';
+    return err(coreError(code, budgetCheck.value.detail, {
+      reason: budgetCheck.value.reason,
+    }));
+  }
+
+  let launchBlocked: CoreError | null = null;
+
+  await ctx.db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${item.projectId}), 51004)`,
+    );
+
+    const txCtx: ServiceContext = { ...ctx, db: tx };
+
+    const existingInTx = await tx.query.runs.findFirst({
+      where: and(
+        eq(runs.workItemId, item.id),
+        inArray(runs.status, [...ACTIVE_RUN_STATUSES]),
+      ),
+    });
+    if (existingInTx) {
+      launchBlocked = coreError('run_already_active', 'An active run already exists for this work item', {
+        runId: existingInTx.id,
+      });
+      return;
+    }
+
+    const budgetInTx = await (
+      await import('../budgets/check')
+    ).checkBudget(txCtx, { workItemId: item.id });
+    if (!budgetInTx.ok) {
+      launchBlocked = budgetInTx.error;
+      return;
+    }
+    if (!budgetInTx.value.allow) {
+      const code =
+        budgetInTx.value.reason === 'project_burn'
+          ? 'budget_burn'
+          : budgetInTx.value.reason === 'item_paused'
+            ? 'budget_paused'
+            : budgetInTx.value.reason === 'budget_unavailable'
+              ? 'budget_unavailable'
+              : 'budget_hard';
+      launchBlocked = coreError(code, budgetInTx.value.detail, {
+        reason: budgetInTx.value.reason,
+      });
+      return;
+    }
+
+    await tx.insert(runs).values({
       id: runId,
       workItemId: item.id,
-      stageInstanceId: item.currentStageInstanceId,
+      stageInstanceId,
       bindingId: binding.id,
       promptTemplateId: promptTemplateId ?? null,
       adapter: binding.adapter,
@@ -307,13 +374,29 @@ export async function launchRun(
       attempt,
       deadlineAt,
       model: typeof config.model === 'string' ? config.model : null,
-    })
-    .returning();
+    });
 
-  await ctx.db
-    .update(workItems)
-    .set({ currentRunId: runId, updatedAt: now })
-    .where(eq(workItems.id, item.id));
+    await tx
+      .update(workItems)
+      .set({ currentRunId: runId, updatedAt: now })
+      .where(eq(workItems.id, item.id));
+  });
+
+  if (launchBlocked) {
+    return err(launchBlocked);
+  }
+
+  if (input._testStopAfterPersist === true && process.env.VITEST === 'true') {
+    const pending = await ctx.db.query.runs.findFirst({
+      where: eq(runs.id, runId),
+    });
+    if (!pending) {
+      return err(coreError('invariant', 'Pending run row missing after persist'));
+    }
+    return ok(pending);
+  }
+
+  // Persist run BEFORE provider call so timeouts leave a record — done inside advisory lock above.
 
   const minted = await createMcpToken(ctx.db, {
     runId,
@@ -513,6 +596,19 @@ export async function launchRun(
       payload: { errorCode: mapped, message: message.slice(0, 500) },
     });
 
+    try {
+      const { captureRunCostAtCloseOut } = await import('../cost/capture');
+      await captureRunCostAtCloseOut(ctx, runId);
+    } catch (captureErr) {
+      ctx.logger.warn(
+        {
+          err: captureErr instanceof Error ? captureErr.message : String(captureErr),
+          runId,
+        },
+        'cost capture failed for launch_failed run',
+      );
+    }
+
     return err(
       coreError(mapped, message, { runId, run: failed }),
     );
@@ -654,7 +750,7 @@ export async function pollRun(
     // Terminal from provider — fetch usage then close out.
     let tokens: Record<string, unknown> | null = null;
     let usageUuid: string | null = null;
-    let gitSnapshot: unknown = providerRun.git?.branches ?? null;
+    const gitSnapshot: unknown = providerRun.git?.branches ?? null;
     try {
       const usage = await client.getUsage(run.providerAgentId, run.providerRunId);
       tokens = {
@@ -736,8 +832,28 @@ export async function closeOutRun(
     !ACTIVE_RUN_STATUSES.includes(run.status as (typeof ACTIVE_RUN_STATUSES)[number]) &&
     run.status !== 'pending'
   ) {
-    // Already terminal — idempotent.
-    return ok(run);
+    const item = await ctx.db.query.workItems.findFirst({
+      where: eq(workItems.id, run.workItemId),
+    });
+    if (item?.currentRunId === runId) {
+      const report = await ctx.db.query.stageReports.findFirst({
+        where: eq(stageReports.runId, runId),
+      });
+      await completeRunAfterTerminal(ctx, {
+        run,
+        status: run.status,
+        report,
+        now: run.terminalAt ?? ctx.clock(),
+        durationMs: run.durationMs,
+      });
+    }
+    if (run.costMicroUsd == null) {
+      await captureAtCloseOutBestEffort(ctx, runId);
+    }
+    const refreshed = await ctx.db.query.runs.findFirst({
+      where: eq(runs.id, runId),
+    });
+    return ok(refreshed ?? run);
   }
 
   const report = await ctx.db.query.stageReports.findFirst({
@@ -770,6 +886,58 @@ export async function closeOutRun(
     })
     .where(eq(runs.id, runId))
     .returning();
+
+  await completeRunAfterTerminal(ctx, {
+    run,
+    status,
+    report,
+    now,
+    durationMs,
+  });
+
+  await captureAtCloseOutBestEffort(ctx, runId);
+
+  const finalRun = await ctx.db.query.runs.findFirst({
+    where: eq(runs.id, runId),
+  });
+
+  return ok(finalRun ?? updated!);
+}
+
+async function captureAtCloseOutBestEffort(
+  ctx: ServiceContext,
+  runId: string,
+): Promise<void> {
+  try {
+    const { captureRunCostAtCloseOut } = await import('../cost/capture');
+    const captured = await captureRunCostAtCloseOut(ctx, runId);
+    if (!captured.ok) {
+      ctx.logger.warn(
+        { err: captured.error.message, runId },
+        'cost capture failed at close-out (will retry on next close-out)',
+      );
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    ctx.logger.warn(
+      { err: message, runId },
+      'cost capture threw at close-out (will retry on next close-out)',
+    );
+  }
+}
+
+async function completeRunAfterTerminal(
+  ctx: ServiceContext,
+  input: {
+    run: Run;
+    status: string;
+    report: { outcome: string | null } | null | undefined;
+    now: Date;
+    durationMs: number | null;
+  },
+): Promise<void> {
+  const { run, status, report, now, durationMs } = input;
+  const runId = run.id;
 
   await revokeRunTokens(ctx.db, runId);
 
@@ -815,7 +983,6 @@ export async function closeOutRun(
     },
   });
 
-  // Phase 3: event-triggered gates on run finished (inline; never fails close-out).
   if (status === 'completed' || status === 'completed_no_report') {
     try {
       const { evaluateOnRunFinished } = await import('../gates/events');
@@ -839,8 +1006,6 @@ export async function closeOutRun(
       );
     }
   }
-
-  return ok(updated!);
 }
 
 export async function cancelRun(
