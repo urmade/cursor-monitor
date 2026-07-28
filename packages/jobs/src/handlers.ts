@@ -6,6 +6,10 @@ import {
   reconcileWindow,
   silentLogger,
   sweepStuckRuns,
+  dispatchAttentionEvents,
+  reconcileAttention,
+  rescoreOpenItems,
+  resumeAfterQuestion,
 } from '@nexus/core';
 import { CursorClient } from '@nexus/cursor-client';
 import { getDb } from '@nexus/db';
@@ -88,6 +92,95 @@ registerJobHandler('reconcile_costs_admin', async (db) => {
   const from = new Date(to.getTime() - 72 * 60 * 60 * 1000);
   await reconcileWindow(ctx, { from, to });
 });
+
+registerJobHandler('dispatch_attention_events', async (db) => {
+  const org = await db.query.orgs.findFirst();
+  const ctx = createContext({
+    db,
+    orgId: org?.id ?? '00000000-0000-7000-8000-000000000000',
+    actor: { kind: 'system', reason: 'dispatch_attention_events' },
+    flags: createFlagReader(db),
+    logger: silentLogger,
+  });
+  await dispatchAttentionEvents(ctx, 200);
+});
+
+registerJobHandler('reconcile_attention', async (db) => {
+  const org = await db.query.orgs.findFirst();
+  const ctx = createContext({
+    db,
+    orgId: org?.id ?? '00000000-0000-7000-8000-000000000000',
+    actor: { kind: 'system', reason: 'reconcile_attention' },
+    flags: createFlagReader(db),
+    logger: silentLogger,
+  });
+  await reconcileAttention(ctx);
+});
+
+registerJobHandler('resume_after_question', async (db, job) => {
+  const org = await db.query.orgs.findFirst();
+  const ctx = createContext({
+    db,
+    orgId: org?.id ?? '00000000-0000-7000-8000-000000000000',
+    actor: { kind: 'system', reason: 'resume_after_question' },
+    flags: createFlagReader(db),
+    logger: silentLogger,
+  });
+  const p = job.payload as {
+    questionId?: string;
+    answer?: string;
+    workItemId?: string;
+    attempt?: number;
+    forceFreshAgent?: boolean;
+  };
+  if (!p.questionId || !p.workItemId || !p.answer) {
+    throw new Error('resume_after_question missing fields');
+  }
+  await resumeAfterQuestion(ctx, {
+    questionId: p.questionId,
+    answer: p.answer,
+    workItemId: p.workItemId,
+    attempt: p.attempt ?? 0,
+    forceFreshAgent: p.forceFreshAgent ?? false,
+  });
+});
+
+registerJobHandler('rescore_attention', async (db) => {
+  const org = await db.query.orgs.findFirst();
+  const ctx = createContext({
+    db,
+    orgId: org?.id ?? '00000000-0000-7000-8000-000000000000',
+    actor: { kind: 'system', reason: 'rescore_attention' },
+    flags: createFlagReader(db),
+    logger: silentLogger,
+  });
+  await rescoreOpenItems(ctx);
+});
+
+/** Enqueue attention maintenance jobs on cron tick. */
+export async function ensureAttentionJobs(): Promise<void> {
+  const db = getDb();
+  const bucket = new Date().toISOString().slice(0, 16);
+  await enqueueJob(db, {
+    kind: 'dispatch_attention_events',
+    payload: {},
+    dedupeKey: `dispatch_attention_events:${bucket}`,
+    priority: 8,
+  }).catch(() => undefined);
+  await enqueueJob(db, {
+    kind: 'rescore_attention',
+    payload: {},
+    dedupeKey: `rescore_attention:${bucket}`,
+    priority: 3,
+  }).catch(() => undefined);
+  const fiveMinBucket = Math.floor(Date.now() / (5 * 60 * 1000));
+  await enqueueJob(db, {
+    kind: 'reconcile_attention',
+    payload: {},
+    dedupeKey: `reconcile_attention:${fiveMinBucket}`,
+    priority: 7,
+  }).catch(() => undefined);
+}
 
 /** Enqueue the hourly stuck sweep if not already pending. */
 export async function ensureSweepJob(): Promise<void> {

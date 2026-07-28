@@ -136,7 +136,11 @@ export async function setItemBudget(
     subjectType: 'work_item',
     subjectId: workItemId,
     actor: ctx.actor,
-    payload: { micro: input.micro.toString(), reason: input.reason },
+    payload: {
+      workItemId,
+      micro: input.micro.toString(),
+      reason: input.reason,
+    },
   });
 
   return ok(row!);
@@ -207,6 +211,16 @@ export async function raiseProjectCap(
     return [updated];
   });
 
+  await emit(ctx.db, {
+    orgId: ctx.orgId,
+    projectId,
+    type: 'budget.cap_raised',
+    subjectType: 'project',
+    subjectId: projectId,
+    actor: ctx.actor,
+    payload: { micro: input.micro.toString(), reason: input.reason },
+  });
+
   return ok(row!);
 }
 
@@ -246,6 +260,16 @@ export async function pauseItemForBudget(
       target: { workItemId },
       detail: { reason, paused: true },
     });
+  });
+
+  await emit(ctx.db, {
+    orgId: ctx.orgId,
+    projectId: item.projectId,
+    type: 'budget.blocked',
+    subjectType: 'work_item',
+    subjectId: workItemId,
+    actor: ctx.actor,
+    payload: { workItemId, reason, pausedReason: 'budget' },
   });
 }
 
@@ -309,6 +333,16 @@ export async function resumeItemBudget(
     });
 
     return [updated];
+  });
+
+  await emit(ctx.db, {
+    orgId: ctx.orgId,
+    projectId: item.projectId,
+    type: 'item.resumed',
+    subjectType: 'work_item',
+    subjectId: workItemId,
+    actor: ctx.actor,
+    payload: { workItemId, reason, pausedReason: null },
   });
 
   return ok(row!);

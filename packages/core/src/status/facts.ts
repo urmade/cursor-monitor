@@ -205,6 +205,94 @@ export async function loadActiveRunElapsed(
   return map;
 }
 
+/** Batched status facts for board swimlanes (bounded query count). */
+export async function loadStatusFactsForWorkItems(
+  ctx: ServiceContext,
+  items: Array<{
+    id: string;
+    pausedReason: string | null;
+    loopEscalated: boolean;
+    currentStageInstanceId: string | null;
+  }>,
+): Promise<Map<string, Partial<StatusFacts>>> {
+  const map = new Map<string, Partial<StatusFacts>>();
+  const ids = items.map((i) => i.id);
+  if (ids.length === 0) return map;
+
+  const empty = (): Partial<StatusFacts> => ({
+    activeRuns: 0,
+    openBlockingQuestions: 0,
+    failedRunsSinceLastSuccess: 0,
+    pendingApprovals: 0,
+    blockingGateResults: 0,
+    override: null,
+    budgetState: 'ok',
+    loopEscalated: false,
+  });
+  for (const id of ids) map.set(id, empty());
+
+  const activeRuns = await ctx.db.query.runs.findMany({
+    where: and(
+      inArray(runs.workItemId, ids),
+      inArray(runs.status, [...ACTIVE_RUN_STATUSES]),
+    ),
+  });
+  for (const r of activeRuns) {
+    const f = map.get(r.workItemId)!;
+    f.activeRuns = (f.activeRuns ?? 0) + 1;
+  }
+
+  const openBlocking = await ctx.db.query.questions.findMany({
+    where: and(
+      inArray(questions.workItemId, ids),
+      eq(questions.status, 'open'),
+      eq(questions.blocking, true),
+    ),
+  });
+  for (const q of openBlocking) {
+    const f = map.get(q.workItemId)!;
+    f.openBlockingQuestions = (f.openBlockingQuestions ?? 0) + 1;
+  }
+
+  const overrides = await ctx.db.query.statusOverrides.findMany({
+    where: and(inArray(statusOverrides.workItemId, ids), isNull(statusOverrides.clearedAt)),
+    orderBy: [desc(statusOverrides.createdAt)],
+  });
+  const seenOverride = new Set<string>();
+  for (const o of overrides) {
+    if (seenOverride.has(o.workItemId)) continue;
+    seenOverride.add(o.workItemId);
+    const f = map.get(o.workItemId)!;
+    f.override = {
+      status: o.status as import('@nexus/contracts').DerivedStatus,
+      reason: o.reason,
+    };
+  }
+
+  try {
+    const { approvals } = await import('@nexus/db');
+    const pending = await ctx.db.query.approvals.findMany({
+      where: and(inArray(approvals.workItemId, ids), eq(approvals.status, 'pending')),
+    });
+    for (const a of pending) {
+      const f = map.get(a.workItemId)!;
+      f.pendingApprovals = (f.pendingApprovals ?? 0) + 1;
+    }
+  } catch {
+    // gates package optional in early tests
+  }
+
+  for (const item of items) {
+    const f = map.get(item.id)!;
+    f.loopEscalated = item.loopEscalated;
+    if (item.pausedReason === 'budget') {
+      f.budgetState = 'blocked';
+    }
+  }
+
+  return map;
+}
+
 export async function countMcpCallsLastMinute(
   ctx: ServiceContext,
 ): Promise<number> {

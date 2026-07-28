@@ -8,7 +8,7 @@ import {
   queueDepth,
 } from './queue';
 import { getJobHandler } from './registry';
-import { ensureSweepJob } from './handlers';
+import { ensureSweepJob, ensureAttentionJobs } from './handlers';
 
 export type TickResult = {
   ok: true;
@@ -71,6 +71,7 @@ export async function runCronTick(): Promise<TickResult> {
   }).catch(() => undefined);
 
   await ensureSweepJob().catch(() => undefined);
+  await ensureAttentionJobs().catch(() => undefined);
 
   const hour = new Date().getUTCHours();
   if (hour === 3) {

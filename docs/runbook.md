@@ -154,4 +154,35 @@ pnpm db:exec-migrations
 pnpm test
 ```
 
-Integration suites (`integration.services.test.ts`, `gates.integration.test.ts`, `cost.integration.test.ts`, `cost.rollups.property.test.ts`, `loops.integration.test.ts`) require `DB_POSTGRES_URL`; without it they are skipped.
+Integration suites (`integration.services.test.ts`, `gates.integration.test.ts`, `cost.integration.test.ts`, `cost.rollups.property.test.ts`, `loops.integration.test.ts`, `attention.integration.test.ts`) require `DB_POSTGRES_URL`; without it they are skipped.
+
+## Phase 6 — attention inbox
+
+| Surface | URL | Notes |
+|---|---|---|
+| Inbox | `/inbox` | Default landing when `p6.inbox` is enabled; polls every 15s |
+| Health | `/api/health` | `attention.lastReconcileAt`, `attention.drift` |
+
+### An item is missing from the inbox
+
+1. Check `/api/health` → `attention.drift` and `attention.lastReconcileAt`.
+2. Confirm the source still exists (open blocking question, pending approval, budget pause, terminal failed run, loop escalation).
+3. Run reconciliation: enqueue or wait for cron job `reconcile_attention` (every ~5 minutes via dedupe bucket).
+4. Inspect `attention_reconciliations` for recent `drift` / `detail.items`.
+5. Ensure `dispatch_attention_events` is running (cron tick enqueues per minute).
+
+### Playwright (local)
+
+```bash
+export DB_POSTGRES_URL=postgres://postgres:postgres@127.0.0.1:5432/nexus_test
+export DB_SSL=disable
+pnpm db:exec-migrations && pnpm db:seed -- --demo
+pnpm --filter @nexus/web run build
+PORT=3001 DB_POSTGRES_URL=... pnpm --filter @nexus/web exec next start -p 3001   # separate terminal
+pnpm --filter @nexus/web exec playwright install chromium
+DB_POSTGRES_URL=... PLAYWRIGHT_BASE_URL=http://127.0.0.1:3001 PLAYWRIGHT_SKIP_WEBSERVER=1 pnpm --filter @nexus/web test:e2e
+```
+
+Use `next start` (not `pnpm dev`) for Playwright in this environment: Turbopack HMR websockets fail against `127.0.0.1`, so client components may not hydrate and inbox clicks will not fire. `playwright.config.ts` can start a production server automatically when `PLAYWRIGHT_SKIP_WEBSERVER` is unset.
+
+CI does not run Playwright today (managed `managed-app.yml` is policy-owned).

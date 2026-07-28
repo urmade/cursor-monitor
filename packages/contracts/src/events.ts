@@ -66,6 +66,12 @@ export const EventTypeSchema = z.enum([
   'loop.detected',
   'loop.escalated',
   'loop.edge_closed',
+  // Phase 6
+  'budget.blocked',
+  'budget.cap_raised',
+  'item.resumed',
+  'attention.created',
+  'attention.resolved',
 ]);
 
 export type EventType = z.infer<typeof EventTypeSchema>;

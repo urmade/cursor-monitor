@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getMigrationVersion, pingDb, getDb, mcpCallLog } from '@nexus/db';
 import { queueDepth, readLastCronTick } from '@nexus/jobs';
+import { readLastReconciliation } from '@nexus/core';
 import { sql } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
@@ -15,6 +16,8 @@ export async function GET() {
     oldestPendingAt: string | null;
   } | null = null;
   let mcp: { callsLastMinute: number } | null = null;
+  let attention: { lastReconcileAt: string | null; drift: number | null } | null =
+    null;
 
   try {
     dbOk = await pingDb();
@@ -58,6 +61,16 @@ export async function GET() {
     } catch {
       mcp = { callsLastMinute: 0 };
     }
+
+    try {
+      const recon = await readLastReconciliation();
+      attention = {
+        lastReconcileAt: recon.at,
+        drift: recon.drift,
+      };
+    } catch {
+      attention = null;
+    }
   }
 
   return NextResponse.json({
@@ -68,6 +81,7 @@ export async function GET() {
     lastCronTick,
     queue,
     mcp,
+    attention,
   });
 }
 

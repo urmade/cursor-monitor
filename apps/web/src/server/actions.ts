@@ -755,3 +755,24 @@ export async function actionArchiveReasonCode(formData: FormData) {
   if (!result.ok) throw new Error(result.error.message);
   revalidatePath(`/projects/${projectKey}/settings`);
 }
+
+export async function actionExecuteInboxAction(
+  attentionItemId: string,
+  action: string,
+  payload?: Record<string, unknown>,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { ctx } = await requireSession();
+  const { executeAction } = await import('@nexus/core');
+  const result = await executeAction(ctx, { attentionItemId, action, payload });
+  if (!result.ok) return { ok: false, error: result.error.message };
+  revalidatePath('/inbox');
+  return { ok: true };
+}
+
+export async function actionSnoozeAttention(id: string, untilIso: string) {
+  const { ctx } = await requireSession();
+  const { snoozeAttention } = await import('@nexus/core');
+  const result = await snoozeAttention(ctx, id, new Date(untilIso), 'snoozed from inbox');
+  if (!result.ok) throw new Error(result.error.message);
+  revalidatePath('/inbox');
+}

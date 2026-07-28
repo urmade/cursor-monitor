@@ -65,6 +65,7 @@ export {
 export * from './cost';
 export * from './budgets';
 export * from './loops';
+export * from './attention';
 export type {
   TransitionInput,
   AdvanceTransitionInput,

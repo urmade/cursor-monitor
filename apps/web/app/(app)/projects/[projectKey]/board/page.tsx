@@ -12,6 +12,7 @@ import {
   can,
   parseProjectBudgetSettings,
   projectReworkStats,
+  boardAttentionSummary,
 } from '@nexus/core';
 import { eq, inArray } from 'drizzle-orm';
 import { workItemLabels, labels as labelsTable } from '@nexus/db';
@@ -125,8 +126,51 @@ export default async function BoardPage({
     project.value.settings as Record<string, unknown>,
   );
 
+  let attentionSummary = {
+    lanes: { needs_me: 0, ai_working: 0, blocked_external: 0, done: 0 },
+    inboxOpen: 0,
+    inFlight: {
+      itemsInFlight: 0,
+      oldestRunMinutes: null as number | null,
+      activeRunCount: 0,
+      lastHumanAttentionAt: null as Date | null,
+    },
+  };
+  try {
+    attentionSummary = await boardAttentionSummary(ctx, project.value.id);
+  } catch {
+    // Degrade: board still shows swimlane chrome if summary query fails.
+  }
+
   return (
     <div className="space-y-4">
+      <Panel>
+        <PanelBody className="flex flex-wrap gap-4 text-sm">
+          <div>
+            <div className="font-medium">Needs me</div>
+            <div className="text-lg">{attentionSummary.lanes.needs_me}</div>
+          </div>
+          <div>
+            <div className="font-medium">AI working</div>
+            <div className="text-lg">{attentionSummary.lanes.ai_working}</div>
+          </div>
+          <div>
+            <div className="font-medium">Blocked externally</div>
+            <div className="text-lg">{attentionSummary.lanes.blocked_external}</div>
+          </div>
+          <div>
+            <div className="font-medium">Done</div>
+            <div className="text-lg">{attentionSummary.lanes.done}</div>
+          </div>
+          <div className="ml-auto text-right text-fg-muted">
+            Inbox open: {attentionSummary.inboxOpen} · in flight{' '}
+            {attentionSummary.inFlight.itemsInFlight}
+            {attentionSummary.inFlight.oldestRunMinutes != null
+              ? ` · oldest run ${attentionSummary.inFlight.oldestRunMinutes}m`
+              : ''}
+          </div>
+        </PanelBody>
+      </Panel>
       {reworkR.ok ? (
         <Panel>
           <PanelBody className="flex flex-wrap items-center justify-between gap-3 text-sm">

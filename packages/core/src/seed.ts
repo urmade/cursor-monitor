@@ -74,6 +74,19 @@ async function main(): Promise<void> {
       set: { enabled: true, updatedAt: new Date() },
     });
 
+  await db
+    .insert(featureFlags)
+    .values({
+      key: 'p6.inbox',
+      enabled: true,
+      enabledForProjectIds: [],
+      updatedBy: userId,
+    })
+    .onConflictDoUpdate({
+      target: featureFlags.key,
+      set: { enabled: true, updatedAt: new Date() },
+    });
+
   const alpha = await createProject(ctx, {
     key: 'ALPHA',
     name: 'Alpha',

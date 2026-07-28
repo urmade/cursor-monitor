@@ -165,6 +165,8 @@ export async function launchRun(
     workItemId: string;
     bindingId?: string;
     trigger?: RunTrigger;
+    resumeAgentId?: string | null;
+    forceFreshAgent?: boolean;
     /**
      * Vitest-only: return after the advisory-lock transaction persists a pending run.
      * Ignored outside `process.env.VITEST === 'true'` so production never skips provider I/O.
@@ -417,12 +419,16 @@ export async function launchRun(
         throw new Error('CURSOR_API_KEY not configured');
       }
       const client = new CursorClient({ apiKey });
-      const agentId = deterministicAgentId([
-        item.id,
-        item.currentStageInstanceId,
-        binding.id,
-        String(attempt),
-      ]);
+      const useFollowUp =
+        input.resumeAgentId && !input.forceFreshAgent && input.trigger?.kind === 'resume';
+      const agentId = useFollowUp
+        ? input.resumeAgentId!
+        : deterministicAgentId([
+            item.id,
+            item.currentStageInstanceId,
+            binding.id,
+            String(attempt),
+          ]);
       const mcpUrl = `${publicBaseUrl()}/api/mcp`;
       const bypass = protectionBypass();
       const headers: Record<string, string> = {
@@ -459,9 +465,31 @@ export async function launchRun(
 
       let created;
       try {
-        created = await client.createAgent(body);
+        if (useFollowUp) {
+          const follow = await client.createRun(agentId, {
+            prompt: { text: promptText },
+            mcpServers: body.mcpServers,
+            model: body.model,
+          });
+          created = {
+            agent: { id: agentId, url: `https://cursor.com/agents/${agentId}` },
+            run: { id: follow.id, status: follow.status },
+          };
+        } else {
+          created = await client.createAgent(body);
+        }
       } catch (e) {
-        if (e instanceof CursorApiError && e.code === 'agent_id_conflict') {
+        if (
+          e instanceof CursorApiError &&
+          (e.code === 'agent_busy' || e.code === 'agent_id_conflict')
+        ) {
+          if (e.code === 'agent_busy' || useFollowUp) {
+            throw new CursorApiError({
+              message: 'agent_busy',
+              status: 409,
+              code: 'agent_busy',
+            });
+          }
           // Adopt existing agent — create a follow-up run on it.
           const follow = await client.createRun(agentId, {
             prompt: { text: promptText },

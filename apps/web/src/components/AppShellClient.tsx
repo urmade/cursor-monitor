@@ -47,7 +47,18 @@ export function AppShellClient({
           href: `/projects/${projectKey}/audit`,
         },
       ]
-    : undefined;
+    : [
+        {
+          slug: 'inbox',
+          label: 'Inbox',
+          href: '/inbox',
+        },
+        {
+          slug: 'projects',
+          label: 'Projects',
+          href: '/projects',
+        },
+      ];
 
   const breadcrumbItems: Array<{ label: string; href?: string }> = [
     { label: 'Nexus', href: '/projects' },
@@ -68,6 +79,8 @@ export function AppShellClient({
     } else {
       breadcrumbItems.push({ label: 'Board' });
     }
+  } else if (pathname.startsWith('/inbox')) {
+    breadcrumbItems.push({ label: 'Inbox' });
   } else if (pathname.startsWith('/projects')) {
     breadcrumbItems.push({ label: 'Projects' });
   } else if (pathname.startsWith('/design')) {

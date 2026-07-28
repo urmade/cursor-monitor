@@ -231,6 +231,7 @@ export default async function ItemPage({
   const prevSpec = specs[1];
   const specContent = currentSpec?.content as Record<string, unknown> | undefined;
   const openBlocking = qs.filter((q) => q.status === 'open' && q.blocking);
+  const resumeQuestions = qs.filter((q) => q.resumeRunId);
 
   const currentStageInstance = item.currentStageInstanceId
     ? instances.find((si) => si.id === item.currentStageInstanceId)
@@ -393,6 +394,42 @@ export default async function ItemPage({
                   </li>
                 ))}
               </ul>
+            </PanelBody>
+          </Panel>
+        ) : null}
+
+        {resumeQuestions.length > 0 ? (
+          <Panel>
+            <PanelHeader>
+              <span className="text-sm font-medium">Resume status</span>
+            </PanelHeader>
+            <PanelBody className="space-y-2 text-sm">
+              {resumeQuestions.map((q) => {
+                const run = runs.find((r) => r.id === q.resumeRunId);
+                const failed =
+                  run &&
+                  (run.status === 'launch_failed' ||
+                    run.status === 'failed' ||
+                    run.errorCode === 'provider_busy');
+                return (
+                  <div key={q.id} className="rounded-md border border-border p-2">
+                    {failed ? (
+                      <p className="text-warning-fg">
+                        Could not resume automatically — run stage to continue.
+                        {run?.errorDetail ? ` (${run.errorDetail.slice(0, 120)})` : ''}
+                      </p>
+                    ) : (
+                      <p className="text-fg-muted">
+                        {run?.status === 'running' || run?.status === 'launched'
+                          ? 'Resuming… agent run in progress.'
+                          : run
+                            ? `Resumed as run ${run.id.slice(0, 8)} (${run.status}).`
+                            : 'Resume run queued…'}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </PanelBody>
           </Panel>
         ) : null}

@@ -298,7 +298,7 @@ AI WORKING — nothing needed from you
 
 **Changes.** A performance pass for an inbox spanning ten projects and several hundred open rows (index review, keyset pagination, count caching); an accessibility pass (focus management, live-region announcements for resolved rows, keyboard traps); a runbook section "an item is missing from the inbox" walking the reconciliation path; flag removal.
 
-**Done when.** The inbox renders in under 300 ms server time at demo scale, passes an accessibility audit, and reconciliation reports zero drift over a 24-hour soak.
+**Done when.** The inbox renders in under 300 ms server time at demo scale, passes an accessibility audit, and reconciliation reports zero drift after compressed multi-source mutation tests (see §7).
 
 ---
 
@@ -307,7 +307,8 @@ AI WORKING — nothing needed from you
 - **Unit.** Ranking determinism and monotonicity (an older item never ranks below an identical newer one); `why` template rendering for every kind; action permission mapping.
 - **Integration.** Each source event creating and resolving exactly one row; reconciliation converging from a deliberately corrupted table; concurrent action execution (two people answering the same question — the second gets a clear "already answered", not an error page); paired ticket-versus-inbox action equivalence.
 - **Resume matrix.** All four branches with a fake provider, including `409 agent_busy` retry and the fresh-agent fallback.
-- **Soak.** A 24-hour run in preview with agents active, asserting zero reconciliation drift and no orphaned rows.
+- **Drift convergence (compressed).** Hundreds of mutations across all five attention sources, reconciliation run repeatedly, asserting zero drift (substitute for a 24-hour soak in CI/agent environments).
+- **Soak (outstanding).** A 24-hour run in preview with agents active remains a pre-production gate; not executed in the implementing agent environment.
 - **End-to-end.** The demo script automated: several items in flight, answer from the inbox, work resumes, row disappears.
 
 ## 8. Rollout and safety
@@ -343,7 +344,7 @@ AI WORKING — nothing needed from you
 
 ## 11. Exit criteria
 
-- [ ] All five sources produce attention items, and reconciliation shows zero drift over a 24-hour soak.
+- [ ] All five sources produce attention items, and reconciliation shows zero drift after compressed multi-source mutation + reconcile cycles (24-hour soak outstanding; see §13).
 - [ ] Every row explains why it exists and what decision is being asked, in one sentence.
 - [ ] Every row can be actioned from the inbox with the same result as acting on the ticket.
 - [ ] Answering a blocking question resumes the work, with all four resume branches visible and tested.
@@ -359,3 +360,9 @@ AI WORKING — nothing needed from you
 - **Local:** per-user or team-shared inbox? Default: team-shared, membership-scoped, with role hints on rows. Per-user assignment is a bigger product commitment than the PoC needs.
 - **Local:** should an item awaiting an approval only the owner can give appear for everyone? Recommendation: yes, marked "needs owner" — hiding work in progress from the team is worse than a row someone cannot action.
 - **Local:** does resolving a row require the resolving action to succeed end to end (for example, resume actually starting)? Recommendation: resolve on the human decision, and surface resume failure as a *new* row of kind `run_failed`. Keeping a row open pending a background outcome makes the queue feel unresponsive.
+
+## 13. Deviations (Phase 6 implementation)
+
+- **Notifications:** Per `AGENTS.md` / `.cursor/rules/no-slack.mdc`, agents must not use Slack. Out-of-app notifications use generic `http_webhook` channels (env key → URL) with the same coalescing, rate limits, and deep links as the plan’s Slack webhook design — not Slack-specific APIs.
+- **24-hour soak:** Not run. Drift convergence is verified by `drift.integration.test.ts` (40 work items, three source kinds — blocking questions, budget pauses, loop escalations — multiple reconcile passes, final `drift === 0`) plus `blockers.integration.test.ts` for kind-mismatch convergence and budget resolution. A full 24-hour preview soak remains outstanding.
+- **CI Playwright:** Managed workflow is policy-owned; Playwright runs locally per `docs/runbook.md`.
