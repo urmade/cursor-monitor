@@ -33,11 +33,18 @@ export default async function InboxPage() {
         lastHumanAttentionAt: null,
       };
 
+  const inboxLoadFailed = !inboxR.ok;
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
       {!inboxEnabled ? (
         <p className="mb-4 text-sm text-fg-muted">
           Inbox preview — enable flag <code>p6.inbox</code> for default landing.
+        </p>
+      ) : null}
+      {inboxLoadFailed ? (
+        <p className="mb-4 text-sm text-danger-fg" role="alert">
+          Could not load inbox. Try refreshing the page.
         </p>
       ) : null}
       <InboxClient

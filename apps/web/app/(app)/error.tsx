@@ -10,7 +10,7 @@ export default function AppError({
   reset: () => void;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
+    <div className="flex w-full flex-col items-center justify-center gap-3 p-8 text-center">
       <p className="text-sm font-medium text-fg">Something went wrong</p>
       <p className="max-w-md text-xs text-fg-muted">{error.message}</p>
       <Button type="button" variant="secondary" size="sm" onClick={reset}>

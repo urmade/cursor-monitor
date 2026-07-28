@@ -7,6 +7,7 @@ import {
 import {
   Badge,
   Button,
+  Field,
   Panel,
   PanelBody,
   Textarea,
@@ -38,8 +39,8 @@ export default async function QuestionsPage({
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-medium">Open questions</h2>
-      <p className="text-sm text-fg-muted">
-        Stopgap surface until Phase 6 ranked inbox. Blocking questions also appear on the ticket.
+        <p className="text-sm text-fg-muted">
+        Use the ranked inbox for blocking questions across projects. This list is a project-scoped view; answers also appear on the ticket.
       </p>
       {questions.length === 0 ? (
         <p className="text-sm text-fg-subtle">No open questions.</p>
@@ -68,7 +69,9 @@ export default async function QuestionsPage({
                     <input type="hidden" name="questionId" value={q.id} />
                     <input type="hidden" name="projectKey" value={projectKey} />
                     <input type="hidden" name="itemKey" value={item?.key ?? ''} />
-                    <Textarea name="answer" required rows={2} placeholder="Answer" />
+                    <Field label="Answer">
+                      <Textarea name="answer" required rows={2} placeholder="Your answer" />
+                    </Field>
                     <Button type="submit" size="sm" className="w-fit">
                       Answer{q.blocking ? ' & resume' : ''}
                     </Button>

@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Kbd } from '../primitives/Kbd';
+import { CommandPaletteShortcut } from '../lib/platform';
 import { TooltipProvider } from '../primitives/Tooltip';
 import {
   CommandPalette,
@@ -17,6 +17,8 @@ export type AppShellProps = {
   projects: SidebarProject[];
   projectKey?: string;
   navItems?: SidebarNavItem[];
+  /** Extra palette entries (e.g. project sections) merged into Navigation. */
+  commandNavItems?: Array<{ label: string; href: string }>;
   currentPath: string;
   breadcrumbs?: React.ReactNode;
   health?: StatusBarHealth | null;
@@ -29,6 +31,7 @@ export function AppShell({
   projects,
   projectKey,
   navItems,
+  commandNavItems,
   currentPath,
   breadcrumbs,
   health,
@@ -45,6 +48,16 @@ export function AppShell({
     } catch {
       /* ignore */
     }
+  }, []);
+
+  React.useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const apply = () => {
+      if (mq.matches) setCollapsed(true);
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
   }, []);
 
   const onToggleCollapsed = () => {
@@ -74,10 +87,12 @@ export function AppShell({
             type="button"
             onClick={() => setPaletteOpen(true)}
             className="flex items-center gap-2 rounded-md border border-border bg-surface-sunken px-2 py-1 text-xs text-fg-muted hover:bg-[var(--nx-hover)]"
+            aria-label="Open command palette"
           >
             Search
-            <Kbd>⌘</Kbd>
-            <Kbd>K</Kbd>
+            <span className="hidden sm:inline">
+              <CommandPaletteShortcut />
+            </span>
           </button>
         </header>
         <div className="flex min-h-0 flex-1">
@@ -101,6 +116,7 @@ export function AppShell({
           onOpenChange={setPaletteOpen}
           projects={projects}
           projectKey={projectKey}
+          extraNavItems={commandNavItems}
           onNavigate={onNavigate}
         />
       </div>

@@ -1,7 +1,7 @@
-import Link from 'next/link';
 import { getProjectByKey } from '@nexus/core';
 import { PageHeader } from '@nexus/ui';
 import { notFound } from 'next/navigation';
+import { ProjectTabNav } from '../../../../src/components/ProjectTabNav';
 import { requireSession } from '../../../../src/server/session';
 
 export default async function ProjectLayout({
@@ -16,27 +16,6 @@ export default async function ProjectLayout({
   const project = await getProjectByKey(ctx, projectKey);
   if (!project.ok) notFound();
 
-  const tabs = [
-    { slug: 'board', label: 'Board', href: `/projects/${projectKey}/board` },
-    {
-      slug: 'policies',
-      label: 'Policies',
-      href: `/projects/${projectKey}/policies`,
-    },
-    {
-      slug: 'analytics',
-      label: 'Analytics',
-      href: `/projects/${projectKey}/analytics`,
-    },
-    {
-      slug: 'questions',
-      label: 'Questions',
-      href: `/projects/${projectKey}/questions`,
-    },
-    { slug: 'settings', label: 'Settings', href: `/projects/${projectKey}/settings` },
-    { slug: 'audit', label: 'Audit', href: `/projects/${projectKey}/audit` },
-  ] as const;
-
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border bg-surface px-4 py-3">
@@ -45,17 +24,7 @@ export default async function ProjectLayout({
           title={project.value.name}
           subtitle={project.value.description}
         />
-        <nav className="mt-3 flex gap-1">
-          {tabs.map((tab) => (
-            <Link
-              key={tab.slug}
-              href={tab.href}
-              className="rounded-md px-3 py-1.5 text-sm text-fg-muted hover:bg-[var(--nx-hover)] hover:text-fg"
-            >
-              {tab.label}
-            </Link>
-          ))}
-        </nav>
+        <ProjectTabNav projectKey={projectKey} />
       </div>
       <div className="flex-1 overflow-auto p-4">{children}</div>
     </div>

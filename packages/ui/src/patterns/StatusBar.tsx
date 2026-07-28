@@ -1,8 +1,8 @@
 'use client';
 
 import * as React from 'react';
+import { CommandPaletteShortcut } from '../lib/platform';
 import { cn } from '../lib/cn';
-import { Kbd } from '../primitives/Kbd';
 import { ThemeToggle } from './ThemeToggle';
 
 export type StatusBarHealth = {
@@ -56,9 +56,9 @@ export function StatusBar({
             type="button"
             onClick={onOpenCommandPalette}
             className="flex items-center gap-1 rounded-sm px-1 hover:bg-[var(--nx-hover)]"
+            aria-label="Open command palette"
           >
-            <Kbd>⌘</Kbd>
-            <Kbd>K</Kbd>
+            <CommandPaletteShortcut />
           </button>
         ) : null}
       </div>

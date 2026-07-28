@@ -27,8 +27,9 @@ export function TicketBudgetBar({
       </div>
       {budget != null ? (
         <div
-          className="h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-surface-muted"
+          className="h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-surface-sunken"
           role="progressbar"
+          aria-label={`Spend ${formatMicroUsdDisplay(spent)} of ${formatMicroUsdDisplay(budget!)} budget`}
           aria-valuenow={Math.round(ratio * 100)}
           aria-valuemin={0}
           aria-valuemax={100}

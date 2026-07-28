@@ -24,6 +24,7 @@ import {
   PanelBody,
   PanelHeader,
   statusToTone,
+  formatWorkItemStatus,
   formatMicroUsdDisplay,
   CostSourceBadge,
   EstimateDisplay,
@@ -277,7 +278,7 @@ export default async function BoardPage({
                               {item.complexity}
                             </Badge>
                           ) : null}
-                          <Badge tone={statusToTone(status)}>{status}</Badge>
+                          <Badge tone={statusToTone(status)}>{formatWorkItemStatus(status)}</Badge>
                           {spendWarn ? (
                             <Badge tone="warning" title="Item spend past soft budget">
                               {formatMicroUsdDisplay(spent)}{' '}

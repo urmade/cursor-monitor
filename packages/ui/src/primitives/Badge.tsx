@@ -113,6 +113,31 @@ export function statusToTone(status: string): BadgeTone {
   }
 }
 
+export function formatWorkItemStatus(status: string): string {
+  const key = status.toLowerCase().replace(/-/g, '_');
+  const labels: Record<string, string> = {
+    idle: 'Idle',
+    active: 'Active',
+    ai_working: 'AI working',
+    blocked_by_gate: 'Blocked by gate',
+    blocked_external: 'Blocked externally',
+    externally_blocked: 'Blocked externally',
+    needs_approval: 'Needs approval',
+    needs_answer: 'Needs answer',
+    awaiting_evaluation: 'Awaiting evaluation',
+    failed_run: 'Failed run',
+    paused_budget: 'Paused (budget)',
+    archived: 'Archived',
+    abandoned: 'Abandoned',
+  };
+  return (
+    labels[key] ??
+    status
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+  );
+}
+
 export function complexityToTone(
   complexity: string | null | undefined,
 ): BadgeTone {

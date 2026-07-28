@@ -15,6 +15,7 @@ export type CommandPaletteProps = {
   onOpenChange: (open: boolean) => void;
   projects: SidebarProject[];
   projectKey?: string;
+  extraNavItems?: Array<{ label: string; href: string }>;
   onNavigate: (href: string) => void;
 };
 
@@ -22,7 +23,8 @@ export function CommandPalette({
   open,
   onOpenChange,
   projects,
-  projectKey,
+  projectKey: _projectKey,
+  extraNavItems = [],
   onNavigate,
 }: CommandPaletteProps) {
   const { toggle } = useTheme();
@@ -52,28 +54,15 @@ export function CommandPalette({
               >
                 Projects
               </Command.Item>
-              {projectKey ? (
-                <>
-                  <Command.Item
-                    onSelect={() => run(`/projects/${projectKey}/board`)}
-                    className="rounded-md px-2 py-1.5 text-sm aria-selected:bg-[var(--nx-hover)]"
-                  >
-                    Board ({projectKey})
-                  </Command.Item>
-                  <Command.Item
-                    onSelect={() => run(`/projects/${projectKey}/settings`)}
-                    className="rounded-md px-2 py-1.5 text-sm aria-selected:bg-[var(--nx-hover)]"
-                  >
-                    Settings ({projectKey})
-                  </Command.Item>
-                  <Command.Item
-                    onSelect={() => run(`/projects/${projectKey}/audit`)}
-                    className="rounded-md px-2 py-1.5 text-sm aria-selected:bg-[var(--nx-hover)]"
-                  >
-                    Audit ({projectKey})
-                  </Command.Item>
-                </>
-              ) : null}
+              {extraNavItems.map((item) => (
+                <Command.Item
+                  key={item.href}
+                  onSelect={() => run(item.href)}
+                  className="rounded-md px-2 py-1.5 text-sm aria-selected:bg-[var(--nx-hover)]"
+                >
+                  {item.label}
+                </Command.Item>
+              ))}
             </Command.Group>
             <Command.Group heading="Projects">
               {projects.map((p) => (

@@ -604,7 +604,7 @@ export default async function SettingsPage({
         <Panel className="lg:col-span-2">
           <PanelHeader>
             <h2 className="text-lg font-semibold">Webhooks &amp; deliveries</h2>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-fg-muted">
               Outbound events (flag <code className="text-xs">p8.webhooks</code>). Secret shown once on create.
             </p>
           </PanelHeader>
@@ -650,7 +650,7 @@ export default async function SettingsPage({
                           <td className="py-1 pr-2">{d.status}</td>
                           <td className="py-1 pr-2 font-mono text-xs">{d.eventType}</td>
                           <td className="py-1 pr-2">{d.attempts}</td>
-                          <td className="py-1 pr-2 text-xs text-muted-foreground">
+                          <td className="py-1 pr-2 text-xs text-fg-muted">
                             {d.error ?? d.responseStatus ?? '—'}
                           </td>
                           <td className="py-1">

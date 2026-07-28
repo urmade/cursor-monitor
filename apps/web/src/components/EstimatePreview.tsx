@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { EstimateDisplay, type CostEstimateView } from '@nexus/ui';
+import { EstimateDisplay, Skeleton, type CostEstimateView } from '@nexus/ui';
 
 /**
  * Fetches a live estimate while the create form's complexity/labels change.
@@ -17,6 +17,7 @@ export function EstimatePreview({
   labelKeys: string[];
 }) {
   const [estimate, setEstimate] = useState<CostEstimateView | null>(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const labelsKey = labelKeys.join(',');
 
@@ -27,6 +28,7 @@ export function EstimatePreview({
       labels: labelsKey,
     });
     let cancelled = false;
+    setLoading(true);
     fetch(`/api/internal/estimate?projectKey=${encodeURIComponent(projectKey)}&${params}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(await r.text());
@@ -43,6 +45,9 @@ export function EstimatePreview({
           setError(e instanceof Error ? e.message : 'estimate failed');
           setEstimate(null);
         }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -50,6 +55,9 @@ export function EstimatePreview({
   }, [projectKey, complexity, labelsKey]);
 
   if (!complexity) return null;
+  if (loading && !estimate) {
+    return <Skeleton className="h-10 w-full max-w-md" data-testid="estimate-preview-loading" />;
+  }
   if (error) {
     return <p className="text-xs text-fg-muted">Estimate unavailable.</p>;
   }

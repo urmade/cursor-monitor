@@ -14,6 +14,7 @@ import {
   PanelHeader,
   formatMicroUsdDisplay,
 } from '@nexus/ui';
+import { RunBacktestButton } from '../../../../../src/components/RunBacktestButton';
 import { notFound } from 'next/navigation';
 import { requireSession } from '../../../../../src/server/session';
 
@@ -246,9 +247,7 @@ export default async function AnalyticsPage({
           )}
           <form action={actionRunBacktest}>
             <input type="hidden" name="projectId" value={project.value.id} />
-            <Button type="submit" size="sm">
-              Run backtest now
-            </Button>
+            <RunBacktestButton />
           </form>
         </PanelBody>
       </Panel>

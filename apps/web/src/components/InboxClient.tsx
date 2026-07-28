@@ -1,8 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import type { AttentionKind, InFlightSummary } from '@nexus/contracts';
-import { Badge, Button, Panel, PanelBody, PanelHeader } from '@nexus/ui';
+import { Badge, Button, Field, Input, Panel, PanelBody, PanelHeader, Textarea } from '@nexus/ui';
 import { actionSnoozeAttention } from '../server/actions';
 
 type InboxItem = {
@@ -40,7 +41,30 @@ const ALL_KINDS = Object.keys(KIND_LABEL) as AttentionKind[];
 function rowActions(item: InboxItem) {
   const optionActs = (item.actions ?? []).filter((a) => a.id.startsWith('opt_'));
   const otherActs = (item.actions ?? []).filter((a) => !a.id.startsWith('opt_'));
-  return [...optionActs, ...otherActs.filter((a) => a.kind !== 'open_ticket')];
+  return [...optionActs, ...otherActs];
+}
+
+type InboxAction = NonNullable<InboxItem['actions']>[number];
+
+type PayloadDialog = {
+  item: InboxItem;
+  act: InboxAction;
+};
+
+function actionNeedsPayloadForm(act: InboxAction): boolean {
+  return (
+    act.kind === 'raise_project_cap' ||
+    act.kind === 'raise_item_budget' ||
+    act.kind === 'change_complexity' ||
+    act.kind === 'reject' ||
+    act.kind === 'loop_return'
+  );
+}
+
+function usdToMicroUsd(usd: string): string {
+  const n = Number(usd);
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  return String(Math.round(n * 1_000_000));
 }
 
 function ageHours(createdAt: string | undefined, nowMs: number): string {
@@ -75,10 +99,12 @@ export function InboxClient({
   const [openCount, setOpenCount] = useState(totalOpen);
   const [actionError, setActionError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
-  const [confirm, setConfirm] = useState<{
-    item: InboxItem;
-    act: NonNullable<InboxItem['actions']>[number];
-  } | null>(null);
+  const [payloadDialog, setPayloadDialog] = useState<PayloadDialog | null>(null);
+  const [payloadUsd, setPayloadUsd] = useState('50');
+  const [payloadReason, setPayloadReason] = useState('');
+  const [payloadComment, setPayloadComment] = useState('');
+  const [payloadComplexity, setPayloadComplexity] = useState<'low' | 'medium' | 'high'>('high');
+  const [payloadNote, setPayloadNote] = useState('');
   const [answerDraft, setAnswerDraft] = useState<{ item: InboxItem; text: string } | null>(null);
   const [projectFilter, setProjectFilter] = useState<string>('');
   const [kindFilter, setKindFilter] = useState<AttentionKind | ''>('');
@@ -153,35 +179,59 @@ export function InboxClient({
   }, []);
 
   const runAction = useCallback(
-    (item: InboxItem, action: string, payload?: Record<string, unknown>) => {
+    (
+      item: InboxItem,
+      action: string,
+      payload?: Record<string, unknown>,
+      options?: { optimistic?: boolean },
+    ) => {
+      const optimistic = options?.optimistic !== false;
       const prev = groups;
       const removedIdx = filteredFlat.findIndex((i) => i.id === item.id);
-      startTransition(() => {
-        setGroups((g) =>
-          g
-            .map((group) => ({
-              ...group,
-              items: group.items.filter((i) => i.id !== item.id),
-            }))
-            .filter((group) => group.items.length > 0),
-        );
-        setOpenCount((c) => Math.max(0, c - 1));
-        setAnnouncement(`Resolved ${item.workItemKey ?? 'item'}: ${item.title}`);
-      });
+      if (optimistic) {
+        startTransition(() => {
+          setGroups((g) =>
+            g
+              .map((group) => ({
+                ...group,
+                items: group.items.filter((i) => i.id !== item.id),
+              }))
+              .filter((group) => group.items.length > 0),
+          );
+          setOpenCount((c) => Math.max(0, c - 1));
+          setAnnouncement(`Resolved ${item.workItemKey ?? 'item'}: ${item.title}`);
+        });
+      }
       void (async () => {
         const res = await fetch('/api/inbox/action', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ attentionItemId: item.id, action, payload }),
         });
-        const result = (await res.json()) as { ok: boolean; error?: string };
+        const result = (await res.json()) as {
+          ok: boolean;
+          error?: string;
+          value?: { detail?: { navigate?: string | boolean } };
+        };
         if (!res.ok || !result.ok) {
-          setGroups(prev);
-          setOpenCount(totalOpen);
+          if (optimistic) {
+            setGroups(prev);
+            setOpenCount(totalOpen);
+          }
           setActionError(result.error ?? 'Action failed');
           return;
         }
         setActionError(null);
+        const navigate = result.value?.detail?.navigate;
+        if (typeof navigate === 'string') {
+          window.open(navigate, '_blank', 'noopener,noreferrer');
+          await refresh();
+          return;
+        }
+        if (!optimistic) {
+          await refresh();
+          return;
+        }
         const next = filteredFlat[removedIdx] ?? filteredFlat[removedIdx + 1];
         if (next) {
           requestAnimationFrame(() => rowRefs.current.get(next.id)?.focus());
@@ -192,8 +242,63 @@ export function InboxClient({
     [groups, refresh, totalOpen, filteredFlat],
   );
 
+  const openPayloadDialog = useCallback((item: InboxItem, act: InboxAction) => {
+    setPayloadReason('');
+    setPayloadComment('');
+    setPayloadNote('');
+    setPayloadUsd(act.kind === 'raise_item_budget' ? '50' : '100');
+    setPayloadComplexity('high');
+    setPayloadDialog({ item, act });
+  }, []);
+
+  const submitPayloadDialog = useCallback(() => {
+    if (!payloadDialog) return;
+    const { item, act } = payloadDialog;
+    if (act.kind === 'raise_project_cap') {
+      if (!payloadReason.trim()) {
+        setActionError('A reason is required to raise the project cap.');
+        return;
+      }
+      runAction(item, act.kind, {
+        microUsd: usdToMicroUsd(payloadUsd),
+        reason: payloadReason.trim(),
+      });
+    } else if (act.kind === 'raise_item_budget') {
+      if (!payloadReason.trim()) {
+        setActionError('A reason is required to raise the item budget.');
+        return;
+      }
+      runAction(item, act.kind, {
+        microUsd: usdToMicroUsd(payloadUsd),
+        reason: payloadReason.trim(),
+      });
+    } else if (act.kind === 'change_complexity') {
+      runAction(item, act.kind, { complexity: payloadComplexity });
+    } else if (act.kind === 'reject') {
+      runAction(item, act.kind, { comment: payloadComment.trim() });
+    } else if (act.kind === 'loop_return') {
+      runAction(item, act.kind, {
+        reasonCode: 'review_findings',
+        note: payloadNote.trim() || 'Returned from inbox',
+      });
+    } else if (act.kind === 'accept_no_report') {
+      runAction(item, act.kind);
+    } else {
+      runAction(item, act.kind);
+    }
+    setPayloadDialog(null);
+  }, [
+    payloadDialog,
+    payloadUsd,
+    payloadReason,
+    payloadComment,
+    payloadComplexity,
+    payloadNote,
+    runAction,
+  ]);
+
   const fireAction = useCallback(
-    (item: InboxItem, act: NonNullable<InboxItem['actions']>[number]) => {
+    (item: InboxItem, act: InboxAction) => {
       if (act.kind === 'open_ticket') {
         const key =
           projectKeyById.get(item.projectId ?? '') ?? projects.find((p) => p.key)?.key;
@@ -210,20 +315,21 @@ export function InboxClient({
         setAnswerDraft({ item, text: '' });
         return;
       }
-      if (act.requiresConfirm) {
-        setConfirm({ item, act });
+      if (act.kind === 'open_cursor') {
+        runAction(item, act.kind, undefined, { optimistic: false });
         return;
       }
-      if (act.kind === 'raise_item_budget') {
-        runAction(item, act.kind, {
-          microUsd: '50000000',
-          reason: 'Raised from inbox (UI)',
-        });
+      if (actionNeedsPayloadForm(act)) {
+        openPayloadDialog(item, act);
+        return;
+      }
+      if (act.requiresConfirm) {
+        openPayloadDialog(item, act);
         return;
       }
       runAction(item, act.kind);
     },
-    [projectKeyById, projects, runAction],
+    [projectKeyById, projects, runAction, openPayloadDialog],
   );
 
   useEffect(() => {
@@ -252,8 +358,10 @@ export function InboxClient({
         }
       }
       if (e.key === 's' && filteredFlat[selected]) {
+        const row = filteredFlat[selected]!;
+        if (row.meta?.canAct === false) return;
         void actionSnoozeAttention(
-          filteredFlat[selected]!.id,
+          row.id,
           new Date(Date.now() + 60 * 60 * 1000).toISOString(),
         ).then(() => refresh());
       }
@@ -359,29 +467,95 @@ export function InboxClient({
         </p>
       ) : null}
 
-      {confirm ? (
+      <p className="text-xs text-fg-muted">
+        Shortcuts: <kbd className="font-mono">j</kbd>/<kbd className="font-mono">k</kbd>{' '}
+        move, <kbd className="font-mono">1</kbd>–<kbd className="font-mono">9</kbd> act,{' '}
+        <kbd className="font-mono">s</kbd> snooze, <kbd className="font-mono">?</kbd> score
+      </p>
+
+      {payloadDialog ? (
         <Panel>
-          <PanelHeader title={`Confirm: ${confirm.act.label}`} />
-          <PanelBody className="flex gap-2">
-            <Button
-              size="sm"
-              onClick={() => {
-                runAction(confirm.item, confirm.act.kind);
-                setConfirm(null);
-              }}
-            >
-              Confirm
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => setConfirm(null)}>
-              Cancel
-            </Button>
+          <PanelHeader>
+            <span className="text-sm font-medium">Confirm: {payloadDialog.act.label}</span>
+          </PanelHeader>
+          <PanelBody className="grid gap-3">
+            {payloadDialog.act.kind === 'raise_project_cap' ||
+            payloadDialog.act.kind === 'raise_item_budget' ? (
+              <>
+                <Field label="Amount (USD)">
+                  <Input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={payloadUsd}
+                    onChange={(e) => setPayloadUsd(e.target.value)}
+                  />
+                </Field>
+                <Field label="Reason">
+                  <Textarea
+                    rows={2}
+                    value={payloadReason}
+                    onChange={(e) => setPayloadReason(e.target.value)}
+                    required
+                  />
+                </Field>
+              </>
+            ) : null}
+            {payloadDialog.act.kind === 'change_complexity' ? (
+              <Field label="New complexity">
+                <select
+                  className="h-9 rounded border border-border bg-surface px-2 text-sm"
+                  value={payloadComplexity}
+                  onChange={(e) =>
+                    setPayloadComplexity(e.target.value as 'low' | 'medium' | 'high')
+                  }
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </Field>
+            ) : null}
+            {payloadDialog.act.kind === 'reject' ? (
+              <Field label="Comment (optional)">
+                <Textarea
+                  rows={2}
+                  value={payloadComment}
+                  onChange={(e) => setPayloadComment(e.target.value)}
+                />
+              </Field>
+            ) : null}
+            {payloadDialog.act.kind === 'loop_return' ? (
+              <Field label="Note (optional)">
+                <Textarea
+                  rows={2}
+                  value={payloadNote}
+                  onChange={(e) => setPayloadNote(e.target.value)}
+                />
+              </Field>
+            ) : null}
+            {payloadDialog.act.kind === 'accept_no_report' ? (
+              <p className="text-sm text-fg-muted">
+                Accept this run without a stage report? The attention item will be cleared.
+              </p>
+            ) : null}
+            <div className="flex gap-2">
+              <Button size="sm" onClick={submitPayloadDialog}>
+                Confirm
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => setPayloadDialog(null)}>
+                Cancel
+              </Button>
+            </div>
           </PanelBody>
         </Panel>
       ) : null}
 
       {answerDraft ? (
         <Panel>
-          <PanelHeader title="Your answer" />
+          <PanelHeader>
+            <span className="text-sm font-medium">Your answer</span>
+          </PanelHeader>
           <PanelBody className="space-y-2">
             <textarea
               className="w-full rounded-md border border-border bg-canvas p-2 text-sm"
@@ -434,7 +608,16 @@ export function InboxClient({
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-2">
-                        <Badge tone="warning">{item.workItemKey}</Badge>
+                        {item.workItemKey && item.projectId && projectKeyById.get(item.projectId) ? (
+                          <Link
+                            href={`/projects/${projectKeyById.get(item.projectId)}/items/${item.workItemKey}`}
+                            className="inline-flex"
+                          >
+                            <Badge tone="warning">{item.workItemKey}</Badge>
+                          </Link>
+                        ) : (
+                          <Badge tone="warning">{item.workItemKey}</Badge>
+                        )}
                         <span className="text-sm font-medium text-fg">{item.title}</span>
                       </div>
                       <p className="mt-1 text-sm text-fg-muted">{item.why}</p>

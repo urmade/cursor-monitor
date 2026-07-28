@@ -41,7 +41,7 @@ export function WebhookEndpointRegisterForm(props: {
         <Input name="description" placeholder="Optional" />
       </Field>
       {state?.error ? (
-        <p className="text-sm text-destructive" role="alert">
+        <p className="text-sm text-danger-fg" role="alert">
           {state.error}
         </p>
       ) : null}

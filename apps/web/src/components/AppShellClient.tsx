@@ -8,6 +8,12 @@ import {
   type SidebarProject,
   type StatusBarHealth,
 } from '@nexus/ui';
+import {
+  PROJECT_NAV_ITEMS,
+  globalBreadcrumbTrail,
+  projectBreadcrumbTrail,
+  projectSectionHref,
+} from '../navigation/project-nav';
 
 function projectKeyFromPath(pathname: string): string | undefined {
   const m = pathname.match(/^\/projects\/([^/]+)/);
@@ -31,61 +37,31 @@ export function AppShellClient({
 
   const navItems: SidebarNavItem[] | undefined = projectKey
     ? [
-        {
-          slug: 'board',
-          label: 'Board',
-          href: `/projects/${projectKey}/board`,
-        },
-        {
-          slug: 'settings',
-          label: 'Settings',
-          href: `/projects/${projectKey}/settings`,
-        },
-        {
-          slug: 'audit',
-          label: 'Audit',
-          href: `/projects/${projectKey}/audit`,
-        },
+        { slug: 'inbox', label: 'Inbox', href: '/inbox' },
+        ...PROJECT_NAV_ITEMS.map((item) => ({
+          slug: item.slug,
+          label: item.label,
+          href: projectSectionHref(projectKey, item.slug),
+        })),
       ]
     : [
-        {
-          slug: 'inbox',
-          label: 'Inbox',
-          href: '/inbox',
-        },
-        {
-          slug: 'projects',
-          label: 'Projects',
-          href: '/projects',
-        },
+        { slug: 'inbox', label: 'Inbox', href: '/inbox' },
+        { slug: 'projects', label: 'Projects', href: '/projects' },
       ];
 
-  const breadcrumbItems: Array<{ label: string; href?: string }> = [
-    { label: 'Nexus', href: '/projects' },
-  ];
-  if (projectKey) {
-    breadcrumbItems.push({
-      label: projectKey,
-      href: `/projects/${projectKey}/board`,
-    });
-    if (pathname.includes('/settings')) {
-      breadcrumbItems.push({ label: 'Settings' });
-    } else if (pathname.includes('/audit')) {
-      breadcrumbItems.push({ label: 'Audit' });
-    } else if (pathname.includes('/items/')) {
-      const itemKey = pathname.split('/items/')[1]?.split('/')[0];
-      breadcrumbItems.push({ label: 'Board', href: `/projects/${projectKey}/board` });
-      if (itemKey) breadcrumbItems.push({ label: itemKey });
-    } else {
-      breadcrumbItems.push({ label: 'Board' });
-    }
-  } else if (pathname.startsWith('/inbox')) {
-    breadcrumbItems.push({ label: 'Inbox' });
-  } else if (pathname.startsWith('/projects')) {
-    breadcrumbItems.push({ label: 'Projects' });
-  } else if (pathname.startsWith('/design')) {
-    breadcrumbItems.push({ label: 'Design' });
-  }
+  const breadcrumbItems = projectKey
+    ? projectBreadcrumbTrail(pathname, projectKey)
+    : globalBreadcrumbTrail(pathname);
+
+  const commandNavItems = projectKey
+    ? [
+        { label: 'Inbox', href: '/inbox' },
+        ...PROJECT_NAV_ITEMS.map((item) => ({
+          label: `${item.label} (${projectKey})`,
+          href: projectSectionHref(projectKey, item.slug),
+        })),
+      ]
+    : [{ label: 'Inbox', href: '/inbox' }];
 
   return (
     <AppShell
@@ -96,6 +72,7 @@ export function AppShellClient({
       breadcrumbs={<Breadcrumb items={breadcrumbItems} />}
       health={health}
       userLabel={userLabel}
+      commandNavItems={commandNavItems}
       onNavigate={(href) => router.push(href)}
     >
       {children}

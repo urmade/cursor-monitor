@@ -47,7 +47,7 @@ export function JourneyRibbon({
 }: JourneyRibbonProps) {
   if (nodes.length === 0) {
     return (
-      <p className={cn('text-sm text-muted', className)} aria-label="No journey yet">
+      <p className={cn('text-sm text-fg-muted', className)} aria-label="No journey yet">
         No stage history yet.
       </p>
     );
@@ -65,7 +65,7 @@ export function JourneyRibbon({
         {nodes.map((n, i) => (
           <li key={n.stageInstanceId} className="flex items-center gap-1">
             {i > 0 ? (
-              <span className="text-muted px-0.5" aria-hidden>
+              <span className="text-fg-muted px-0.5" aria-hidden>
                 →
               </span>
             ) : null}
@@ -84,7 +84,7 @@ export function JourneyRibbon({
             >
               <span className="font-medium">{n.stageName}</span>
               {n.visitIndex > 1 ? (
-                <span className="text-xs text-muted">({n.visitIndex})</span>
+                <span className="text-xs text-fg-muted">({n.visitIndex})</span>
               ) : null}
             </span>
           </li>
@@ -92,7 +92,7 @@ export function JourneyRibbon({
       </ol>
 
       {arcs.length > 0 && !dense ? (
-        <ul className="grid gap-1 text-xs text-muted" aria-label="Return edges">
+        <ul className="grid gap-1 text-xs text-fg-muted" aria-label="Return edges">
           {arcs.map((a) => (
             <li key={a.loopEdgeId}>
               ↺ {a.reasonCode}
@@ -105,7 +105,7 @@ export function JourneyRibbon({
       ) : null}
 
       {dense && collapsedPairs.length > 0 ? (
-        <ul className="grid gap-1 text-xs text-muted" aria-label="Collapsed returns">
+        <ul className="grid gap-1 text-xs text-fg-muted" aria-label="Collapsed returns">
           {collapsedPairs.map((p) => (
             <li key={`${p.fromStageKey}-${p.toStageKey}`}>
               ↺ {p.fromStageKey} → {p.toStageKey} ×{p.count}

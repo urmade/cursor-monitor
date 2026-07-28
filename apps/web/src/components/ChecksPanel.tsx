@@ -95,7 +95,7 @@ export function ChecksPanel({
             {approvals.map((a) => (
               <div
                 key={a.id}
-                className="rounded-md border border-border bg-surface-muted/40 p-3"
+                className="rounded-md border border-border bg-surface-sunken/40 p-3"
               >
                 <div className="flex items-center gap-2">
                   <Badge tone="warning">needs approval</Badge>

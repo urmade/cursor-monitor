@@ -126,7 +126,7 @@ export default async function SpendPage({
                   {ev.reason ? (
                     <p className="mt-1 text-fg">{ev.reason}</p>
                   ) : null}
-                  <pre className="mt-1 max-h-24 overflow-auto rounded bg-surface-muted p-2 text-[10px] text-fg-muted">
+                  <pre className="mt-1 max-h-24 overflow-auto rounded bg-surface-sunken p-2 text-[10px] text-fg-muted">
                     {JSON.stringify({ before: ev.before, after: ev.after }, null, 2)}
                   </pre>
                 </li>

@@ -39,6 +39,7 @@ import {
   PanelHeader,
   PropertyRow,
   statusToTone,
+  formatWorkItemStatus,
   Tabs,
   TabsContent,
   TabsList,
@@ -986,7 +987,7 @@ export default async function ItemPage({
       <aside className="space-y-1 border-l border-border pl-4">
         <PropertyRow
           label="Status"
-          value={<Badge tone={statusToTone(status)}>{status}</Badge>}
+          value={<Badge tone={statusToTone(status)}>{formatWorkItemStatus(status)}</Badge>}
         />
         <PropertyRow
           label="Complexity"

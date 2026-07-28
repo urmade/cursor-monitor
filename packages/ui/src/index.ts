@@ -26,6 +26,7 @@ export {
   Badge,
   StatusDot,
   statusToTone,
+  formatWorkItemStatus,
   complexityToTone,
   type BadgeTone,
 } from './primitives/Badge';
