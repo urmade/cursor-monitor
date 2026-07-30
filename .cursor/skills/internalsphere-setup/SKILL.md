@@ -145,7 +145,7 @@ viewers:
     reason: "Customer pitch review"
 ```
 
-Open a PR — `@internalsphere/security` is tagged automatically for review. After merge, the orchestrator grants access in Vercel and revokes it at `expires_at` or when the entry is removed. `target` is the deployment or alias host. The viewer signs in to a free Vercel account with that email. Grants apply on the next reconciliation (daily; ask in `#proj-internalsphere` for an urgent run).
+Open a PR — `@internalsphere/security` is tagged automatically for review. After merge, the orchestrator invites the viewer in Vercel immediately and revokes access when the entry is removed (also on merge) or when `expires_at` passes (scheduled reconcile). `target` is the deployment or alias host. The viewer signs in to a free Vercel account with that email.
 
 ## FAQs
 

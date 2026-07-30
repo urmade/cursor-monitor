@@ -99,17 +99,17 @@ jobs:
       GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
-  external-viewers-password:
-    name: external-viewers-password
+  external-viewers:
+    name: external-viewers
     permissions:
       contents: read
       pull-requests: write
     # Runs only on a merged PR. Security review is enforced by branch protection
     # (external-viewers.yml is code-owned by @internalsphere/security), so the merge
-    # already required it; the reusable workflow then (delivery before install) posts
-    # the generated passphrase as a bot comment and installs it on Vercel.
+    # already required it. The reusable workflow then delivers/installs password
+    # sharing and applies per-email viewer invites/revokes immediately.
     if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
-    uses: internalsphere/internal-app-orchestrator/.github/workflows/external-viewers-password-reusable.yml@main
+    uses: internalsphere/internal-app-orchestrator/.github/workflows/external-viewers-merge-reusable.yml@main
     with:
       project_name: nexus
       pr_number: ${{ github.event.pull_request.number }}

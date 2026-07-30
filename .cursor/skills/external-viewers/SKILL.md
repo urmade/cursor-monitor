@@ -40,10 +40,11 @@ viewers:
 2. `target` is the deployment or alias host.
 3. Keep `expires_at` as short as practical; access is denied automatically after it passes.
 4. Open a PR. `@internalsphere/security` is tagged automatically for review.
+5. **On merge**, the orchestrator invites the viewer in Vercel immediately. Scheduled reconcile still converges grants and revokes at `expires_at`.
 
 ## Revoke
 
-Remove the entry (or shorten `expires_at`) and merge. The orchestrator denies the viewer in Vercel before dropping it from tracked state, so removal is safe even before expiry.
+Remove the entry (or shorten `expires_at`) and merge. Removal is applied on merge; scheduled reconcile also denies the viewer if anything was missed.
 
 ## Password sharing (whole-project demo)
 
@@ -94,5 +95,5 @@ password_sharing:
 ## Verify
 
 - CI validates the file shape on the PR (`ci-required`).
-- For per-email grants: after merge, the orchestrator reconciles grants on its next baseline run, and the viewer signs in to a free Vercel account with that email.
+- For per-email grants: after merge, the viewer is invited immediately and signs in to a free Vercel account with that email. Scheduled reconcile still converges grants and enforces expiry.
 - For password sharing: the passphrase appears as a bot comment on the merged PR and the Vercel project shows password protection enabled for all deployments. Read that comment and return the passphrase to the user.

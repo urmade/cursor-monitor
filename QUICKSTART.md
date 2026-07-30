@@ -75,7 +75,7 @@ viewers:
     reason: "Customer pitch review"
 ```
 
-Open a PR — `@internalsphere/security` is tagged automatically for review. After merge, the orchestrator grants the viewer access in Vercel (they sign in to a free Vercel account with that email) and revokes it at `expires_at` or when the entry is removed.
+Open a PR — `@internalsphere/security` is tagged automatically for review. After merge, the orchestrator invites the viewer in Vercel immediately (they sign in to a free Vercel account with that email) and revokes access when the entry is removed (on merge) or when `expires_at` passes.
 
 ## Required checks
 
