@@ -7,7 +7,7 @@ import { RunStatusBadge } from './RunStatusBadge';
 import {
   formatCentsUsd,
   formatRelativeTime,
-  sortConversationGroupsBy,
+  partitionProjectRunsByAutomation,
   type ConversationGroupSort,
 } from '../lib/monitoring-format';
 
@@ -17,21 +17,26 @@ export type ProjectConversationRow = {
   status?: string;
   chargedCents: number | null;
   createdAt?: string;
+  source?: string;
+  automationId?: string;
+  automationName?: string | null;
+  prUrl?: string | null;
+  prLabel?: string | null;
+  prName?: string | null;
+  prNumber?: string | null;
 };
 
-export type ProjectConversationGroupView = {
-  key: string;
-  prUrl: string | null;
-  prLabel: string | null;
-  /** Human PR title when known (GitHub or conversation-name fallback). */
-  prName: string | null;
-  /** Short `#N` when the URL parses as a GitHub PR. */
-  prNumber: string | null;
-  branch?: string;
-  conversations: ProjectConversationRow[];
+export type ProjectAutomationGroupView = {
+  automationId: string;
+  automationName: string;
   totalChargedCents: number | null;
-  totalRawCents: number | null;
   latestCreatedAt: string | null;
+  conversations: ProjectConversationRow[];
+};
+
+export type ProjectSectionsView = {
+  automations: ProjectAutomationGroupView[];
+  userRequests: ProjectConversationRow[];
 };
 
 function SortControl({
@@ -74,42 +79,112 @@ function SortControl({
   );
 }
 
+function ImpactedPr({
+  run,
+}: {
+  run: Pick<
+    ProjectConversationRow,
+    'prUrl' | 'prName' | 'prNumber' | 'prLabel'
+  >;
+}) {
+  if (!run.prUrl && !run.prLabel) return null;
+  const label =
+    run.prName && run.prNumber
+      ? `${run.prName} (${run.prNumber})`
+      : run.prName || run.prNumber || run.prLabel;
+  if (!label) return null;
+  if (run.prUrl) {
+    return (
+      <a
+        href={run.prUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="max-w-[14rem] truncate text-xs text-accent hover:underline"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {label}
+      </a>
+    );
+  }
+  return (
+    <span className="max-w-[14rem] truncate text-xs text-fg-subtle">{label}</span>
+  );
+}
+
+function RunRowLink({
+  projectHref,
+  run,
+}: {
+  projectHref: string;
+  run: ProjectConversationRow;
+}) {
+  return (
+    <li>
+      <Link
+        href={`${projectHref}/conversations/${encodeURIComponent(run.id)}`}
+        className="flex items-center gap-3 px-3 py-2 transition-colors hover:bg-[var(--nx-hover)]"
+      >
+        <span className="min-w-0 flex-1 truncate text-sm text-fg">{run.name}</span>
+        <ImpactedPr run={run} />
+        <RunStatusBadge status={run.status} />
+        <span className="w-20 shrink-0 text-right text-sm font-medium tabular-nums text-fg">
+          {formatCentsUsd(run.chargedCents)}
+        </span>
+        <span className="w-16 shrink-0 text-right text-xs text-fg-subtle">
+          {run.createdAt ? formatRelativeTime(run.createdAt) : '—'}
+        </span>
+      </Link>
+    </li>
+  );
+}
+
 /**
- * Client-side PR-group list + sort control. Sorting is pure in-memory so
- * flipping "Total cost" / "Created at" is near-instant (no server round-trip).
+ * Project detail: Automations (grouped, with totals) then User requests.
+ * Sorting is pure in-memory within each bucket.
  */
 export function ProjectConversationsClient({
   projectHref,
   initialSort,
-  groups,
-  prTitlePrefix,
+  sections,
 }: {
   projectHref: string;
   initialSort: ConversationGroupSort;
-  groups: ProjectConversationGroupView[];
-  prTitlePrefix: string;
+  sections: ProjectSectionsView;
 }) {
   const [sort, setSort] = useState<ConversationGroupSort>(initialSort);
   const [pending, startTransition] = useTransition();
 
-  const sorted = useMemo(
-    () => sortConversationGroupsBy(groups, sort),
-    [groups, sort],
-  );
+  const sorted = useMemo(() => {
+    const flat: ProjectConversationRow[] = [
+      ...sections.automations.flatMap((a) =>
+        a.conversations.map((c) => ({
+          ...c,
+          automationId: a.automationId,
+          automationName: a.automationName,
+          source: c.source ?? 'automations',
+        })),
+      ),
+      ...sections.userRequests,
+    ];
+    return partitionProjectRunsByAutomation(flat, sort);
+  }, [sections, sort]);
 
-  if (sorted.length === 0) {
+  const empty =
+    sorted.automations.length === 0 && sorted.userRequests.length === 0;
+
+  if (empty) {
     return (
       <Panel>
         <EmptyState
           title="No conversations in this project"
-          description="Cloud Agents started against this repository will appear here."
+          description="Cloud Agents and Automations started against this repository will appear here."
         />
       </Panel>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
       <div className="flex justify-end">
         <SortControl
           active={sort}
@@ -122,83 +197,78 @@ export function ProjectConversationsClient({
           }}
         />
       </div>
-      {sorted.map((group) => (
-        <Panel key={group.key}>
-          <PanelHeader>
-            <div className="flex min-w-0 items-baseline gap-2">
-              {group.prUrl ? (
-                <a
-                  href={group.prUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex min-w-0 items-baseline gap-2 text-sm font-medium text-accent hover:underline"
-                >
-                  {group.prName ? (
-                    <span className="truncate">{group.prName}</span>
-                  ) : (
-                    <span className="truncate">
-                      {prTitle(group.prLabel ?? group.prUrl, prTitlePrefix)}
-                    </span>
-                  )}
-                  {group.prName && group.prNumber ? (
-                    <span className="shrink-0 font-mono text-xs font-normal text-fg-subtle">
-                      {group.prNumber}
-                    </span>
-                  ) : null}
-                </a>
-              ) : (
-                <span className="text-sm font-medium text-fg-muted">
-                  No pull request
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-fg">Automations</h2>
+        {sorted.automations.length === 0 ? (
+          <Panel>
+            <PanelBody>
+              <p className="text-sm text-fg-muted">
+                No automation runs attributed to this repository yet. Connect a
+                team Admin API key (admin:*) or use keys that own Automations to
+                populate this section.
+              </p>
+            </PanelBody>
+          </Panel>
+        ) : (
+          sorted.automations.map((group) => (
+            <Panel key={group.automationId}>
+              <PanelHeader>
+                <div className="min-w-0">
+                  <span className="text-sm font-medium text-fg">
+                    {group.automationName}
+                  </span>
+                  <span className="ml-2 text-xs text-fg-subtle">
+                    {group.conversations.length} run
+                    {group.conversations.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <span className="text-sm font-medium tabular-nums text-fg">
+                  {formatCentsUsd(group.totalChargedCents)}
                 </span>
-              )}
-              {group.branch ? (
-                <span className="truncate font-mono text-xs text-fg-subtle">
-                  {group.branch}
-                </span>
-              ) : null}
-            </div>
-            <div className="flex shrink-0 items-baseline gap-2">
-              <span className="text-xs text-fg-subtle">
-                {group.conversations.length} conversation
-                {group.conversations.length === 1 ? '' : 's'}
-              </span>
-              <span className="text-sm font-medium tabular-nums text-fg">
-                {formatCentsUsd(group.totalChargedCents)}
-              </span>
-            </div>
-          </PanelHeader>
-          <PanelBody className="p-0">
-            <ul className="divide-y divide-border">
-              {group.conversations.map((agent) => (
-                <li key={`${group.key}-${agent.id}`}>
-                  <Link
-                    href={`${projectHref}/conversations/${encodeURIComponent(agent.id)}`}
-                    className="flex items-center gap-3 px-3 py-2 transition-colors hover:bg-[var(--nx-hover)]"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-sm text-fg">
-                      {agent.name}
-                    </span>
-                    <RunStatusBadge status={agent.status} />
-                    <span className="w-20 shrink-0 text-right text-sm font-medium tabular-nums text-fg">
-                      {formatCentsUsd(agent.chargedCents)}
-                    </span>
-                    <span className="w-16 shrink-0 text-right text-xs text-fg-subtle">
-                      {agent.createdAt
-                        ? formatRelativeTime(agent.createdAt)
-                        : '—'}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </PanelBody>
-        </Panel>
-      ))}
+              </PanelHeader>
+              <PanelBody className="p-0">
+                <ul className="divide-y divide-border">
+                  {group.conversations.map((run) => (
+                    <RunRowLink
+                      key={`${group.automationId}-${run.id}`}
+                      projectHref={projectHref}
+                      run={run}
+                    />
+                  ))}
+                </ul>
+              </PanelBody>
+            </Panel>
+          ))
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-fg">User requests</h2>
+        {sorted.userRequests.length === 0 ? (
+          <Panel>
+            <PanelBody>
+              <p className="text-sm text-fg-muted">
+                No user-requested conversations in this repository yet.
+              </p>
+            </PanelBody>
+          </Panel>
+        ) : (
+          <Panel>
+            <PanelBody className="p-0">
+              <ul className="divide-y divide-border">
+                {sorted.userRequests.map((run) => (
+                  <RunRowLink
+                    key={`user-${run.id}`}
+                    projectHref={projectHref}
+                    run={run}
+                  />
+                ))}
+              </ul>
+            </PanelBody>
+          </Panel>
+        )}
+      </section>
     </div>
   );
-}
-
-function prTitle(label: string, project: string): string {
-  const prefix = `${project}#`;
-  return label.startsWith(prefix) ? `#${label.slice(prefix.length)}` : label;
 }

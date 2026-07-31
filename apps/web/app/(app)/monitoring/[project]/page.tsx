@@ -2,14 +2,12 @@ import { EmptyState, PageHeader, Panel } from '@nexus/ui';
 import Link from 'next/link';
 import {
   ProjectConversationsClient,
-  type ProjectConversationGroupView,
+  type ProjectSectionsView,
 } from '../../../../src/components/ProjectConversationsClient';
 import {
-  agentRepoLabels,
   conversationDisplayStatus,
   formatCentsUsd,
   formatPrNumberLabel,
-  NO_PR_GROUP,
   NO_REPO_GROUP,
   normalizeRepoLabel,
   parseConversationGroupSort,
@@ -19,7 +17,6 @@ import {
   runDidNotFinish,
 } from '../../../../src/server/cursor';
 import { getCachedProjectDetail } from '../../../../src/server/monitoring-cache';
-import type { AgentSummary } from '@nexus/cursor-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,31 +27,6 @@ function projectHref(project: string): string {
 /** Canonical project key: lowercased repo label, or the no-repo sentinel. */
 function canonicalProject(project: string): string {
   return project === NO_REPO_GROUP ? project : normalizeRepoLabel(project);
-}
-
-function agentsForProject(
-  agents: AgentSummary[],
-  project: string,
-): AgentSummary[] {
-  const key = canonicalProject(project);
-  if (key === NO_REPO_GROUP) {
-    return agents.filter((a) => agentRepoLabels(a.repos).length === 0);
-  }
-  return agents.filter((a) => agentRepoLabels(a.repos).includes(key));
-}
-
-function findRepoUrl(agents: AgentSummary[], project: string): string | null {
-  const key = canonicalProject(project);
-  for (const agent of agents) {
-    for (const repo of agent.repos ?? []) {
-      if (!repo.url) continue;
-      if (agentRepoLabels([repo]).includes(key)) {
-        const url = repo.url;
-        return url.includes('://') ? url : `https://${url}`;
-      }
-    }
-  }
-  return null;
 }
 
 export default async function ProjectMonitoringPage({
@@ -70,7 +42,7 @@ export default async function ProjectMonitoringPage({
   const sort = parseConversationGroupSort(sp.sort);
 
   const auth = await resolveCursorAuth();
-  if (!auth.client || !auth.fingerprint) {
+  if (auth.credentials.length === 0 || !auth.combinedFingerprint) {
     return (
       <div className="space-y-4 p-4">
         <Link href="/monitoring" className="text-sm text-accent hover:underline">
@@ -78,18 +50,19 @@ export default async function ProjectMonitoringPage({
         </Link>
         <p className="text-sm text-danger-fg" role="alert">
           {auth.error ??
-            'Connect a personal Cursor API key on the Monitoring page (or set CURSOR_API_KEY).'}
+            'Connect one or more Cursor API keys on the Monitoring page (or set CURSOR_API_KEY).'}
         </p>
       </div>
     );
   }
 
   const detail = await getCachedProjectDetail(
-    auth.client,
-    auth.fingerprint,
+    auth.credentials.map((c) => ({
+      client: c.client,
+      fingerprint: c.fingerprint,
+    })),
     project,
     sort,
-    { agentsForProject, findRepoUrl },
   );
 
   if ('empty' in detail) {
@@ -104,46 +77,74 @@ export default async function ProjectMonitoringPage({
         <Panel>
           <EmptyState
             title="No such project"
-            description={`No conversations are working against “${project}” with this Cursor API key.`}
+            description={`No conversations are working against “${project}” with the connected Cursor API key(s).`}
           />
         </Panel>
       </div>
     );
   }
 
-  const { groups, enrichedCount, truncatedEnrichment, repoUrl } = detail;
+  const { sections, enrichedCount, truncatedEnrichment, repoUrl } = detail;
 
-  const groupViews: ProjectConversationGroupView[] = groups.map((g) => ({
-    key: g.key,
-    prUrl: g.pr?.prUrl ?? null,
-    prLabel: g.pr?.label ?? null,
-    prName: resolvePrDisplayName({
-      prTitle: g.pr?.title,
-      conversations: g.conversations,
-    }),
-    prNumber: formatPrNumberLabel(g.pr?.prUrl ?? g.pr?.label),
-    branch: g.pr?.branch,
-    totalChargedCents: g.totalChargedCents,
-    totalRawCents: g.totalRawCents,
-    latestCreatedAt: g.latestCreatedAt,
-    conversations: g.conversations.map((c) => ({
-      id: c.id,
-      name: c.name?.trim() || '(unnamed conversation)',
-      status: conversationDisplayStatus(c),
-      chargedCents: preferredChargedCents(c),
-      createdAt: c.createdAt,
+  const sectionViews: ProjectSectionsView = {
+    automations: sections.automations.map((g) => ({
+      automationId: g.automationId,
+      automationName: g.automationName,
+      totalChargedCents: g.totalChargedCents,
+      latestCreatedAt: g.latestCreatedAt,
+      conversations: g.conversations.map((c) => {
+        const pr = c.prs[0] ?? null;
+        return {
+          id: c.id,
+          name: c.name?.trim() || '(unnamed conversation)',
+          status: conversationDisplayStatus(c),
+          chargedCents: preferredChargedCents(c),
+          createdAt: c.createdAt,
+          source: c.source,
+          automationId: g.automationId,
+          automationName: g.automationName,
+          prUrl: pr?.prUrl ?? null,
+          prLabel: pr?.label ?? null,
+          prName: resolvePrDisplayName({
+            prTitle: pr?.title,
+            conversations: [c],
+          }),
+          prNumber: formatPrNumberLabel(pr?.prUrl ?? pr?.label),
+        };
+      }),
     })),
-  }));
+    userRequests: sections.userRequests.map((c) => {
+      const pr = c.prs[0] ?? null;
+      return {
+        id: c.id,
+        name: c.name?.trim() || '(unnamed conversation)',
+        status: conversationDisplayStatus(c),
+        chargedCents: preferredChargedCents(c),
+        createdAt: c.createdAt,
+        source: c.source,
+        prUrl: pr?.prUrl ?? null,
+        prLabel: pr?.label ?? null,
+        prName: resolvePrDisplayName({
+          prTitle: pr?.title,
+          conversations: [c],
+        }),
+        prNumber: formatPrNumberLabel(pr?.prUrl ?? pr?.label),
+      };
+    }),
+  };
 
-  const totalCharged = groups.reduce(
-    (sum, g) => (g.totalChargedCents != null ? sum + g.totalChargedCents : sum),
-    0,
-  );
-  const anyCost = groups.some((g) => g.totalChargedCents != null);
-  const prGroupCount = groups.filter((g) => g.key !== NO_PR_GROUP).length;
-  const unfinishedCount = groups
-    .flatMap((g) => g.conversations)
-    .filter((a) => runDidNotFinish(conversationDisplayStatus(a))).length;
+  const allRuns = [
+    ...sections.automations.flatMap((g) => g.conversations),
+    ...sections.userRequests,
+  ];
+  const totalCharged = allRuns.reduce((sum, c) => {
+    const cc = preferredChargedCents(c);
+    return cc != null ? sum + cc : sum;
+  }, 0);
+  const anyCost = allRuns.some((c) => preferredChargedCents(c) != null);
+  const unfinishedCount = allRuns.filter((a) =>
+    runDidNotFinish(conversationDisplayStatus(a)),
+  ).length;
   const href = projectHref(project);
 
   return (
@@ -159,7 +160,7 @@ export default async function ProjectMonitoringPage({
           className="mt-1"
           title={project === NO_REPO_GROUP ? 'No repository' : project}
           meta="Project"
-          subtitle={`${enrichedCount} conversation${enrichedCount === 1 ? '' : 's'} · ${prGroupCount} pull request${prGroupCount === 1 ? '' : 's'}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}${unfinishedCount > 0 ? ` · ${unfinishedCount} did not finish` : ''}`}
+          subtitle={`${enrichedCount} conversation${enrichedCount === 1 ? '' : 's'} · ${sections.automations.length} automation${sections.automations.length === 1 ? '' : 's'} · ${sections.userRequests.length} user request${sections.userRequests.length === 1 ? '' : 's'}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}${unfinishedCount > 0 ? ` · ${unfinishedCount} did not finish` : ''}`}
           actions={
             repoUrl ? (
               <a
@@ -178,8 +179,7 @@ export default async function ProjectMonitoringPage({
       <ProjectConversationsClient
         projectHref={href}
         initialSort={sort}
-        groups={groupViews}
-        prTitlePrefix={project}
+        sections={sectionViews}
       />
 
       {truncatedEnrichment ? (

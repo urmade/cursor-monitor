@@ -8,7 +8,11 @@ import {
   type CursorClient,
 } from '@nexus/cursor-client';
 import {
+  automationDisplayName,
+  automationMetaFromRun,
   NO_PR_GROUP,
+  parseGithubPrRef,
+  partitionProjectRunsByAutomation,
   sortConversationGroupsBy,
   type ConversationGroupSort,
 } from '../lib/monitoring-format';
@@ -20,35 +24,62 @@ export {
   type RunOutcome,
 } from '../lib/monitoring-status';
 export {
+  automationDisplayName,
+  automationMetaFromRun,
   formatCentsUsd,
   formatRelativeTime,
   formatPrNumberLabel,
   NO_PR_GROUP,
   parseConversationGroupSort,
   parseGithubPrRef,
+  partitionProjectRunsByAutomation,
   resolvePrDisplayName,
   type ConversationGroupSort,
   type GithubPrRef,
 } from '../lib/monitoring-format';
 
-/** httpOnly cookie holding a user-pasted Cursor API key (prototype BYOK). */
+/** httpOnly cookie holding user-pasted Cursor API keys (prototype BYOK). */
 export const CURSOR_USER_API_KEY_COOKIE = 'nexus_cursor_user_api_key';
+/** Multi-key cookie: JSON string array of API keys (different Cursor orgs). */
+export const CURSOR_USER_API_KEYS_COOKIE = 'nexus_cursor_user_api_keys';
 
 function fingerprintApiKey(apiKey: string): string {
   return createHash('sha256').update(apiKey).digest('hex').slice(0, 24);
 }
 
+/** Combined fingerprint for a set of credentials (stable cache key). */
+export function combinedCredentialFingerprint(fingerprints: string[]): string {
+  const sorted = [...fingerprints].filter(Boolean).sort();
+  if (sorted.length === 0) return '';
+  if (sorted.length === 1) return sorted[0]!;
+  return createHash('sha256').update(sorted.join('|')).digest('hex').slice(0, 24);
+}
+
 const COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 14; // 14 days
+const MAX_STORED_API_KEYS = 8;
 
 export type CursorCredentialSource = 'user_cookie' | 'env' | 'none';
 
+export type ResolvedCursorCredential = {
+  client: CursorClient;
+  fingerprint: string;
+  me: ApiKeyInfo | null;
+  identityLabel: string;
+  source: 'user_cookie' | 'env';
+};
+
 export type ResolvedCursorAuth = {
+  /** Primary client (first cookie key, else env) for simple single-client callers. */
   client: CursorClient | null;
   source: CursorCredentialSource;
   me: ApiKeyInfo | null;
   error: string | null;
-  /** SHA-256 fingerprint of the API key in use (for cache keys); null when unauthenticated. */
+  /** Fingerprint of the primary API key; null when unauthenticated. */
   fingerprint: string | null;
+  /** Every usable credential (multiple org keys, or a single env fallback). */
+  credentials: ResolvedCursorCredential[];
+  /** Stable fingerprint spanning all credentials — use for monitoring caches. */
+  combinedFingerprint: string | null;
 };
 
 function envCursorApiKey(): string | null {
@@ -59,73 +90,168 @@ function envCursorApiKey(): string | null {
   return key || null;
 }
 
-export async function readUserCursorApiKey(): Promise<string | null> {
-  const store = await cookies();
-  const value = store.get(CURSOR_USER_API_KEY_COOKIE)?.value?.trim();
-  return value || null;
-}
-
-export async function writeUserCursorApiKey(apiKey: string): Promise<void> {
-  const store = await cookies();
-  store.set(CURSOR_USER_API_KEY_COOKIE, apiKey, {
+function cookieOptions() {
+  return {
     httpOnly: true,
-    sameSite: 'lax',
+    sameSite: 'lax' as const,
     secure: process.env.VERCEL === '1' || process.env.NODE_ENV === 'production',
     path: '/',
     maxAge: COOKIE_MAX_AGE_SEC,
-  });
+  };
+}
+
+/** Parse stored keys from the multi-key cookie and legacy single-key cookie. */
+export async function readUserCursorApiKeys(): Promise<string[]> {
+  const store = await cookies();
+  const multi = store.get(CURSOR_USER_API_KEYS_COOKIE)?.value?.trim();
+  if (multi) {
+    try {
+      const parsed = JSON.parse(multi) as unknown;
+      if (Array.isArray(parsed)) {
+        return [
+          ...new Set(
+            parsed
+              .map((k) => (typeof k === 'string' ? k.trim() : ''))
+              .filter((k) => k.length >= 20),
+          ),
+        ].slice(0, MAX_STORED_API_KEYS);
+      }
+    } catch {
+      // fall through to legacy
+    }
+  }
+  const legacy = store.get(CURSOR_USER_API_KEY_COOKIE)?.value?.trim();
+  return legacy ? [legacy] : [];
+}
+
+/** @deprecated Prefer readUserCursorApiKeys — returns the first stored key. */
+export async function readUserCursorApiKey(): Promise<string | null> {
+  const keys = await readUserCursorApiKeys();
+  return keys[0] ?? null;
+}
+
+export async function writeUserCursorApiKeys(apiKeys: string[]): Promise<void> {
+  const store = await cookies();
+  const unique = [
+    ...new Set(apiKeys.map((k) => k.trim()).filter((k) => k.length >= 20)),
+  ].slice(0, MAX_STORED_API_KEYS);
+  const opts = cookieOptions();
+  if (unique.length === 0) {
+    store.delete(CURSOR_USER_API_KEYS_COOKIE);
+    store.delete(CURSOR_USER_API_KEY_COOKIE);
+    return;
+  }
+  store.set(CURSOR_USER_API_KEYS_COOKIE, JSON.stringify(unique), opts);
+  // Keep legacy cookie in sync for any older readers.
+  store.set(CURSOR_USER_API_KEY_COOKIE, unique[0]!, opts);
+}
+
+/** Replace stored keys with a single key (backward-compatible helper). */
+export async function writeUserCursorApiKey(apiKey: string): Promise<void> {
+  await writeUserCursorApiKeys([apiKey]);
 }
 
 export async function clearUserCursorApiKey(): Promise<void> {
-  const store = await cookies();
-  store.delete(CURSOR_USER_API_KEY_COOKIE);
+  await writeUserCursorApiKeys([]);
 }
 
-/** Prefer personal cookie key; fall back to env service-account / shared key. */
+async function probeCredential(
+  apiKey: string,
+  source: 'user_cookie' | 'env',
+): Promise<ResolvedCursorCredential | { error: string }> {
+  const client = createCursorClient({ apiKey });
+  const fingerprint = fingerprintApiKey(apiKey);
+  try {
+    const me = await client.getMe();
+    return {
+      client,
+      fingerprint,
+      me,
+      identityLabel: formatApiKeyIdentity(me),
+      source,
+    };
+  } catch (err) {
+    return {
+      error:
+        err instanceof Error
+          ? `Cursor API key failed (/v1/me): ${err.message}`
+          : 'Cursor API key failed (/v1/me)',
+    };
+  }
+}
+
+/** Prefer personal cookie keys; fall back to env service-account / shared key. */
 async function resolveCursorAuthUncached(): Promise<ResolvedCursorAuth> {
-  const userKey = await readUserCursorApiKey();
-  if (userKey) {
-    const client = createCursorClient({ apiKey: userKey });
-    const fingerprint = fingerprintApiKey(userKey);
-    try {
-      const me = await client.getMe();
-      return { client, source: 'user_cookie', me, error: null, fingerprint };
-    } catch (err) {
+  const userKeys = await readUserCursorApiKeys();
+  if (userKeys.length > 0) {
+    const results = await Promise.all(
+      userKeys.map((key) => probeCredential(key, 'user_cookie')),
+    );
+    const credentials: ResolvedCursorCredential[] = [];
+    const errors: string[] = [];
+    for (const result of results) {
+      if ('error' in result) errors.push(result.error);
+      else credentials.push(result);
+    }
+    if (credentials.length === 0) {
       return {
         client: null,
         source: 'user_cookie',
         me: null,
         fingerprint: null,
-        error:
-          err instanceof Error
-            ? `Saved Cursor API key failed (/v1/me): ${err.message}`
-            : 'Saved Cursor API key failed (/v1/me)',
+        credentials: [],
+        combinedFingerprint: null,
+        error: errors[0] ?? 'Saved Cursor API key failed (/v1/me)',
       };
     }
+    const primary = credentials[0]!;
+    return {
+      client: primary.client,
+      source: 'user_cookie',
+      me: primary.me,
+      fingerprint: primary.fingerprint,
+      credentials,
+      combinedFingerprint: combinedCredentialFingerprint(
+        credentials.map((c) => c.fingerprint),
+      ),
+      error: errors.length > 0 ? errors.join(' · ') : null,
+    };
   }
 
   const envKey = envCursorApiKey();
   if (!envKey) {
-    return { client: null, source: 'none', me: null, error: null, fingerprint: null };
+    return {
+      client: null,
+      source: 'none',
+      me: null,
+      error: null,
+      fingerprint: null,
+      credentials: [],
+      combinedFingerprint: null,
+    };
   }
 
-  const client = createCursorClient({ apiKey: envKey });
-  const fingerprint = fingerprintApiKey(envKey);
-  try {
-    const me = await client.getMe();
-    return { client, source: 'env', me, error: null, fingerprint };
-  } catch (err) {
+  const probed = await probeCredential(envKey, 'env');
+  if ('error' in probed) {
     return {
       client: null,
       source: 'env',
       me: null,
       fingerprint: null,
-      error:
-        err instanceof Error
-          ? `Env Cursor API key failed (/v1/me): ${err.message}`
-          : 'Env Cursor API key failed (/v1/me)',
+      credentials: [],
+      combinedFingerprint: null,
+      error: probed.error.replace('Cursor API key', 'Env Cursor API key'),
     };
   }
+  return {
+    client: probed.client,
+    source: 'env',
+    me: probed.me,
+    fingerprint: probed.fingerprint,
+    credentials: [probed],
+    combinedFingerprint: probed.fingerprint,
+    error: null,
+  };
 }
 
 /** Deduped per React request — layouts + pages share one auth resolve. */
@@ -185,6 +311,22 @@ export function agentRepoLabels(
     })
     .filter((x): x is string => Boolean(x));
   return [...new Set(labels)];
+}
+
+/** Repo labels from agent.repos plus owner/repo derived from linked PRs. */
+export function agentRepoLabelsIncludingPrs(
+  agent: {
+    repos?: Array<{ url?: string }> | null;
+    prs?: Array<{ prUrl?: string }>;
+  },
+): string[] {
+  const fromRepos = agentRepoLabels(agent.repos);
+  const fromPrs: string[] = [];
+  for (const pr of agent.prs ?? []) {
+    const ref = parseGithubPrRef(pr.prUrl);
+    if (ref) fromPrs.push(normalizeRepoLabel(`${ref.owner}/${ref.repo}`));
+  }
+  return [...new Set([...fromRepos, ...fromPrs])];
 }
 
 export function agentMatchesRepoFilter(
@@ -333,7 +475,19 @@ export type EnrichedAgent = AgentSummary & {
    */
   latestRunStatus?: string;
   enrichError?: string;
+  /** Credential fingerprint that could fetch this agent (multi-key). */
+  credentialFingerprint?: string;
 };
+
+/** Read automation attribution from agent payload fields when present. */
+export function automationMetaFromAgent(agent: {
+  source?: string;
+  automationId?: string;
+  automationName?: string;
+  [key: string]: unknown;
+}): { automationId: string; automationName: string | null } | null {
+  return automationMetaFromRun(agent);
+}
 
 /** Prefer latest-run status when enrichment populated it; else agent status. */
 export function conversationDisplayStatus(
@@ -636,6 +790,116 @@ export function sortConversationGroups(
   sort: ConversationGroupSort,
 ): ConversationPrGroup[] {
   return sortConversationGroupsBy(groups, sort);
+}
+
+export type AutomationRunGroup = {
+  automationId: string;
+  automationName: string;
+  conversations: EnrichedAgent[];
+  totalChargedCents: number | null;
+  totalRawCents: number | null;
+  latestCreatedAt: string | null;
+};
+
+export type ProjectRunSections = {
+  automations: AutomationRunGroup[];
+  userRequests: EnrichedAgent[];
+  userRequestsTotalChargedCents: number | null;
+  userRequestsLatestCreatedAt: string | null;
+};
+
+/**
+ * Split enriched conversations into Automations (grouped by automationId) and
+ * User requests. Sorting is applied within each bucket.
+ */
+export function partitionProjectRuns(
+  agents: EnrichedAgent[],
+  sort: ConversationGroupSort = 'cost',
+): ProjectRunSections {
+  const rows = agents.map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    status: agent.latestRunStatus ?? agent.status,
+    createdAt: agent.createdAt,
+    source: agent.source,
+    automationId: agent.automationId,
+    automationName: agent.automationName,
+    chargedCents: preferredChargedCents(agent),
+    agent,
+  }));
+  const buckets = partitionProjectRunsByAutomation(rows, sort);
+  const userAgents = buckets.userRequests.map((r) => r.agent);
+  let userCharged: number | null = null;
+  let userLatest: string | null = null;
+  let userLatestMs = 0;
+  for (const agent of userAgents) {
+    const cc = preferredChargedCents(agent);
+    if (cc != null) userCharged = (userCharged ?? 0) + cc;
+    const createdMs = agent.createdAt ? Date.parse(agent.createdAt) : 0;
+    if (createdMs > userLatestMs) {
+      userLatestMs = createdMs;
+      userLatest = agent.createdAt ?? null;
+    }
+  }
+
+  return {
+    automations: buckets.automations.map((g) => {
+      const conversations = g.conversations.map((r) => r.agent);
+      let raw: number | null = null;
+      for (const c of conversations) {
+        const rc = preferredRawCents(c);
+        if (rc != null) raw = (raw ?? 0) + rc;
+      }
+      return {
+        automationId: g.automationId,
+        automationName: g.automationName,
+        conversations,
+        totalChargedCents: g.totalChargedCents,
+        totalRawCents: raw,
+        latestCreatedAt: g.latestCreatedAt,
+      };
+    }),
+    userRequests: userAgents,
+    userRequestsTotalChargedCents: userCharged,
+    userRequestsLatestCreatedAt: userLatest,
+  };
+}
+
+/**
+ * Group enriched agents by repository, including repos inferred from PR URLs
+ * so automation runs that only expose a PR still land under that project.
+ */
+export function groupEnrichedAgentsByRepo(
+  agents: EnrichedAgent[],
+): AgentRepoGroup<EnrichedAgent>[] {
+  const map = new Map<string, EnrichedAgent[]>();
+
+  for (const agent of agents) {
+    const labels = agentRepoLabelsIncludingPrs(agent);
+    const keys = labels.length > 0 ? labels : [NO_REPO_GROUP];
+    for (const key of keys) {
+      const list = map.get(key);
+      if (list) list.push(agent);
+      else map.set(key, [agent]);
+    }
+  }
+
+  const sortAgents = (list: EnrichedAgent[]) =>
+    [...list].sort((a, b) => {
+      const at = a.createdAt ? Date.parse(a.createdAt) : 0;
+      const bt = b.createdAt ? Date.parse(b.createdAt) : 0;
+      return bt - at;
+    });
+
+  const named = [...map.keys()]
+    .filter((k) => k !== NO_REPO_GROUP)
+    .sort((a, b) => a.localeCompare(b));
+  const ordered = map.has(NO_REPO_GROUP) ? [...named, NO_REPO_GROUP] : named;
+
+  return ordered.map((repo) => ({
+    repo,
+    agents: sortAgents(map.get(repo) ?? []),
+  }));
 }
 
 export type ProjectSummary = {

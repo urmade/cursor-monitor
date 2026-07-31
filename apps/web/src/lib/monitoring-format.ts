@@ -149,3 +149,168 @@ export function sortConversationGroupsBy<T extends SortableConversationGroup>(
 
   return [...rest, ...noPr];
 }
+
+/** Minimal conversation shape for Automations / User-request partitioning. */
+export type PartitionableRun = {
+  id: string;
+  name?: string;
+  status?: string;
+  createdAt?: string;
+  source?: string;
+  automationId?: string;
+  automationName?: string | null;
+  chargedCents: number | null;
+  prUrl?: string | null;
+  prLabel?: string | null;
+  prName?: string | null;
+  prNumber?: string | null;
+};
+
+export function automationMetaFromRun(run: {
+  source?: string;
+  automationId?: string;
+  automationName?: string | null;
+}): { automationId: string; automationName: string | null } | null {
+  const id =
+    typeof run.automationId === 'string' && run.automationId.trim()
+      ? run.automationId.trim()
+      : null;
+  const source =
+    typeof run.source === 'string' ? run.source.trim().toLowerCase() : '';
+  const name =
+    typeof run.automationName === 'string' && run.automationName.trim()
+      ? run.automationName.trim()
+      : null;
+  if (id) return { automationId: id, automationName: name };
+  if (source === 'automations' || source === 'automation') {
+    return {
+      automationId: '__unscoped_automation__',
+      automationName: name ?? 'Automations',
+    };
+  }
+  return null;
+}
+
+export function automationDisplayName(
+  automationId: string,
+  automationName?: string | null,
+): string {
+  const named = automationName?.trim();
+  if (named) return named;
+  if (automationId === '__unscoped_automation__') return 'Automations';
+  const short = automationId.replace(/-/g, '').slice(0, 8);
+  return `Automation ${short}`;
+}
+
+export type AutomationRunBucket<T extends PartitionableRun> = {
+  automationId: string;
+  automationName: string;
+  conversations: T[];
+  totalChargedCents: number | null;
+  latestCreatedAt: string | null;
+};
+
+export type ProjectRunBuckets<T extends PartitionableRun> = {
+  automations: AutomationRunBucket<T>[];
+  userRequests: T[];
+};
+
+function sortPartitionableRuns<T extends PartitionableRun>(
+  runs: T[],
+  sort: ConversationGroupSort,
+): T[] {
+  return [...runs].sort((a, b) => {
+    if (sort === 'cost') {
+      const ac = a.chargedCents;
+      const bc = b.chargedCents;
+      if (ac != null && bc != null && ac !== bc) return bc - ac;
+      if (ac != null && bc == null) return -1;
+      if (ac == null && bc != null) return 1;
+    }
+    const at = a.createdAt ? Date.parse(a.createdAt) : 0;
+    const bt = b.createdAt ? Date.parse(b.createdAt) : 0;
+    if (at !== bt) return bt - at;
+    return (a.name ?? a.id).localeCompare(b.name ?? b.id);
+  });
+}
+
+function sumChargedAndLatest<T extends PartitionableRun>(runs: T[]): {
+  totalChargedCents: number | null;
+  latestCreatedAt: string | null;
+} {
+  let charged: number | null = null;
+  let latest: string | null = null;
+  let latestMs = 0;
+  for (const run of runs) {
+    if (run.chargedCents != null) charged = (charged ?? 0) + run.chargedCents;
+    const createdMs = run.createdAt ? Date.parse(run.createdAt) : 0;
+    if (createdMs > latestMs) {
+      latestMs = createdMs;
+      latest = run.createdAt ?? null;
+    }
+  }
+  return { totalChargedCents: charged, latestCreatedAt: latest };
+}
+
+/**
+ * Split runs into Automations (by automationId) and User requests.
+ * Sorting applies within each bucket (automations by total, runs by cost/created).
+ */
+export function partitionProjectRunsByAutomation<T extends PartitionableRun>(
+  runs: T[],
+  sort: ConversationGroupSort = 'cost',
+): ProjectRunBuckets<T> {
+  const byAutomation = new Map<string, { name: string | null; runs: T[] }>();
+  const userRequests: T[] = [];
+
+  for (const run of runs) {
+    const meta = automationMetaFromRun(run);
+    if (!meta) {
+      userRequests.push(run);
+      continue;
+    }
+    const cur = byAutomation.get(meta.automationId);
+    if (cur) {
+      cur.runs.push(run);
+      if (!cur.name && meta.automationName) cur.name = meta.automationName;
+    } else {
+      byAutomation.set(meta.automationId, {
+        name: meta.automationName,
+        runs: [run],
+      });
+    }
+  }
+
+  const automations: AutomationRunBucket<T>[] = [...byAutomation.entries()].map(
+    ([automationId, bucket]) => {
+      const conversations = sortPartitionableRuns(bucket.runs, sort);
+      const totals = sumChargedAndLatest(conversations);
+      return {
+        automationId,
+        automationName: automationDisplayName(automationId, bucket.name),
+        conversations,
+        totalChargedCents: totals.totalChargedCents,
+        latestCreatedAt: totals.latestCreatedAt,
+      };
+    },
+  );
+
+  automations.sort((a, b) => {
+    if (sort === 'cost') {
+      const ac = a.totalChargedCents;
+      const bc = b.totalChargedCents;
+      if (ac != null && bc != null && ac !== bc) return bc - ac;
+      if (ac != null && bc == null) return -1;
+      if (ac == null && bc != null) return 1;
+    }
+    const at = a.latestCreatedAt ? Date.parse(a.latestCreatedAt) : 0;
+    const bt = b.latestCreatedAt ? Date.parse(b.latestCreatedAt) : 0;
+    if (at !== bt) return bt - at;
+    return a.automationName.localeCompare(b.automationName);
+  });
+
+  return {
+    automations,
+    userRequests: sortPartitionableRuns(userRequests, sort),
+  };
+}

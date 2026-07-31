@@ -153,6 +153,15 @@ export type AgentSummary = {
   createdAt?: string;
   updatedAt?: string;
   repos?: AgentRepoRef[];
+  /**
+   * Origin of the agent when the API exposes it (e.g. `automations`, `desktop`,
+   * `api`). Not always present on Cloud Agents API responses today.
+   */
+  source?: string;
+  /** Automation UUID when this agent was launched by an automation. */
+  automationId?: string;
+  /** Human automation name when the API exposes it. */
+  automationName?: string;
   [key: string]: unknown;
 };
 
@@ -168,8 +177,8 @@ export type ApiKeyInfo = {
 };
 
 export type FilteredUsageEventsRequest = {
-  startDate?: string;
-  endDate?: string;
+  startDate?: number | string;
+  endDate?: number | string;
   cloudAgentId?: string;
   automationId?: string;
   page?: number;
@@ -177,15 +186,32 @@ export type FilteredUsageEventsRequest = {
   [key: string]: unknown;
 };
 
+export type FilteredUsageEvent = {
+  timestamp: string;
+  userEmail?: string;
+  serviceAccountId?: string;
+  serviceAccountName?: string;
+  cloudAgentId?: string;
+  automationId?: string;
+  model?: string;
+  kind?: string;
+  chargedCents?: number;
+  [key: string]: unknown;
+};
+
 export type FilteredUsageEventsResponse = {
-  events?: Array<{
-    chargedCents?: number;
-    tokenUsage?: unknown;
-    model?: string;
-    cloudAgentId?: string;
-    automationId?: string;
-    [key: string]: unknown;
-  }>;
+  totalUsageEventsCount?: number;
+  pagination?: {
+    numPages?: number;
+    currentPage?: number;
+    pageSize?: number;
+    hasNextPage?: boolean;
+    hasPreviousPage?: boolean;
+  };
+  usageEvents?: FilteredUsageEvent[];
+  /** Legacy alias retained for older fixtures. */
+  events?: FilteredUsageEvent[];
+  period?: { startDate?: number; endDate?: number };
   [key: string]: unknown;
 };
 

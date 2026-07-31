@@ -77,7 +77,7 @@ export default async function ConversationPage({
   const projectHref = `/monitoring/${encodeURIComponent(project)}`;
 
   const auth = await resolveCursorAuth();
-  if (!auth.client) {
+  if (auth.credentials.length === 0) {
     return (
       <div className="space-y-4 p-4">
         <Link href={projectHref} className="text-sm text-accent hover:underline">
@@ -91,7 +91,17 @@ export default async function ConversationPage({
     );
   }
 
-  const client = auth.client;
+  // Prefer the credential that owns this agent when multiple org keys are connected.
+  let client = auth.client!;
+  for (const cred of auth.credentials) {
+    try {
+      await cred.client.getAgent(agentId);
+      client = cred.client;
+      break;
+    } catch {
+      // try next
+    }
+  }
   let error: string | null = null;
   let agentName = agentId;
   let agentStatus: string | undefined;

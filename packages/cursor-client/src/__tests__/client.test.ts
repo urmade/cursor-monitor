@@ -240,6 +240,32 @@ describe('admin + automation webhook', () => {
     expect(res.events).toEqual([]);
   });
 
+  it('listAllFilteredUsageEvents pages until exhausted', async () => {
+    const fetchImpl = vi.fn(async (_input, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        page?: number;
+      };
+      if (body.page === 1) {
+        return jsonResponse(200, {
+          usageEvents: [{ timestamp: '1', automationId: 'a1', cloudAgentId: 'bc-1' }],
+          pagination: { hasNextPage: true, numPages: 2, currentPage: 1 },
+        });
+      }
+      return jsonResponse(200, {
+        usageEvents: [{ timestamp: '2', automationId: 'a1', cloudAgentId: 'bc-2' }],
+        pagination: { hasNextPage: false, numPages: 2, currentPage: 2 },
+      });
+    });
+    const admin = createCursorAdminClient({ apiKey: 'admin-key', fetchImpl });
+    const res = await admin.listAllFilteredUsageEvents(
+      { automationId: '*' },
+      { pageSize: 1, maxPages: 5 },
+    );
+    expect(res.truncated).toBe(false);
+    expect(res.items).toHaveLength(2);
+    expect(res.items.map((e) => e.cloudAgentId)).toEqual(['bc-1', 'bc-2']);
+  });
+
   it('postAutomationWebhook uses bearer auth', async () => {
     const fetchImpl = vi.fn(async (_input, init?: RequestInit) => {
       expect(new Headers(init?.headers).get('Authorization')).toBe(

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   agentMatchesRepoFilter,
   agentRepoLabels,
+  agentRepoLabelsIncludingPrs,
   aggregateUsageCost,
   attachGithubPrTitles,
   classifyRunStatus,
@@ -13,10 +14,12 @@ import {
   formatRelativeTime,
   groupAgentsByRepo,
   groupConversationsByPr,
+  groupEnrichedAgentsByRepo,
   NO_PR_GROUP,
   NO_REPO_GROUP,
   parseConversationGroupSort,
   parseGithubPrRef,
+  partitionProjectRuns,
   preferredChargedCents,
   resolvePrDisplayName,
   runDidNotFinish,
@@ -26,6 +29,17 @@ import {
   summarizeProject,
   type EnrichedAgent,
 } from '../server/cursor';
+import {
+  automationDisplayName,
+  automationMetaFromRun,
+  partitionProjectRunsByAutomation,
+} from '../lib/monitoring-format';
+import {
+  applyAutomationAttribution,
+  loadAutomationAttributionMap,
+} from '../server/automation-attribution';
+import type { CursorAdminClient } from '@nexus/cursor-client';
+
 
 describe('monitoring format helpers', () => {
   it('formats duration', () => {
@@ -430,5 +444,130 @@ describe('project summaries', () => {
     const providerOnly = conversation('c2', [], null, '2026-07-28T10:00:00.000Z');
     providerOnly.cost.providerChargedCents = 42;
     expect(preferredChargedCents(providerOnly)).toBe(42);
+  });
+});
+
+describe('automation vs user-request partitioning', () => {
+  it('detects automation metadata from agent fields', () => {
+    expect(
+      automationMetaFromRun({
+        automationId: 'auto-1',
+        automationName: 'PR Review',
+      }),
+    ).toEqual({ automationId: 'auto-1', automationName: 'PR Review' });
+    expect(automationMetaFromRun({ source: 'automations' })?.automationId).toBe(
+      '__unscoped_automation__',
+    );
+    expect(automationMetaFromRun({})).toBeNull();
+    expect(automationDisplayName('7fc64f90-6d7a-4a5d-91b1-bd1f529a85dd')).toBe(
+      'Automation 7fc64f90',
+    );
+  });
+
+  it('buckets automations and user requests with cost sorting', () => {
+    const runs = [
+      {
+        id: 'u1',
+        name: 'User expensive',
+        chargedCents: 500,
+        createdAt: '2026-07-30T10:00:00.000Z',
+      },
+      {
+        id: 'a1',
+        name: 'Auto cheap run',
+        automationId: 'auto-hi',
+        automationName: 'High Cost Auto',
+        chargedCents: 100,
+        createdAt: '2026-07-29T10:00:00.000Z',
+        prUrl: 'https://github.com/acme/web/pull/1',
+        prNumber: '#1',
+      },
+      {
+        id: 'a2',
+        name: 'Auto expensive run',
+        automationId: 'auto-hi',
+        automationName: 'High Cost Auto',
+        chargedCents: 400,
+        createdAt: '2026-07-30T09:00:00.000Z',
+      },
+      {
+        id: 'a3',
+        name: 'Other auto',
+        automationId: 'auto-lo',
+        automationName: 'Low Cost Auto',
+        chargedCents: 50,
+        createdAt: '2026-07-28T10:00:00.000Z',
+      },
+      {
+        id: 'u2',
+        name: 'User cheap',
+        chargedCents: 10,
+        createdAt: '2026-07-31T10:00:00.000Z',
+      },
+    ];
+
+    const byCost = partitionProjectRunsByAutomation(runs, 'cost');
+    expect(byCost.automations.map((a) => a.automationId)).toEqual([
+      'auto-hi',
+      'auto-lo',
+    ]);
+    expect(byCost.automations[0]!.totalChargedCents).toBe(500);
+    expect(byCost.automations[0]!.conversations.map((c) => c.id)).toEqual([
+      'a2',
+      'a1',
+    ]);
+    expect(byCost.userRequests.map((r) => r.id)).toEqual(['u1', 'u2']);
+
+    const byCreated = partitionProjectRunsByAutomation(runs, 'created');
+    expect(byCreated.userRequests.map((r) => r.id)).toEqual(['u2', 'u1']);
+  });
+
+  it('partitions enriched agents and attributes PR-derived repos', () => {
+    const agents: EnrichedAgent[] = [
+      {
+        ...conversation('auto', ['https://github.com/acme/web/pull/9'], 80, '2026-07-30T10:00:00.000Z'),
+        automationId: 'auto-1',
+        automationName: 'Nightly',
+        repos: [],
+      },
+      conversation('user', ['https://github.com/acme/web/pull/8'], 20, '2026-07-29T10:00:00.000Z'),
+    ];
+    agents[1]!.repos = [{ url: 'https://github.com/acme/web' }];
+
+    expect(agentRepoLabelsIncludingPrs(agents[0]!)).toEqual(['acme/web']);
+    const groups = groupEnrichedAgentsByRepo(agents);
+    expect(groups.map((g) => g.repo)).toEqual(['acme/web']);
+    expect(groups[0]!.agents.map((a) => a.id).sort()).toEqual(['auto', 'user']);
+
+    const sections = partitionProjectRuns(agents, 'cost');
+    expect(sections.automations).toHaveLength(1);
+    expect(sections.automations[0]!.automationName).toBe('Nightly');
+    expect(sections.automations[0]!.totalChargedCents).toBe(80);
+    expect(sections.userRequests.map((a) => a.id)).toEqual(['user']);
+  });
+
+  it('applies Admin usage automation attribution onto agents', async () => {
+    const admin = {
+      listAllFilteredUsageEvents: async () => ({
+        items: [
+          {
+            timestamp: '1',
+            cloudAgentId: 'bc-1',
+            automationId: 'auto-9',
+          },
+        ],
+        truncated: false,
+      }),
+    } as unknown as CursorAdminClient;
+
+    const map = await loadAutomationAttributionMap(admin);
+    expect(map.get('bc-1')).toEqual({ automationId: 'auto-9' });
+
+    const stamped = applyAutomationAttribution(
+      [conversation('bc-1', [], 10, '2026-07-30T10:00:00.000Z')],
+      map,
+    );
+    expect(stamped[0]!.automationId).toBe('auto-9');
+    expect(stamped[0]!.source).toBe('automations');
   });
 });

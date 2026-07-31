@@ -22,9 +22,14 @@ export default async function MonitoringPage() {
   let truncated = false;
   let truncatedEnrichment = false;
 
-  if (auth.client && auth.fingerprint) {
+  if (auth.credentials.length > 0 && auth.combinedFingerprint) {
     try {
-      const page = await getCachedProjectsPage(auth.client, auth.fingerprint);
+      const page = await getCachedProjectsPage(
+        auth.credentials.map((c) => ({
+          client: c.client,
+          fingerprint: c.fingerprint,
+        })),
+      );
       projects = page.projects;
       agentCount = page.agentCount;
       truncated = page.truncated;
@@ -39,21 +44,29 @@ export default async function MonitoringPage() {
     0,
   );
   const anyCost = projects.some((p) => p.totalChargedCents != null);
+  const connectedKeys =
+    auth.source === 'user_cookie'
+      ? auth.credentials.map((c) => ({
+          fingerprint: c.fingerprint,
+          identity: c.identityLabel,
+        }))
+      : [];
 
   return (
     <div className="space-y-4 p-4">
       <PageHeader
         title="Monitoring"
-        subtitle="Every repository is a project. Open one to inspect the conversations running against it — grouped by pull request, with their cost."
+        subtitle="Every repository is a project. Open one to inspect Automations and user requests running against it — with cost."
         meta={
-          auth.client && projects.length > 0
-            ? `${projects.length} project${projects.length === 1 ? '' : 's'} · ${agentCount} conversation${agentCount === 1 ? '' : 's'}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}`
+          auth.credentials.length > 0 && projects.length > 0
+            ? `${projects.length} project${projects.length === 1 ? '' : 's'} · ${agentCount} conversation${agentCount === 1 ? '' : 's'}${auth.credentials.length > 1 ? ` · ${auth.credentials.length} orgs` : ''}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}`
             : undefined
         }
       />
 
       <CursorApiKeyConnectForm
-        connected={Boolean(auth.client)}
+        connected={auth.credentials.length > 0}
+        connectedKeys={connectedKeys}
         identityLabel={auth.me ? formatApiKeyIdentity(auth.me) : null}
         source={auth.source}
       />
@@ -64,11 +77,11 @@ export default async function MonitoringPage() {
         </p>
       ) : null}
 
-      {auth.client && !error && projects.length === 0 ? (
+      {auth.credentials.length > 0 && !error && projects.length === 0 ? (
         <Panel>
           <EmptyState
             title="No conversations yet"
-            description="Cloud Agents started in Cursor show up here as conversations, grouped by the repository they work on."
+            description="Cloud Agents and Automations started in Cursor show up here as conversations, grouped by the repository they work on."
           />
         </Panel>
       ) : null}
@@ -111,7 +124,7 @@ export default async function MonitoringPage() {
         </div>
       ) : null}
 
-      {auth.client && (truncated || truncatedEnrichment) ? (
+      {auth.credentials.length > 0 && (truncated || truncatedEnrichment) ? (
         <p className="text-xs text-fg-subtle">
           {truncated
             ? 'Conversation list truncated — hit the API page cap. '
