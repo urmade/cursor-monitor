@@ -49,6 +49,11 @@ export function AppShellClient({
         { slug: 'projects', label: 'Projects', href: '/projects' },
         { slug: 'monitoring', label: 'Monitoring', href: '/monitoring' },
         { slug: 'hooks', label: 'Hooks', href: '/hooks' },
+        {
+          slug: 'settings',
+          label: 'Settings',
+          href: '/settings/organisations',
+        },
       ];
 
   const breadcrumbItems = projectKey
@@ -67,6 +72,7 @@ export function AppShellClient({
         { label: 'Inbox', href: '/inbox' },
         { label: 'Monitoring', href: '/monitoring' },
         { label: 'Hooks', href: '/hooks' },
+        { label: 'Settings', href: '/settings/organisations' },
       ];
 
   return (

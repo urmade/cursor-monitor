@@ -1,13 +1,17 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createCursorClient } from '@nexus/cursor-client';
+import { createCursorClient, defaultCursorApiBaseUrl } from '@nexus/cursor-client';
+import { formatApiKeyIdentity } from './cursor';
 import {
-  clearUserCursorApiKey,
-  formatApiKeyIdentity,
-  readUserCursorApiKeys,
-  writeUserCursorApiKeys,
-} from './cursor';
+  actionRemoveAllCursorOrganisations,
+  actionRemoveCursorOrganisation,
+} from './cursor-organisations';
+import {
+  readCursorOrganisations,
+  writeCursorOrganisations,
+  type StoredCursorOrganisation,
+} from './cursor-org-store';
 import {
   credentialFingerprint,
   invalidateMonitoringCache,
@@ -34,6 +38,7 @@ function parseKeysFromForm(formData: FormData): string[] {
   ];
 }
 
+/** @deprecated Prefer actionUpsertCursorOrganisation on the Settings page. */
 export async function actionConnectCursorApiKey(
   formData: FormData,
 ): Promise<ConnectCursorKeyResult> {
@@ -45,11 +50,11 @@ export async function actionConnectCursorApiKey(
     };
   }
 
-  const existing = await readUserCursorApiKeys();
+  const existing = await readCursorOrganisations();
   const existingFingerprints = new Set(
-    existing.map((k) => credentialFingerprint(k)),
+    existing.map((row) => credentialFingerprint(row.apiKey)),
   );
-  const accepted: string[] = [...existing];
+  const accepted: StoredCursorOrganisation[] = [...existing];
   const identities: string[] = [];
   const errors: string[] = [];
 
@@ -66,7 +71,17 @@ export async function actionConnectCursorApiKey(
     try {
       const client = createCursorClient({ apiKey });
       const me = await client.getMe();
-      accepted.push(apiKey);
+      accepted.push({
+        id: fp,
+        label:
+          accepted.length === 0
+            ? 'Connected organisation'
+            : `Organisation ${accepted.length + 1}`,
+        organizationId: null,
+        apiKey,
+        orgApiKey: null,
+        baseUrl: defaultCursorApiBaseUrl(),
+      });
       existingFingerprints.add(fp);
       identities.push(formatApiKeyIdentity(me));
       await invalidateMonitoringCache(fp);
@@ -86,8 +101,9 @@ export async function actionConnectCursorApiKey(
     };
   }
 
-  await writeUserCursorApiKeys(accepted);
+  await writeCursorOrganisations(accepted);
   revalidatePath('/monitoring');
+  revalidatePath('/settings/organisations');
   return {
     ok: true,
     identity: identities.join(' · '),
@@ -95,28 +111,26 @@ export async function actionConnectCursorApiKey(
   };
 }
 
+/** @deprecated Prefer actionRemoveCursorOrganisation. */
 export async function actionDisconnectCursorApiKey(
   fingerprint?: string,
 ): Promise<void> {
   if (!fingerprint) {
-    await clearUserCursorApiKey();
-    revalidatePath('/monitoring');
+    await actionRemoveAllCursorOrganisations();
     return;
   }
-  const existing = await readUserCursorApiKeys();
-  const remaining = existing.filter(
-    (key) => credentialFingerprint(key) !== fingerprint,
+  const existing = await readCursorOrganisations();
+  const target = existing.find(
+    (row) => credentialFingerprint(row.apiKey) === fingerprint,
   );
-  await writeUserCursorApiKeys(remaining);
-  await invalidateMonitoringCache(fingerprint);
+  if (target) {
+    await actionRemoveCursorOrganisation(target.id);
+    return;
+  }
   revalidatePath('/monitoring');
 }
 
+/** @deprecated Prefer actionRemoveAllCursorOrganisations. */
 export async function actionDisconnectAllCursorApiKeys(): Promise<void> {
-  const existing = await readUserCursorApiKeys();
-  for (const key of existing) {
-    await invalidateMonitoringCache(credentialFingerprint(key));
-  }
-  await clearUserCursorApiKey();
-  revalidatePath('/monitoring');
+  await actionRemoveAllCursorOrganisations();
 }

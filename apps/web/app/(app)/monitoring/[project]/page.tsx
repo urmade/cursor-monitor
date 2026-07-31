@@ -50,7 +50,7 @@ export default async function ProjectMonitoringPage({
         </Link>
         <p className="text-sm text-danger-fg" role="alert">
           {auth.error ??
-            'Connect one or more Cursor API keys on the Monitoring page (or set CURSOR_API_KEY).'}
+            'Connect one or more Cursor organisations in Settings (or set CURSOR_API_KEY).'}
         </p>
       </div>
     );

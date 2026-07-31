@@ -1,6 +1,6 @@
 import { EmptyState, PageHeader, Panel } from '@nexus/ui';
 import Link from 'next/link';
-import { CursorApiKeyConnectForm } from '../../../src/components/CursorApiKeyConnectForm';
+import { CursorCredentialsStatus } from '../../../src/components/CursorCredentialsStatus';
 import {
   formatApiKeyIdentity,
   formatCentsUsd,
@@ -44,13 +44,8 @@ export default async function MonitoringPage() {
     0,
   );
   const anyCost = projects.some((p) => p.totalChargedCents != null);
-  const connectedKeys =
-    auth.source === 'user_cookie'
-      ? auth.credentials.map((c) => ({
-          fingerprint: c.fingerprint,
-          identity: c.identityLabel,
-        }))
-      : [];
+  const orgCount =
+    auth.source === 'user_cookie' ? auth.credentials.length : 0;
 
   return (
     <div className="space-y-4 p-4">
@@ -59,16 +54,21 @@ export default async function MonitoringPage() {
         subtitle="Every repository is a project. Open one to inspect Automations and user requests running against it — with cost."
         meta={
           auth.credentials.length > 0 && projects.length > 0
-            ? `${projects.length} project${projects.length === 1 ? '' : 's'} · ${agentCount} conversation${agentCount === 1 ? '' : 's'}${auth.credentials.length > 1 ? ` · ${auth.credentials.length} orgs` : ''}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}`
+            ? `${projects.length} project${projects.length === 1 ? '' : 's'} · ${agentCount} conversation${agentCount === 1 ? '' : 's'}${orgCount > 1 ? ` · ${orgCount} orgs` : ''}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}`
             : undefined
         }
       />
 
-      <CursorApiKeyConnectForm
-        connected={auth.credentials.length > 0}
-        connectedKeys={connectedKeys}
-        identityLabel={auth.me ? formatApiKeyIdentity(auth.me) : null}
+      <CursorCredentialsStatus
+        connectedCount={orgCount}
         source={auth.source}
+        identityLabel={
+          auth.source === 'user_cookie' && auth.credentials.length > 1
+            ? `${auth.credentials.length} API keys`
+            : auth.me
+              ? formatApiKeyIdentity(auth.me)
+              : null
+        }
       />
 
       {error ? (

@@ -85,7 +85,7 @@ export default async function ConversationPage({
         </Link>
         <p className="text-sm text-danger-fg" role="alert">
           {auth.error ??
-            'Connect a personal Cursor API key on the Monitoring page (or set CURSOR_API_KEY).'}
+            'Connect a Cursor organisation in Settings (or set CURSOR_API_KEY).'}
         </p>
       </div>
     );

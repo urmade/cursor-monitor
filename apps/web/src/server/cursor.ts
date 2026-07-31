@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { cache } from 'react';
 import {
   createCursorClient,
+  defaultCursorApiBaseUrl,
   type AgentSummary,
   type ApiKeyInfo,
   type CursorClient,
@@ -16,6 +17,7 @@ import {
   sortConversationGroupsBy,
   type ConversationGroupSort,
 } from '../lib/monitoring-format';
+import type { StoredCursorOrganisation } from './cursor-org-store';
 
 export {
   classifyRunStatus,
@@ -66,6 +68,14 @@ export type ResolvedCursorCredential = {
   me: ApiKeyInfo | null;
   identityLabel: string;
   source: 'user_cookie' | 'env';
+  /** Local organisation connection id when sourced from settings. */
+  organisationConnectionId?: string;
+  /** Public Cursor organization id (`org_…`) when configured. */
+  organizationId?: string | null;
+  /** Cursor API base URL used for this credential. */
+  baseUrl?: string;
+  /** Admin-chosen organisation label. */
+  organisationLabel?: string;
 };
 
 export type ResolvedCursorAuth = {
@@ -158,17 +168,32 @@ export async function clearUserCursorApiKey(): Promise<void> {
 async function probeCredential(
   apiKey: string,
   source: 'user_cookie' | 'env',
+  opts?: {
+    baseUrl?: string;
+    organisation?: StoredCursorOrganisation;
+  },
 ): Promise<ResolvedCursorCredential | { error: string }> {
-  const client = createCursorClient({ apiKey });
+  const baseUrl = opts?.baseUrl ?? defaultCursorApiBaseUrl();
+  const client = createCursorClient({ apiKey, baseUrl });
   const fingerprint = fingerprintApiKey(apiKey);
   try {
     const me = await client.getMe();
+    const identity = formatApiKeyIdentity(me);
+    const orgLabel = opts?.organisation?.label?.trim();
+    const orgId = opts?.organisation?.organizationId;
+    const identityLabel = orgLabel
+      ? `${orgLabel}${orgId ? ` · ${orgId}` : ''} · ${identity}`
+      : identity;
     return {
       client,
       fingerprint,
       me,
-      identityLabel: formatApiKeyIdentity(me),
+      identityLabel,
       source,
+      organisationConnectionId: opts?.organisation?.id,
+      organizationId: orgId ?? null,
+      baseUrl,
+      organisationLabel: orgLabel,
     };
   } catch (err) {
     return {
@@ -180,12 +205,19 @@ async function probeCredential(
   }
 }
 
-/** Prefer personal cookie keys; fall back to env service-account / shared key. */
+/** Prefer configured organisations; fall back to env service-account / shared key. */
 async function resolveCursorAuthUncached(): Promise<ResolvedCursorAuth> {
-  const userKeys = await readUserCursorApiKeys();
-  if (userKeys.length > 0) {
+  // Lazy import avoids a circular init with cursor-org-store ↔ cursor.
+  const { readCursorOrganisations } = await import('./cursor-org-store');
+  const organisations = await readCursorOrganisations();
+  if (organisations.length > 0) {
     const results = await Promise.all(
-      userKeys.map((key) => probeCredential(key, 'user_cookie')),
+      organisations.map((org) =>
+        probeCredential(org.apiKey, 'user_cookie', {
+          baseUrl: org.baseUrl,
+          organisation: org,
+        }),
+      ),
     );
     const credentials: ResolvedCursorCredential[] = [];
     const errors: string[] = [];

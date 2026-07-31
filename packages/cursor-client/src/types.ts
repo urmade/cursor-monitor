@@ -236,3 +236,54 @@ export type AutomationWebhookPayload = {
   mcp_url?: string;
   [key: string]: unknown;
 };
+
+export type OrganizationMember = {
+  userId?: number;
+  email?: string;
+  name?: string;
+  organizationRole?: string;
+  teams?: Array<{ teamId?: number; teamRole?: string }>;
+  [key: string]: unknown;
+};
+
+export type OrganizationMembersResponse = {
+  members?: OrganizationMember[];
+  pagination?: {
+    page?: number;
+    pageSize?: number;
+    totalCount?: number;
+    totalPages?: number;
+    hasNextPage?: boolean;
+    hasPreviousPage?: boolean;
+  };
+  organizationId?: string;
+  [key: string]: unknown;
+};
+
+export type OrganizationGroup = {
+  id?: string;
+  name?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  [key: string]: unknown;
+};
+
+export type OrganizationGroupsResponse = {
+  groups?: OrganizationGroup[];
+  pagination?: {
+    page?: number;
+    pageSize?: number;
+    totalCount?: number;
+    totalPages?: number;
+    hasNextPage?: boolean;
+    hasPreviousPage?: boolean;
+  };
+  organizationId?: string;
+  [key: string]: unknown;
+};
+
+export type OrganizationPooledUsageResponse = {
+  teams?: Array<{ teamId?: number; [key: string]: unknown }>;
+  organizationId?: string;
+  [key: string]: unknown;
+};
