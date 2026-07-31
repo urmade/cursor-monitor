@@ -282,8 +282,19 @@ export type OrganizationGroupsResponse = {
   [key: string]: unknown;
 };
 
+export type OrganizationPooledUsagePool = {
+  limitCents?: number;
+  usedCents?: number;
+  remainingCents?: number;
+  contractStartDate?: string;
+  contractEndDate?: string;
+  [key: string]: unknown;
+};
+
 export type OrganizationPooledUsageResponse = {
-  teams?: Array<{ teamId?: number; [key: string]: unknown }>;
+  enabled?: boolean;
+  pool?: OrganizationPooledUsagePool;
+  teams?: Array<{ teamId?: number; usedCents?: number; [key: string]: unknown }>;
   organizationId?: string;
   [key: string]: unknown;
 };

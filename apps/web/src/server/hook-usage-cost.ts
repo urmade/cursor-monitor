@@ -3,6 +3,7 @@ import {
   type CursorAdminClient,
   type FilteredUsageEvent,
 } from '@nexus/cursor-client';
+import { resolveOrgCostCredentials } from './cursor-org-cost-credentials';
 
 export type HookUsageCostLookup = {
   chargedCents: number | null;
@@ -13,27 +14,10 @@ export type HookUsageCostLookup = {
 
 const DEFAULT_LOOKBACK_MS = 20 * 60 * 1000;
 
-function orgApiKey(): string | null {
-  const value =
-    process.env.CURSOR_ORGANIZATION_API_KEY?.trim() ||
-    process.env.CURSOR_ORG_API_KEY?.trim() ||
-    process.env.CURSOR_ADMIN_API_KEY?.trim() ||
-    '';
-  return value || null;
-}
-
 function teamApiKey(): string | null {
   const value =
     process.env.CURSOR_TEAM_API_KEY?.trim() ||
     process.env.CURSOR_ADMIN_API_KEY?.trim() ||
-    '';
-  return value || null;
-}
-
-function organizationId(): string | null {
-  const value =
-    process.env.CURSOR_ORGANIZATION_ID?.trim() ||
-    process.env.CURSOR_ORG_ID?.trim() ||
     '';
   return value || null;
 }
@@ -124,6 +108,9 @@ async function fetchUsageEvents(opts: {
  * Look up chargedCents for a stop-hook turn via Cursor Admin usage events.
  * Prefers Organization Admin API (`/organizations/filtered-usage-events`),
  * falls back to team Admin API. Never throws — returns an error string instead.
+ *
+ * Credentials resolve from: explicit opts → env → server store (synced from
+ * Settings → Organisations) → browser cookie orgs.
  */
 export async function lookupStopHookUsageCost(input: {
   userEmail: string | null;
@@ -131,6 +118,10 @@ export async function lookupStopHookUsageCost(input: {
   now?: Date;
   lookbackMs?: number;
   fetchEvents?: typeof fetchUsageEvents;
+  /** Optional override (tests / explicit wiring). */
+  organizationId?: string | null;
+  orgApiKey?: string | null;
+  baseUrl?: string | null;
 }): Promise<HookUsageCostLookup> {
   const now = input.now ?? new Date();
   const lookbackMs = input.lookbackMs ?? DEFAULT_LOOKBACK_MS;
@@ -139,25 +130,31 @@ export async function lookupStopHookUsageCost(input: {
   const email = input.userEmail?.trim() || null;
   const fetchEvents = input.fetchEvents ?? fetchUsageEvents;
 
-  const orgId = organizationId();
-  const orgKey = orgApiKey();
+  const orgCreds = await resolveOrgCostCredentials({
+    organizationId: input.organizationId,
+    orgApiKey: input.orgApiKey,
+    baseUrl: input.baseUrl,
+  });
   const teamKey = teamApiKey();
 
   try {
     let events: FilteredUsageEvent[] = [];
     let source: string | null = null;
 
-    if (orgId && orgKey) {
-      const client = createCursorAdminClient({ apiKey: orgKey });
+    if (orgCreds) {
+      const client = createCursorAdminClient({
+        apiKey: orgCreds.orgApiKey,
+        baseUrl: orgCreds.baseUrl,
+      });
       events = await fetchEvents({
         client,
         mode: 'org',
-        organizationId: orgId,
+        organizationId: orgCreds.organizationId,
         email,
         startDate,
         endDate,
       });
-      source = 'organizations.filtered-usage-events';
+      source = `organizations.filtered-usage-events:${orgCreds.source}`;
     } else if (teamKey) {
       const client = createCursorAdminClient({ apiKey: teamKey });
       events = await fetchEvents({
@@ -174,7 +171,7 @@ export async function lookupStopHookUsageCost(input: {
         costSource: null,
         usageEvent: null,
         costLookupError:
-          'No Cursor Admin/Organization API key configured for usage-events lookup',
+          'No Cursor Admin/Organization API key configured for usage-events lookup. Add an Organisation API key + org id in Settings → Organisations (or set CURSOR_ORGANIZATION_API_KEY + CURSOR_ORGANIZATION_ID).',
       };
     }
 

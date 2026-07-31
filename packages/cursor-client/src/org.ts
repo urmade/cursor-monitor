@@ -141,6 +141,8 @@ export async function discoverOrganizationId(opts: {
     // Key may be org-scoped and reject /v1/me — continue with org probes.
   }
 
+  let sawUsageScopedKey = false;
+
   try {
     const members = await client.listMembers({ page: 1, pageSize: 1 });
     const fromMembers = firstOrgIdInValue(members);
@@ -151,7 +153,11 @@ export async function discoverOrganizationId(opts: {
         note: 'Resolved organization id from GET /organizations/members.',
       };
     }
-  } catch {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/organization\.(members|groups)\.read|usage:\*/i.test(message)) {
+      sawUsageScopedKey = true;
+    }
     // Not an Organization API key, or missing members scope.
   }
 
@@ -165,7 +171,11 @@ export async function discoverOrganizationId(opts: {
         note: 'Resolved organization id from GET /organizations/groups.',
       };
     }
-  } catch {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/organization\.(members|groups)\.read|usage:\*/i.test(message)) {
+      sawUsageScopedKey = true;
+    }
     // Not an Organization API key, or missing members scope.
   }
 
@@ -193,8 +203,9 @@ export async function discoverOrganizationId(opts: {
   return {
     organizationId: null,
     source: null,
-    note:
-      'Cursor does not expose a documented whoami for organization id. Paste the org id from the Cursor organisation dashboard URL (org_…).',
+    note: sawUsageScopedKey
+      ? 'This Organization API key appears usage-scoped (usage:*). It can fetch pooled usage and cost events, but cannot discover the public org id. Paste org_… from the Cursor organisation dashboard URL.'
+      : 'Cursor does not expose a documented whoami for organization id. Paste the org id from the Cursor organisation dashboard URL (org_…).',
   };
 }
 

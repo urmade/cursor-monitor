@@ -1,9 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { CursorAdminClient, FilteredUsageEvent } from '@nexus/cursor-client';
+import { resetMemoryKv } from '@nexus/core';
 import {
   lookupStopHookUsageCost,
   selectUsageEventForStopHook,
 } from './hook-usage-cost';
+import { writeOrgCostCredentialsStore } from './cursor-org-cost-credentials';
 
 describe('selectUsageEventForStopHook', () => {
   const events: FilteredUsageEvent[] = [
@@ -45,13 +47,26 @@ describe('selectUsageEventForStopHook', () => {
 });
 
 describe('lookupStopHookUsageCost', () => {
-  it('uses org filtered-usage-events when org id + key are set', async () => {
-    const prev = { ...process.env };
-    process.env.CURSOR_ORGANIZATION_ID = 'org_test';
-    process.env.CURSOR_ORGANIZATION_API_KEY = 'org-key';
+  const prev = { ...process.env };
+
+  beforeEach(() => {
+    resetMemoryKv();
+    delete process.env.CURSOR_ORGANIZATION_ID;
+    delete process.env.CURSOR_ORG_ID;
+    delete process.env.CURSOR_ORGANIZATION_API_KEY;
     delete process.env.CURSOR_ORG_API_KEY;
     delete process.env.CURSOR_ADMIN_API_KEY;
     delete process.env.CURSOR_TEAM_API_KEY;
+  });
+
+  afterEach(() => {
+    process.env = { ...prev };
+    resetMemoryKv();
+  });
+
+  it('uses org filtered-usage-events when org id + key are set', async () => {
+    process.env.CURSOR_ORGANIZATION_ID = 'org_test';
+    process.env.CURSOR_ORGANIZATION_API_KEY = 'org-key';
 
     const fetchEvents = vi.fn(async () => [
       {
@@ -63,44 +78,65 @@ describe('lookupStopHookUsageCost', () => {
       } satisfies FilteredUsageEvent,
     ]);
 
-    try {
-      const result = await lookupStopHookUsageCost({
-        userEmail: 'dev@example.com',
-        model: 'composer',
-        fetchEvents: async (opts) => {
-          expect(opts.mode).toBe('org');
-          expect(opts.organizationId).toBe('org_test');
-          expect(opts.email).toBe('dev@example.com');
-          // Satisfy typing — client unused in mock
-          void (opts.client as CursorAdminClient);
-          return fetchEvents();
-        },
-      });
-      expect(result.chargedCents).toBe(12.34);
-      expect(result.costSource).toBe('organizations.filtered-usage-events');
-      expect(result.costLookupError).toBeNull();
-      expect(result.usageEvent?.chargedCents).toBe(12.34);
-    } finally {
-      process.env = { ...prev };
-    }
+    const result = await lookupStopHookUsageCost({
+      userEmail: 'dev@example.com',
+      model: 'composer',
+      fetchEvents: async (opts) => {
+        expect(opts.mode).toBe('org');
+        expect(opts.organizationId).toBe('org_test');
+        expect(opts.email).toBe('dev@example.com');
+        void (opts.client as CursorAdminClient);
+        return fetchEvents();
+      },
+    });
+    expect(result.chargedCents).toBe(12.34);
+    expect(result.costSource).toBe(
+      'organizations.filtered-usage-events:env',
+    );
+    expect(result.costLookupError).toBeNull();
+    expect(result.usageEvent?.chargedCents).toBe(12.34);
+  });
+
+  it('uses server-store credentials synced from organisation settings', async () => {
+    await writeOrgCostCredentialsStore([
+      {
+        id: '1',
+        label: 'Acme',
+        organizationId: 'org_from_settings',
+        apiKey: 'cursor_user_key_bbbbbbbbbbbb',
+        orgApiKey: 'settings-org-key-xxxxxxxxxxxx',
+        baseUrl: 'https://api.cursor.com',
+      },
+    ]);
+
+    const result = await lookupStopHookUsageCost({
+      userEmail: 'dev@example.com',
+      model: 'composer',
+      fetchEvents: async (opts) => {
+        expect(opts.mode).toBe('org');
+        expect(opts.organizationId).toBe('org_from_settings');
+        return [
+          {
+            timestamp: String(Date.now()),
+            userEmail: 'dev@example.com',
+            model: 'composer',
+            chargedCents: 4.2,
+          },
+        ];
+      },
+    });
+    expect(result.chargedCents).toBe(4.2);
+    expect(result.costSource).toBe(
+      'organizations.filtered-usage-events:server_store',
+    );
   });
 
   it('returns a soft error when no API key is configured', async () => {
-    const prev = { ...process.env };
-    delete process.env.CURSOR_ORGANIZATION_ID;
-    delete process.env.CURSOR_ORGANIZATION_API_KEY;
-    delete process.env.CURSOR_ORG_API_KEY;
-    delete process.env.CURSOR_ADMIN_API_KEY;
-    delete process.env.CURSOR_TEAM_API_KEY;
-    try {
-      const result = await lookupStopHookUsageCost({
-        userEmail: 'dev@example.com',
-        model: null,
-      });
-      expect(result.chargedCents).toBeNull();
-      expect(result.costLookupError).toMatch(/No Cursor Admin/i);
-    } finally {
-      process.env = { ...prev };
-    }
+    const result = await lookupStopHookUsageCost({
+      userEmail: 'dev@example.com',
+      model: null,
+    });
+    expect(result.chargedCents).toBeNull();
+    expect(result.costLookupError).toMatch(/No Cursor Admin/i);
   });
 });

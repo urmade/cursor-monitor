@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import {
+  createCursorAdminClient,
   createCursorClient,
   createCursorOrgClient,
   discoverOrganizationId,
@@ -10,6 +11,7 @@ import {
   type ApiKeyInfo,
 } from '@nexus/cursor-client';
 import { formatApiKeyIdentity } from './cursor';
+import { writeOrgCostCredentialsStore } from './cursor-org-cost-credentials';
 import {
   clearCursorOrganisations,
   fingerprintApiKey,
@@ -27,6 +29,16 @@ export type {
   StoredCursorOrganisation,
 } from './cursor-org-store';
 
+export type OrganisationCostProbe = {
+  pooledUsageOk: boolean;
+  usageEventsOk: boolean;
+  usedCents: number | null;
+  remainingCents: number | null;
+  limitCents: number | null;
+  recentEventsCount: number | null;
+  note: string | null;
+};
+
 export type UpsertOrganisationResult =
   | {
       ok: true;
@@ -34,6 +46,7 @@ export type UpsertOrganisationResult =
       organizationId: string | null;
       discoveryNote: string | null;
       identity: string | null;
+      cost: OrganisationCostProbe | null;
     }
   | { ok: false; error: string };
 
@@ -47,6 +60,104 @@ async function probeIdentity(
   } catch {
     return null;
   }
+}
+
+async function syncOrgCostCredentialsFromStore(): Promise<void> {
+  const orgs = await readCursorOrganisations();
+  await writeOrgCostCredentialsStore(orgs);
+}
+
+/**
+ * Verify Organization Admin cost endpoints with the given key + org id.
+ * Used when saving Settings → Organisations so cost wiring is proven before persist.
+ */
+export async function probeOrganisationCost(opts: {
+  orgApiKey: string;
+  organizationId: string;
+  baseUrl: string;
+}): Promise<OrganisationCostProbe> {
+  const orgClient = createCursorOrgClient({
+    apiKey: opts.orgApiKey,
+    baseUrl: opts.baseUrl,
+    maxRetries: 0,
+  });
+  const adminClient = createCursorAdminClient({
+    apiKey: opts.orgApiKey,
+    baseUrl: opts.baseUrl,
+    maxRetries: 0,
+  });
+
+  let pooledUsageOk = false;
+  let usedCents: number | null = null;
+  let remainingCents: number | null = null;
+  let limitCents: number | null = null;
+  let pooledError: string | null = null;
+
+  try {
+    const pooled = await orgClient.pooledUsage(opts.organizationId);
+    pooledUsageOk = true;
+    usedCents =
+      typeof pooled.pool?.usedCents === 'number' ? pooled.pool.usedCents : null;
+    remainingCents =
+      typeof pooled.pool?.remainingCents === 'number'
+        ? pooled.pool.remainingCents
+        : null;
+    limitCents =
+      typeof pooled.pool?.limitCents === 'number' ? pooled.pool.limitCents : null;
+  } catch (err) {
+    pooledError = err instanceof Error ? err.message : String(err);
+  }
+
+  let usageEventsOk = false;
+  let recentEventsCount: number | null = null;
+  let eventsError: string | null = null;
+  try {
+    const end = Date.now();
+    const start = end - 60 * 60 * 1000;
+    const res = await adminClient.filteredOrgUsageEvents({
+      organizationId: opts.organizationId,
+      startDate: start,
+      endDate: end,
+      page: 1,
+      pageSize: 5,
+    });
+    usageEventsOk = true;
+    recentEventsCount =
+      typeof res.totalUsageEventsCount === 'number'
+        ? res.totalUsageEventsCount
+        : (res.usageEvents?.length ?? res.events?.length ?? 0);
+  } catch (err) {
+    eventsError = err instanceof Error ? err.message : String(err);
+  }
+
+  const bits: string[] = [];
+  if (pooledUsageOk && usedCents != null) {
+    bits.push(
+      `pooled usage ${(usedCents / 100).toFixed(2)} used` +
+        (remainingCents != null
+          ? ` / ${(remainingCents / 100).toFixed(2)} remaining`
+          : ''),
+    );
+  } else if (pooledError) {
+    bits.push(`pooled-usage failed: ${pooledError}`);
+  }
+  if (usageEventsOk) {
+    bits.push(
+      `usage events ok${recentEventsCount != null ? ` (${recentEventsCount} in last hour window)` : ''}`,
+    );
+  } else if (eventsError) {
+    bits.push(`filtered-usage-events failed: ${eventsError}`);
+  }
+
+  return {
+    pooledUsageOk,
+    usageEventsOk,
+    usedCents,
+    remainingCents,
+    limitCents,
+    recentEventsCount,
+    note: bits.join(' · ') || null,
+  };
 }
 
 export async function listCursorOrganisationViews(): Promise<
@@ -122,6 +233,7 @@ export async function actionUpsertCursorOrganisation(
 
   let organizationId = normalizeOrganizationId(organizationIdRaw);
   let discoveryNote: string | null = null;
+  let cost: OrganisationCostProbe | null = null;
 
   if (!organizationId) {
     const discovered = await discoverOrganizationId({
@@ -130,7 +242,38 @@ export async function actionUpsertCursorOrganisation(
     });
     organizationId = discovered.organizationId;
     discoveryNote = discovered.note;
-  } else {
+  }
+
+  if (orgApiKey) {
+    if (!organizationId) {
+      return {
+        ok: false,
+        error:
+          discoveryNote ??
+          'Organisation API key requires an organisation id (org_…). Paste it from the Cursor dashboard URL — usage-scoped keys cannot discover it automatically.',
+      };
+    }
+
+    cost = await probeOrganisationCost({
+      orgApiKey,
+      organizationId,
+      baseUrl,
+    });
+
+    if (!cost.pooledUsageOk && !cost.usageEventsOk) {
+      return {
+        ok: false,
+        error:
+          cost.note ??
+          'Organisation API key could not fetch cost (pooled-usage / filtered-usage-events). Check the key has usage:* (or admin:*) scope and the org id matches.',
+      };
+    }
+
+    discoveryNote = cost.note
+      ? `Organisation cost verified · ${cost.note}`
+      : 'Organisation cost verified via Organization API.';
+  } else if (organizationId) {
+    // Soft-check with Cloud Agents key — usually fails; keep as advisory.
     try {
       const orgClient = createCursorOrgClient({
         apiKey: discoveryKey,
@@ -138,10 +281,11 @@ export async function actionUpsertCursorOrganisation(
         maxRetries: 0,
       });
       await orgClient.pooledUsage(organizationId);
-      discoveryNote = 'Organisation id verified via Organization API.';
+      discoveryNote =
+        'Organisation id verified (Cloud Agents key unexpectedly accepted Organization API). Add an Organisation API key for stop-hook cost.';
     } catch {
       discoveryNote =
-        'Saved organisation id as entered (could not verify via Organization API with this key).';
+        'Saved organisation id. Add an Organisation API key (usage:*) to fetch pooled usage and stop-hook cost.';
     }
   }
 
@@ -172,6 +316,7 @@ export async function actionUpsertCursorOrganisation(
   await invalidateMonitoringCache(fingerprintApiKey(apiKey));
 
   await writeCursorOrganisations([...withoutSelf, nextRow]);
+  await syncOrgCostCredentialsFromStore();
   revalidatePath('/settings/organisations');
   revalidatePath('/monitoring');
 
@@ -181,6 +326,7 @@ export async function actionUpsertCursorOrganisation(
     organizationId,
     discoveryNote,
     identity: me ? formatApiKeyIdentity(me) : null,
+    cost,
   };
 }
 
@@ -194,6 +340,7 @@ export async function actionRemoveCursorOrganisation(
     await invalidateMonitoringCache(fingerprintApiKey(target.apiKey));
   }
   await writeCursorOrganisations(remaining);
+  await syncOrgCostCredentialsFromStore();
   revalidatePath('/settings/organisations');
   revalidatePath('/monitoring');
 }
@@ -204,6 +351,7 @@ export async function actionRemoveAllCursorOrganisations(): Promise<void> {
     await invalidateMonitoringCache(fingerprintApiKey(org.apiKey));
   }
   await clearCursorOrganisations();
+  await writeOrgCostCredentialsStore([]);
   revalidatePath('/settings/organisations');
   revalidatePath('/monitoring');
 }

@@ -151,7 +151,15 @@ export function CursorOrganisationsSettings({
                 </p>
                 <p className="text-xs text-fg-muted">
                   {org.identity ?? 'Key identity unavailable'} · {org.apiKeyHint}
-                  {org.hasOrgApiKey ? ' · Org Admin key saved' : ''}
+                  {org.hasOrgApiKey ? (
+                    <span className="text-xs text-success-fg">
+                      · Org Admin key saved (cost)
+                    </span>
+                  ) : (
+                    <span className="text-xs text-warning-fg">
+                      · No Org Admin key — cost unavailable
+                    </span>
+                  )}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -260,6 +268,9 @@ export function CursorOrganisationsSettings({
                 ];
                 if (result.organizationId) {
                   bits.push(`org id ${result.organizationId}`);
+                }
+                if (result.cost?.note) {
+                  bits.push(result.cost.note);
                 } else if (result.discoveryNote) {
                   bits.push(result.discoveryNote);
                 }
@@ -314,7 +325,13 @@ export function CursorOrganisationsSettings({
               />
             </Field>
 
-            <Field label="Organisation API key (optional)">
+            <Field
+              label={
+                editor.hasExistingOrgApiKey
+                  ? 'Organisation API key (leave blank to keep current)'
+                  : 'Organisation API key (required for cost)'
+              }
+            >
               <Input
                 type="password"
                 autoComplete="off"
@@ -323,11 +340,16 @@ export function CursorOrganisationsSettings({
                 onChange={(e) =>
                   setEditor((prev) => ({ ...prev, orgApiKey: e.target.value }))
                 }
-                placeholder="Organisation Admin key — used to look up org id"
+                placeholder="Organisation Admin key with usage:* scope"
                 disabled={pending}
                 className="font-mono text-sm"
               />
             </Field>
+            <p className="text-xs text-fg-subtle">
+              Needed for pooled usage and stop-hook cost (
+              <span className="font-mono">filtered-usage-events</span>). A
+              Cloud Agents / user key cannot call Organization cost APIs.
+            </p>
             {editor.hasExistingOrgApiKey ? (
               <label className="flex items-center gap-2 text-xs text-fg-muted">
                 <input

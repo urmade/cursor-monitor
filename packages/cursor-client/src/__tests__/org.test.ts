@@ -122,4 +122,35 @@ describe('discoverOrganizationId', () => {
     expect(result.organizationId).toBe('org_error_probe');
     expect(result.source).toBe('pooled_usage');
   });
+
+  it('notes usage-scoped keys that cannot discover org id', async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/v1/me')) {
+        return jsonResponse(401, { message: 'Invalid User API Key' });
+      }
+      if (url.includes('/organizations/members')) {
+        return jsonResponse(401, {
+          message:
+            'Organization API key missing permission: organization.members.read',
+        });
+      }
+      if (url.includes('/organizations/groups')) {
+        return jsonResponse(401, {
+          message:
+            'Organization API key missing permission: organization.groups.read',
+        });
+      }
+      if (url.includes('/organizations/pooled-usage')) {
+        return jsonResponse(400, { message: 'organizationId is required' });
+      }
+      return jsonResponse(404, {});
+    });
+    const result = await discoverOrganizationId({
+      apiKey: 'usage-scoped-key',
+      fetchImpl,
+    });
+    expect(result.organizationId).toBeNull();
+    expect(result.note).toMatch(/usage-scoped/i);
+  });
 });
