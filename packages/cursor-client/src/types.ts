@@ -181,6 +181,12 @@ export type FilteredUsageEventsRequest = {
   endDate?: number | string;
   cloudAgentId?: string;
   automationId?: string;
+  /** Organization Admin API (`/organizations/filtered-usage-events`). */
+  organizationId?: string;
+  teamIds?: number[];
+  userId?: number;
+  email?: string;
+  serviceAccountId?: string;
   page?: number;
   pageSize?: number;
   [key: string]: unknown;
@@ -196,6 +202,14 @@ export type FilteredUsageEvent = {
   model?: string;
   kind?: string;
   chargedCents?: number;
+  teamId?: number;
+  maxMode?: boolean;
+  requestsCosts?: number;
+  isTokenBasedCall?: boolean;
+  isChargeable?: boolean;
+  isHeadless?: boolean;
+  cursorTokenFee?: number;
+  tokenUsage?: Record<string, unknown>;
   [key: string]: unknown;
 };
 

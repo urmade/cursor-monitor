@@ -19,7 +19,7 @@ export default async function HooksSignalsPage() {
     <div className="space-y-4 p-4 max-w-4xl">
       <PageHeader
         title="Hook signals"
-        subtitle="Stop-hook telemetry grouped by user → repository → conversation. Repo and branch are enriched by the Mac-native shell hook when Cursor does not send them."
+        subtitle="Stop-hook telemetry grouped by user → repository → conversation. Each turn shows the full stored log entry, including payload and chargedCents from Cursor usage events when available."
         meta="Hooks"
         actions={
           <Button asChild size="sm" variant="secondary">

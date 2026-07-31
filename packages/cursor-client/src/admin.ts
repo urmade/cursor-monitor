@@ -25,6 +25,21 @@ export class CursorAdminClient extends CursorClient {
   }
 
   /**
+   * Organization Admin API: usage events across linked teams.
+   * Requires an Organization API key + `organizationId` in the body.
+   * @see https://cursor.com/docs/account/organizations/organization-admin-api#get-usage-events
+   */
+  async filteredOrgUsageEvents(
+    body: FilteredUsageEventsRequest & { organizationId: string },
+  ): Promise<FilteredUsageEventsResponse> {
+    return this.request<FilteredUsageEventsResponse>(
+      'POST',
+      '/organizations/filtered-usage-events',
+      body,
+    );
+  }
+
+  /**
    * Page through filtered usage events until exhausted or `maxPages` is hit.
    * Prefers `usageEvents`, falls back to legacy `events`.
    */

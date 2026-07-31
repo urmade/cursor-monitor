@@ -10,9 +10,19 @@ export type HookSignalEvent = {
   conversationId: string | null;
   generationId: string | null;
   model: string | null;
+  modelId: string | null;
+  hookEventName: string | null;
   status: string | null;
   loopCount: number | null;
   cursorVersion: string | null;
+  transcriptPath: string | null;
+  workspaceRoots: unknown[];
+  modelParams: Array<{ id: string; value: string }> | null;
+  chargedCents: number | null;
+  costSource: string | null;
+  costLookupError: string | null;
+  usageEvent: Record<string, unknown> | null;
+  payload: Record<string, unknown>;
   receivedAt: string;
 };
 
@@ -21,6 +31,7 @@ export type HookConversationBucket = {
   events: HookSignalEvent[];
   latestAt: string;
   statuses: Record<string, number>;
+  chargedCentsTotal: number | null;
 };
 
 export type HookRepoBucket = {
@@ -50,20 +61,7 @@ const UNKNOWN_CONVERSATION = 'Unknown conversation';
 
 export async function loadHookSignalsTree(limit = 500): Promise<HookSignalsTree> {
   const rows = await getDb()
-    .select({
-      id: cursorStopHookEvents.id,
-      userEmail: cursorStopHookEvents.userEmail,
-      repo: cursorStopHookEvents.repo,
-      gitBranch: cursorStopHookEvents.gitBranch,
-      workspaceRoot: cursorStopHookEvents.workspaceRoot,
-      conversationId: cursorStopHookEvents.conversationId,
-      generationId: cursorStopHookEvents.generationId,
-      model: cursorStopHookEvents.model,
-      status: cursorStopHookEvents.status,
-      loopCount: cursorStopHookEvents.loopCount,
-      cursorVersion: cursorStopHookEvents.cursorVersion,
-      receivedAt: cursorStopHookEvents.receivedAt,
-    })
+    .select()
     .from(cursorStopHookEvents)
     .orderBy(desc(cursorStopHookEvents.receivedAt))
     .limit(limit);
@@ -77,9 +75,22 @@ export async function loadHookSignalsTree(limit = 500): Promise<HookSignalsTree>
     conversationId: r.conversationId,
     generationId: r.generationId,
     model: r.model,
+    modelId: r.modelId,
+    hookEventName: r.hookEventName,
     status: r.status,
     loopCount: r.loopCount,
     cursorVersion: r.cursorVersion,
+    transcriptPath: r.transcriptPath,
+    workspaceRoots: Array.isArray(r.workspaceRoots) ? r.workspaceRoots : [],
+    modelParams: r.modelParams ?? null,
+    chargedCents:
+      typeof r.chargedCents === 'number' && Number.isFinite(r.chargedCents)
+        ? r.chargedCents
+        : null,
+    costSource: r.costSource,
+    costLookupError: r.costLookupError,
+    usageEvent: r.usageEvent ?? null,
+    payload: r.payload ?? {},
     receivedAt:
       r.receivedAt instanceof Date
         ? r.receivedAt.toISOString()
@@ -141,15 +152,22 @@ export function buildHookSignalsTree(
         ...repo.conversations.values(),
       ].map((conv) => {
         const statuses: Record<string, number> = {};
+        let chargedSum = 0;
+        let chargedAny = false;
         for (const e of conv.events) {
           const s = e.status ?? 'unknown';
           statuses[s] = (statuses[s] ?? 0) + 1;
+          if (typeof e.chargedCents === 'number') {
+            chargedSum += e.chargedCents;
+            chargedAny = true;
+          }
         }
         return {
           conversationId: conv.conversationId,
           events: conv.events,
           latestAt: conv.events[0]?.receivedAt ?? '',
           statuses,
+          chargedCentsTotal: chargedAny ? chargedSum : null,
         };
       });
       conversations.sort((a, b) => b.latestAt.localeCompare(a.latestAt));

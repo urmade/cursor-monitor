@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cursorStopHookEvents, getDb, newId } from '@nexus/db';
+import { lookupStopHookUsageCost } from '../../../../src/server/hook-usage-cost';
 import {
   authorizeStopHookRequest,
   extractBranchFromPayload,
@@ -52,6 +53,14 @@ export async function POST(req: Request) {
     ? (payload.model_params as Array<{ id: string; value: string }>)
     : null;
 
+  const userEmail = asString(payload.user_email);
+  const model = asString(payload.model) ?? asString(payload.model_id);
+
+  const cost = await lookupStopHookUsageCost({
+    userEmail,
+    model,
+  });
+
   const id = newId();
   await getDb()
     .insert(cursorStopHookEvents)
@@ -63,7 +72,7 @@ export async function POST(req: Request) {
       modelId: asString(payload.model_id),
       hookEventName: asString(payload.hook_event_name) ?? 'stop',
       cursorVersion: asString(payload.cursor_version),
-      userEmail: asString(payload.user_email),
+      userEmail,
       transcriptPath: asString(payload.transcript_path),
       status: asString(payload.status),
       loopCount: asInt(payload.loop_count),
@@ -72,8 +81,18 @@ export async function POST(req: Request) {
       repo: extractRepoFromPayload(payload),
       gitBranch: extractBranchFromPayload(payload),
       modelParams,
+      chargedCents: cost.chargedCents,
+      costSource: cost.costSource,
+      costLookupError: cost.costLookupError,
+      usageEvent: cost.usageEvent,
       payload,
     });
 
-  return NextResponse.json({ ok: true, id });
+  return NextResponse.json({
+    ok: true,
+    id,
+    chargedCents: cost.chargedCents,
+    costSource: cost.costSource,
+    costLookupError: cost.costLookupError,
+  });
 }

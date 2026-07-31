@@ -105,9 +105,19 @@ describe('hook signals tree', () => {
         conversationId: 'c1',
         generationId: 'g1',
         model: 'm',
+        modelId: null,
+        hookEventName: 'stop',
         status: 'completed',
         loopCount: 0,
         cursorVersion: '3',
+        transcriptPath: null,
+        workspaceRoots: ['/tmp/one'],
+        modelParams: null,
+        chargedCents: 1.5,
+        costSource: 'organizations.filtered-usage-events',
+        costLookupError: null,
+        usageEvent: { chargedCents: 1.5 },
+        payload: { status: 'completed' },
         receivedAt: '2026-07-31T12:00:00.000Z',
       },
       {
@@ -119,9 +129,19 @@ describe('hook signals tree', () => {
         conversationId: 'c1',
         generationId: 'g2',
         model: 'm',
+        modelId: null,
+        hookEventName: 'stop',
         status: 'error',
         loopCount: 1,
         cursorVersion: '3',
+        transcriptPath: null,
+        workspaceRoots: ['/tmp/one'],
+        modelParams: null,
+        chargedCents: null,
+        costSource: null,
+        costLookupError: 'no match',
+        usageEvent: null,
+        payload: { status: 'error' },
         receivedAt: '2026-07-31T11:00:00.000Z',
       },
       {
@@ -133,9 +153,19 @@ describe('hook signals tree', () => {
         conversationId: null,
         generationId: null,
         model: null,
+        modelId: null,
+        hookEventName: 'stop',
         status: 'aborted',
         loopCount: 0,
         cursorVersion: null,
+        transcriptPath: null,
+        workspaceRoots: [],
+        modelParams: null,
+        chargedCents: null,
+        costSource: null,
+        costLookupError: null,
+        usageEvent: null,
+        payload: {},
         receivedAt: '2026-07-31T10:00:00.000Z',
       },
     ];
@@ -149,6 +179,9 @@ describe('hook signals tree', () => {
     expect(tree.users[0]!.repos[0]!.repo).toBe('acme/one');
     expect(tree.users[0]!.repos[0]!.branches).toEqual(['main']);
     expect(tree.users[0]!.repos[0]!.conversations[0]!.events).toHaveLength(2);
+    expect(tree.users[0]!.repos[0]!.conversations[0]!.chargedCentsTotal).toBe(
+      1.5,
+    );
     expect(tree.users[1]!.repos[0]!.repo).toBe('Unknown repo');
     expect(tree.users[1]!.repos[0]!.conversations[0]!.conversationId).toBe(
       'Unknown conversation',

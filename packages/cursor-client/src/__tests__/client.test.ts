@@ -240,6 +240,29 @@ describe('admin + automation webhook', () => {
     expect(res.events).toEqual([]);
   });
 
+  it('filteredOrgUsageEvents posts to organization path', async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(String(input)).toContain('/organizations/filtered-usage-events');
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        organizationId?: string;
+        email?: string;
+      };
+      expect(body.organizationId).toBe('org_abc');
+      expect(body.email).toBe('dev@example.com');
+      return jsonResponse(200, {
+        usageEvents: [{ timestamp: '1', chargedCents: 2.5, userEmail: 'dev@example.com' }],
+      });
+    });
+    const admin = createCursorAdminClient({ apiKey: 'org-key', fetchImpl });
+    const res = await admin.filteredOrgUsageEvents({
+      organizationId: 'org_abc',
+      email: 'dev@example.com',
+      startDate: 1,
+      endDate: 2,
+    });
+    expect(res.usageEvents?.[0]?.chargedCents).toBe(2.5);
+  });
+
   it('listAllFilteredUsageEvents pages until exhausted', async () => {
     const fetchImpl = vi.fn(async (_input, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as {

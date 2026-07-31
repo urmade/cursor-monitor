@@ -1,4 +1,5 @@
 import {
+  doublePrecision,
   integer,
   jsonb,
   pgTable,
@@ -33,6 +34,11 @@ export const cursorStopHookEvents = pgTable(
     modelParams: jsonb('model_params').$type<
       Array<{ id: string; value: string }> | null
     >(),
+    /** chargedCents from Cursor Admin filtered-usage-events */
+    chargedCents: doublePrecision('charged_cents'),
+    costSource: text('cost_source'),
+    costLookupError: text('cost_lookup_error'),
+    usageEvent: jsonb('usage_event').$type<Record<string, unknown> | null>(),
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
     receivedAt: timestamp('received_at', { withTimezone: true })
       .notNull()
