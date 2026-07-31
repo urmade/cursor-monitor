@@ -10,6 +10,7 @@ import { kvGet, kvSet } from '@nexus/core';
 import type { AgentSummary, CursorClient } from '@nexus/cursor-client';
 import {
   agentRepoLabels,
+  attachGithubPrTitles,
   enrichAgentsWithPrAndCost,
   groupAgentsByRepo,
   groupConversationsByPr,
@@ -107,19 +108,19 @@ export function credentialFingerprint(apiKey: string): string {
 }
 
 function agentsKey(fp: string): string {
-  return `monitor:v1:agents:${fp}`;
+  return `monitor:v2:agents:${fp}`;
 }
 
 function enrichKey(fp: string, agentId: string): string {
-  return `monitor:v1:enrich:${fp}:${agentId}`;
+  return `monitor:v2:enrich:${fp}:${agentId}`;
 }
 
 function projectsPageKey(fp: string): string {
-  return `monitor:v1:page:projects:${fp}`;
+  return `monitor:v2:page:projects:${fp}`;
 }
 
 function projectDetailKey(fp: string, project: string, sort: string): string {
-  return `monitor:v1:page:project:${fp}:${encodeURIComponent(project)}:${sort}`;
+  return `monitor:v2:page:project:${fp}:${encodeURIComponent(project)}:${sort}`;
 }
 
 export type AgentCatalog = {
@@ -347,7 +348,7 @@ export async function getCachedProjectsPage(
         const existing = await cacheRead(detailKey);
         if (existing && Date.now() < existing.freshUntil) return;
         const groups = sortConversationGroups(
-          groupConversationsByPr(group.agents),
+          await attachGithubPrTitles(groupConversationsByPr(group.agents)),
           'cost',
         );
         let repoUrl: string | null = null;
@@ -442,7 +443,7 @@ export async function getCachedProjectDetail(
         limit: 100,
       });
     const groups = sortConversationGroups(
-      groupConversationsByPr(enriched),
+      await attachGithubPrTitles(groupConversationsByPr(enriched)),
       cacheSort,
     );
     return {

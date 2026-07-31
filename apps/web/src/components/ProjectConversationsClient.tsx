@@ -23,6 +23,10 @@ export type ProjectConversationGroupView = {
   key: string;
   prUrl: string | null;
   prLabel: string | null;
+  /** Human PR title when known (GitHub or conversation-name fallback). */
+  prName: string | null;
+  /** Short `#N` when the URL parses as a GitHub PR. */
+  prNumber: string | null;
   branch?: string;
   conversations: ProjectConversationRow[];
   totalChargedCents: number | null;
@@ -127,9 +131,20 @@ export function ProjectConversationsClient({
                   href={group.prUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-sm font-medium text-accent hover:underline"
+                  className="flex min-w-0 items-baseline gap-2 text-sm font-medium text-accent hover:underline"
                 >
-                  {prTitle(group.prLabel ?? group.prUrl, prTitlePrefix)}
+                  {group.prName ? (
+                    <span className="truncate">{group.prName}</span>
+                  ) : (
+                    <span className="truncate">
+                      {prTitle(group.prLabel ?? group.prUrl, prTitlePrefix)}
+                    </span>
+                  )}
+                  {group.prName && group.prNumber ? (
+                    <span className="shrink-0 font-mono text-xs font-normal text-fg-subtle">
+                      {group.prNumber}
+                    </span>
+                  ) : null}
                 </a>
               ) : (
                 <span className="text-sm font-medium text-fg-muted">

@@ -3,18 +3,22 @@ import {
   agentMatchesRepoFilter,
   agentRepoLabels,
   aggregateUsageCost,
+  attachGithubPrTitles,
   classifyRunStatus,
   extractPrLinksFromGit,
   formatCentsUsd,
   formatDurationMs,
   formatPrLabel,
+  formatPrNumberLabel,
   formatRelativeTime,
   groupAgentsByRepo,
   groupConversationsByPr,
   NO_PR_GROUP,
   NO_REPO_GROUP,
   parseConversationGroupSort,
+  parseGithubPrRef,
   preferredChargedCents,
+  resolvePrDisplayName,
   runDidNotFinish,
   runWallClockMs,
   sortConversationGroups,
@@ -276,6 +280,58 @@ describe('conversation grouping by pull request', () => {
     expect(parseConversationGroupSort('cost')).toBe('cost');
     expect(parseConversationGroupSort(undefined)).toBe('cost');
     expect(parseConversationGroupSort('bogus')).toBe('cost');
+  });
+
+  it('parses GitHub PR refs and short number labels', () => {
+    expect(
+      parseGithubPrRef('https://github.com/internalsphere/nexus/pull/28'),
+    ).toEqual({
+      owner: 'internalsphere',
+      repo: 'nexus',
+      number: 28,
+      prUrl: 'https://github.com/internalsphere/nexus/pull/28',
+    });
+    expect(parseGithubPrRef('https://gitlab.com/acme/x/merge_requests/1')).toBeNull();
+    expect(
+      formatPrNumberLabel('https://github.com/internalsphere/nexus/pull/28'),
+    ).toBe('#28');
+    expect(formatPrNumberLabel('internalsphere/nexus#31')).toBe('#31');
+  });
+
+  it('prefers GitHub PR titles, else oldest conversation name', () => {
+    expect(
+      resolvePrDisplayName({
+        prTitle: 'Monitoring: repositories as projects',
+        conversations: [
+          { name: 'Follow-up', createdAt: '2026-07-30T10:00:00.000Z' },
+        ],
+      }),
+    ).toBe('Monitoring: repositories as projects');
+
+    expect(
+      resolvePrDisplayName({
+        conversations: [
+          { name: 'Follow-up fix', createdAt: '2026-07-30T10:00:00.000Z' },
+          {
+            name: 'Monitoring: repositories as projects',
+            createdAt: '2026-07-28T10:00:00.000Z',
+          },
+        ],
+      }),
+    ).toBe('Monitoring: repositories as projects');
+
+    expect(resolvePrDisplayName({ conversations: [] })).toBeNull();
+  });
+
+  it('attaches resolved GitHub titles onto PR groups', async () => {
+    const groups = groupConversationsByPr(agents);
+    const withTitles = await attachGithubPrTitles(groups, async () => {
+      return new Map([[PR_A, 'Monitoring: repositories as projects']]);
+    });
+    expect(withTitles.find((g) => g.key === PR_A)?.pr?.title).toBe(
+      'Monitoring: repositories as projects',
+    );
+    expect(withTitles.find((g) => g.key === PR_B)?.pr?.title).toBeUndefined();
   });
 });
 

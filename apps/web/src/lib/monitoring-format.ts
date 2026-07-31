@@ -43,6 +43,74 @@ export function formatRelativeTime(
 
 export const NO_PR_GROUP = 'no-pull-request';
 
+/** Parsed GitHub pull-request coordinates from a PR URL. */
+export type GithubPrRef = {
+  owner: string;
+  repo: string;
+  number: number;
+  /** Canonical https URL used as a cache / map key. */
+  prUrl: string;
+};
+
+/**
+ * Extract owner/repo/number from a github.com pull URL.
+ * Returns null for non-GitHub or malformed URLs.
+ */
+export function parseGithubPrRef(
+  prUrl: string | null | undefined,
+): GithubPrRef | null {
+  if (!prUrl?.trim()) return null;
+  try {
+    const u = new URL(prUrl.includes('://') ? prUrl : `https://${prUrl}`);
+    if (!/(^|\.)github\.com$/i.test(u.hostname)) return null;
+    const m = u.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/);
+    if (!m) return null;
+    const number = Number(m[3]);
+    if (!Number.isFinite(number) || number <= 0) return null;
+    return {
+      owner: m[1]!,
+      repo: m[2]!,
+      number,
+      prUrl: `https://github.com/${m[1]}/${m[2]}/pull/${number}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Short `#N` label from a PR URL or `owner/repo#N` string. */
+export function formatPrNumberLabel(
+  prUrlOrLabel: string | null | undefined,
+): string | null {
+  if (!prUrlOrLabel) return null;
+  const ref = parseGithubPrRef(prUrlOrLabel);
+  if (ref) return `#${ref.number}`;
+  const m = prUrlOrLabel.match(/#(\d+)\s*$/);
+  return m ? `#${m[1]}` : null;
+}
+
+/**
+ * Prefer a known PR title; otherwise the oldest conversation name in the
+ * group (Cloud Agents that open a PR usually share that title).
+ */
+export function resolvePrDisplayName(opts: {
+  prTitle?: string | null;
+  conversations?: Array<{ name?: string; createdAt?: string }>;
+}): string | null {
+  const titled = opts.prTitle?.trim();
+  if (titled) return titled;
+
+  const named = (opts.conversations ?? [])
+    .map((c) => ({
+      name: c.name?.trim() || '',
+      createdAt: c.createdAt ? Date.parse(c.createdAt) : Number.POSITIVE_INFINITY,
+    }))
+    .filter((c) => c.name.length > 0 && c.name !== '(unnamed conversation)');
+  if (named.length === 0) return null;
+  named.sort((a, b) => a.createdAt - b.createdAt);
+  return named[0]!.name;
+}
+
 export type SortableConversationGroup = {
   key: string;
   totalChargedCents: number | null;

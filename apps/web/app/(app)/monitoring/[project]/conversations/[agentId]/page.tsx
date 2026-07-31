@@ -7,11 +7,14 @@ import {
   extractPrLinksFromGit,
   formatCentsUsd,
   formatDurationMs,
+  formatPrNumberLabel,
   resolveCursorAuth,
+  resolvePrDisplayName,
   runDidNotFinish,
   runWallClockMs,
   type AgentPrLink,
 } from '../../../../../../src/server/cursor';
+import { resolveGithubPrTitles } from '../../../../../../src/server/github-pr-titles';
 
 export const dynamic = 'force-dynamic';
 
@@ -148,6 +151,13 @@ export default async function ConversationPage({
     if (newestRun?.status) agentStatus = newestRun.status;
 
     agentPrs = runs.find((run) => run.prs.length)?.prs ?? [];
+    if (agentPrs.length > 0) {
+      const titles = await resolveGithubPrTitles(agentPrs.map((p) => p.prUrl));
+      agentPrs = agentPrs.map((pr) => {
+        const title = titles.get(pr.prUrl);
+        return title ? { ...pr, title } : pr;
+      });
+    }
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
   }
@@ -174,19 +184,32 @@ export default async function ConversationPage({
               {agentPrs.length > 0 ? (
                 <>
                   Targets{' '}
-                  {agentPrs.map((pr, i) => (
-                    <span key={pr.prUrl}>
-                      {i > 0 ? ', ' : null}
-                      <a
-                        href={pr.prUrl}
-                        className="text-accent hover:underline"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {pr.label}
-                      </a>
-                    </span>
-                  ))}
+                  {agentPrs.map((pr, i) => {
+                    const name =
+                      resolvePrDisplayName({
+                        prTitle: pr.title,
+                        conversations: [{ name: agentName }],
+                      }) ?? formatPrNumberLabel(pr.prUrl) ?? pr.label;
+                    const number = formatPrNumberLabel(pr.prUrl);
+                    return (
+                      <span key={pr.prUrl}>
+                        {i > 0 ? ', ' : null}
+                        <a
+                          href={pr.prUrl}
+                          className="text-accent hover:underline"
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {name}
+                          {number && name !== number ? (
+                            <span className="ml-1 font-mono text-xs text-fg-subtle">
+                              {number}
+                            </span>
+                          ) : null}
+                        </a>
+                      </span>
+                    );
+                  })}
                   {' · '}
                 </>
               ) : (

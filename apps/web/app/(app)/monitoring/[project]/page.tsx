@@ -8,11 +8,13 @@ import {
   agentRepoLabels,
   conversationDisplayStatus,
   formatCentsUsd,
+  formatPrNumberLabel,
   NO_PR_GROUP,
   NO_REPO_GROUP,
   parseConversationGroupSort,
   preferredChargedCents,
   resolveCursorAuth,
+  resolvePrDisplayName,
   runDidNotFinish,
 } from '../../../../src/server/cursor';
 import { getCachedProjectDetail } from '../../../../src/server/monitoring-cache';
@@ -107,6 +109,11 @@ export default async function ProjectMonitoringPage({
     key: g.key,
     prUrl: g.pr?.prUrl ?? null,
     prLabel: g.pr?.label ?? null,
+    prName: resolvePrDisplayName({
+      prTitle: g.pr?.title,
+      conversations: g.conversations,
+    }),
+    prNumber: formatPrNumberLabel(g.pr?.prUrl ?? g.pr?.label),
     branch: g.pr?.branch,
     totalChargedCents: g.totalChargedCents,
     totalRawCents: g.totalRawCents,

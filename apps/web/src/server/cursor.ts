@@ -22,9 +22,13 @@ export {
 export {
   formatCentsUsd,
   formatRelativeTime,
+  formatPrNumberLabel,
   NO_PR_GROUP,
   parseConversationGroupSort,
+  parseGithubPrRef,
+  resolvePrDisplayName,
   type ConversationGroupSort,
+  type GithubPrRef,
 } from '../lib/monitoring-format';
 
 /** httpOnly cookie holding a user-pasted Cursor API key (prototype BYOK). */
@@ -289,6 +293,8 @@ export function runWallClockMs(
 export type AgentPrLink = {
   prUrl: string;
   label: string;
+  /** GitHub PR title when resolved; optional. */
+  title?: string | null;
   branch?: string;
   repoUrl?: string;
 };
@@ -572,6 +578,40 @@ export function groupConversationsByPr(
       latestCreatedAt: sorted[0]?.createdAt ?? null,
     };
   });
+}
+
+/**
+ * Attach GitHub PR titles onto conversation groups when the API can resolve
+ * them. Groups without a resolvable title keep `pr.title` unset so the UI can
+ * fall back to the oldest conversation name / `#N`.
+ */
+export async function attachGithubPrTitles(
+  groups: ConversationPrGroup[],
+  resolveTitles: (
+    prUrls: Iterable<string>,
+  ) => Promise<Map<string, string>> = defaultResolveGithubPrTitles,
+): Promise<ConversationPrGroup[]> {
+  const urls = groups
+    .map((g) => g.pr?.prUrl)
+    .filter((u): u is string => typeof u === 'string' && u.length > 0);
+  if (urls.length === 0) return groups;
+
+  const titles = await resolveTitles(urls);
+  if (titles.size === 0) return groups;
+
+  return groups.map((g) => {
+    if (!g.pr) return g;
+    const title = titles.get(g.pr.prUrl);
+    if (!title) return g;
+    return { ...g, pr: { ...g.pr, title } };
+  });
+}
+
+async function defaultResolveGithubPrTitles(
+  prUrls: Iterable<string>,
+): Promise<Map<string, string>> {
+  const { resolveGithubPrTitles } = await import('./github-pr-titles');
+  return resolveGithubPrTitles(prUrls);
 }
 
 /**
