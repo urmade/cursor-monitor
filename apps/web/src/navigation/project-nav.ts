@@ -69,6 +69,21 @@ export function globalBreadcrumbTrail(pathname: string): Array<{ label: string; 
   const items: Array<{ label: string; href?: string }> = [{ label: 'Nexus', href: '/projects' }];
   if (pathname.startsWith('/inbox')) {
     items.push({ label: 'Inbox' });
+  } else if (pathname.startsWith('/monitoring/')) {
+    const segments = pathname.split('/').filter(Boolean);
+    const project = segments[1] ? decodeURIComponent(segments[1]) : null;
+    items.push({ label: 'Monitoring', href: '/monitoring' });
+    if (project && segments[2] === 'conversations' && segments[3]) {
+      items.push({
+        label: project,
+        href: `/monitoring/${encodeURIComponent(project)}`,
+      });
+      items.push({ label: 'Conversation' });
+    } else if (project) {
+      items.push({ label: project });
+    }
+  } else if (pathname.startsWith('/monitoring')) {
+    items.push({ label: 'Monitoring' });
   } else if (pathname.startsWith('/projects')) {
     items.push({ label: 'Projects' });
   } else if (pathname.startsWith('/design')) {

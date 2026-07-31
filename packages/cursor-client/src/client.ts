@@ -1,12 +1,18 @@
 import { CursorApiError, mapHttpError } from './errors';
+import { normalizeAgentUsage } from './usage';
 import type {
   AgentRun,
   AgentSummary,
   AgentUsage,
+  ApiKeyInfo,
   CreateAgentRequest,
   CreateAgentResponse,
   CreateRunRequest,
   CreateRunResponse,
+  ListAgentsOptions,
+  ListAgentsPage,
+  ListRunsOptions,
+  ListRunsPage,
   ModelInfo,
   ModelSelection,
 } from './types';
@@ -89,10 +95,22 @@ export class CursorClient {
 
   async getUsage(agentId: string, runId?: string): Promise<AgentUsage> {
     const qs = runId ? `?runId=${encodeURIComponent(runId)}` : '';
-    return this.request<AgentUsage>(
+    const raw = await this.request<unknown>(
       'GET',
       `/v1/agents/${encodeURIComponent(agentId)}/usage${qs}`,
     );
+    return normalizeAgentUsage(raw);
+  }
+
+  async getAgent(agentId: string): Promise<AgentSummary> {
+    return this.request<AgentSummary>(
+      'GET',
+      `/v1/agents/${encodeURIComponent(agentId)}`,
+    );
+  }
+
+  async getMe(): Promise<ApiKeyInfo> {
+    return this.request<ApiKeyInfo>('GET', '/v1/me');
   }
 
   async listModels(): Promise<ModelInfo[]> {
@@ -103,12 +121,65 @@ export class CursorClient {
     return res.items ?? res.models ?? [];
   }
 
-  async listAgents(): Promise<AgentSummary[]> {
+  async listAgents(opts?: ListAgentsOptions): Promise<ListAgentsPage> {
+    const params = new URLSearchParams();
+    if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+    if (opts?.cursor) params.set('cursor', opts.cursor);
+    const qs = params.toString() ? `?${params}` : '';
     const res = await this.request<
-      { items?: AgentSummary[]; agents?: AgentSummary[] } | AgentSummary[]
-    >('GET', '/v1/agents');
-    if (Array.isArray(res)) return res;
-    return res.items ?? res.agents ?? [];
+      | { items?: AgentSummary[]; agents?: AgentSummary[]; nextCursor?: string | null }
+      | AgentSummary[]
+    >('GET', `/v1/agents${qs}`);
+    if (Array.isArray(res)) {
+      return { items: res, nextCursor: null };
+    }
+    return {
+      items: res.items ?? res.agents ?? [],
+      nextCursor: res.nextCursor ?? null,
+    };
+  }
+
+  /** Page through GET /v1/agents until exhausted or `maxPages` is hit. */
+  async listAllAgents(opts?: {
+    pageSize?: number;
+    maxPages?: number;
+  }): Promise<{ items: AgentSummary[]; truncated: boolean }> {
+    const pageSize = opts?.pageSize ?? 50;
+    const maxPages = opts?.maxPages ?? 40;
+    const items: AgentSummary[] = [];
+    let cursor: string | undefined;
+    let truncated = false;
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const res = await this.listAgents({ limit: pageSize, cursor });
+      items.push(...res.items);
+      if (!res.nextCursor) {
+        return { items, truncated: false };
+      }
+      cursor = res.nextCursor;
+    }
+    truncated = true;
+    return { items, truncated };
+  }
+
+  async listRuns(
+    agentId: string,
+    opts?: ListRunsOptions,
+  ): Promise<ListRunsPage> {
+    const params = new URLSearchParams();
+    if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+    if (opts?.cursor) params.set('cursor', opts.cursor);
+    const qs = params.toString() ? `?${params}` : '';
+    const res = await this.request<
+      { items?: AgentRun[]; runs?: AgentRun[]; nextCursor?: string | null } | AgentRun[]
+    >('GET', `/v1/agents/${encodeURIComponent(agentId)}/runs${qs}`);
+    if (Array.isArray(res)) {
+      return { items: res, nextCursor: null };
+    }
+    return {
+      items: res.items ?? res.runs ?? [],
+      nextCursor: res.nextCursor ?? null,
+    };
   }
 
   async request<T>(

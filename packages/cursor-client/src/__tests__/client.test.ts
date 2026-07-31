@@ -127,17 +127,105 @@ describe('CursorClient', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it('cancelRun and listAgents/listModels paths', async () => {
+  it('cancelRun and listAgents/listModels/listRuns paths', async () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(200, { id: 'run-1', status: 'CANCELLED' }))
-      .mockResolvedValueOnce(jsonResponse(200, { agents: [{ id: 'bc-1' }] }))
-      .mockResolvedValueOnce(jsonResponse(200, { models: [{ id: 'gpt' }] }));
+      .mockResolvedValueOnce(jsonResponse(200, { agents: [{ id: 'bc-1' }], nextCursor: null }))
+      .mockResolvedValueOnce(jsonResponse(200, { models: [{ id: 'gpt' }] }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          items: [{ id: 'run-1', status: 'FINISHED', durationMs: 1000 }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          id: 'bc-1',
+          name: 'Agent One',
+          status: 'ACTIVE',
+        }),
+      );
 
     const client = createCursorClient({ apiKey: 'k', fetchImpl });
     expect((await client.cancelRun('bc-1', 'run-1')).status).toBe('CANCELLED');
-    expect(await client.listAgents()).toEqual([{ id: 'bc-1' }]);
+    expect(await client.listAgents()).toEqual({
+      items: [{ id: 'bc-1' }],
+      nextCursor: null,
+    });
     expect(await client.listModels()).toEqual([{ id: 'gpt' }]);
+    expect(await client.listRuns('bc-1')).toEqual({
+      items: [{ id: 'run-1', status: 'FINISHED', durationMs: 1000 }],
+      nextCursor: null,
+    });
+    expect(await client.getAgent('bc-1')).toMatchObject({ id: 'bc-1', name: 'Agent One' });
+  });
+
+  it('normalises nested live usage responses', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(200, {
+        totalUsage: {
+          inputTokens: 10,
+          outputTokens: 20,
+          cacheWriteTokens: 0,
+          cacheReadTokens: 0,
+          totalTokens: 30,
+        },
+        cost: { rawCostCents: 5.5, chargedCents: 4.2 },
+        runs: [
+          {
+            id: 'run-1',
+            usageUuid: 'uuid-1',
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+            cost: { rawCostCents: 5.5, chargedCents: 4.2 },
+          },
+        ],
+      }),
+    );
+    const client = createCursorClient({ apiKey: 'k', fetchImpl });
+    const usage = await client.getUsage('bc-1', 'run-1');
+    expect(usage.chargedCents).toBe(4.2);
+    expect(usage.rawCostCents).toBe(5.5);
+    expect(usage.inputTokens).toBe(10);
+    expect(usage.usageUuid).toBe('uuid-1');
+    expect(usage.runs?.[0]?.id).toBe('run-1');
+  });
+
+  it('listAllAgents pages until exhausted', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          items: [{ id: 'bc-1' }],
+          nextCursor: 'bc-1',
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          items: [{ id: 'bc-2' }],
+          nextCursor: null,
+        }),
+      );
+    const client = createCursorClient({ apiKey: 'k', fetchImpl });
+    const res = await client.listAllAgents({ pageSize: 1 });
+    expect(res.items.map((a) => a.id)).toEqual(['bc-1', 'bc-2']);
+    expect(res.truncated).toBe(false);
+    expect(String(fetchImpl.mock.calls[0]![0])).toContain('limit=1');
+    expect(String(fetchImpl.mock.calls[1]![0])).toContain('cursor=bc-1');
+  });
+
+  it('getMe hits /v1/me', async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      expect(String(input)).toBe('https://api.cursor.com/v1/me');
+      return jsonResponse(200, {
+        apiKeyName: 'Personal',
+        userId: 42,
+        userEmail: 'dev@example.com',
+      });
+    });
+    const client = createCursorClient({ apiKey: 'k', fetchImpl });
+    const me = await client.getMe();
+    expect(me.userEmail).toBe('dev@example.com');
+    expect(me.apiKeyName).toBe('Personal');
   });
 });
 

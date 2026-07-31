@@ -50,24 +50,85 @@ export type CreateRunResponse = {
   [key: string]: unknown;
 };
 
-export type AgentRun = {
-  id: string;
-  status: string;
-  durationMs?: number | null;
-  result?: unknown;
-  git?: { branches?: unknown[] };
+export type RunGitBranch = {
+  repoUrl?: string;
+  branch?: string;
+  prUrl?: string;
   [key: string]: unknown;
 };
 
+export type AgentRun = {
+  id: string;
+  agentId?: string;
+  status: string;
+  createdAt?: string;
+  updatedAt?: string;
+  durationMs?: number | null;
+  result?: unknown;
+  git?: { branches?: RunGitBranch[] };
+  [key: string]: unknown;
+};
+
+export type AgentUsageRun = {
+  id: string;
+  usageUuid?: string;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheWriteTokens?: number;
+    cacheReadTokens?: number;
+    totalTokens?: number;
+  };
+  cost?: {
+    rawCostCents?: number;
+    chargedCents?: number;
+  };
+  [key: string]: unknown;
+};
+
+/** Normalised usage — flat fields for callers, plus nested live-API shape. */
 export type AgentUsage = {
   inputTokens?: number;
   outputTokens?: number;
   cacheWriteTokens?: number;
   cacheReadTokens?: number;
+  totalTokens?: number;
   usageUuid?: string;
   chargedCents?: number;
   rawCostCents?: number;
+  totalUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheWriteTokens?: number;
+    cacheReadTokens?: number;
+    totalTokens?: number;
+  };
+  cost?: {
+    rawCostCents?: number;
+    chargedCents?: number;
+  };
+  runs?: AgentUsageRun[];
   [key: string]: unknown;
+};
+
+export type ListAgentsOptions = {
+  limit?: number;
+  cursor?: string;
+};
+
+export type ListAgentsPage = {
+  items: AgentSummary[];
+  nextCursor?: string | null;
+};
+
+export type ListRunsOptions = {
+  limit?: number;
+  cursor?: string;
+};
+
+export type ListRunsPage = {
+  items: AgentRun[];
+  nextCursor?: string | null;
 };
 
 export type ModelInfo = {
@@ -76,10 +137,33 @@ export type ModelInfo = {
   [key: string]: unknown;
 };
 
+export type AgentRepoRef = {
+  url?: string;
+  startingRef?: string;
+  prUrl?: string;
+  [key: string]: unknown;
+};
+
 export type AgentSummary = {
   id: string;
   name?: string;
+  status?: string;
+  url?: string;
+  latestRunId?: string;
   createdAt?: string;
+  updatedAt?: string;
+  repos?: AgentRepoRef[];
+  [key: string]: unknown;
+};
+
+/** GET /v1/me — user-scoped keys include identity; service accounts omit user fields. */
+export type ApiKeyInfo = {
+  apiKeyName?: string;
+  createdAt?: string;
+  userId?: number;
+  userEmail?: string;
+  userFirstName?: string;
+  userLastName?: string;
   [key: string]: unknown;
 };
 
