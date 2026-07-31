@@ -144,7 +144,9 @@ export class CursorClient {
     pageSize?: number;
     maxPages?: number;
   }): Promise<{ items: AgentSummary[]; truncated: boolean }> {
-    const pageSize = opts?.pageSize ?? 50;
+    // API caps page size at 100 — larger values 400. Prefer 100 to cut
+    // round-trips roughly in half vs the old default of 50.
+    const pageSize = opts?.pageSize ?? 100;
     const maxPages = opts?.maxPages ?? 40;
     const items: AgentSummary[] = [];
     let cursor: string | undefined;

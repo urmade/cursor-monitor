@@ -139,6 +139,14 @@ export default async function ConversationPage({
       };
     });
 
+    // Prefer newest run status over v1 agent.status (always ACTIVE).
+    const newestRun = [...runs].sort((a, b) => {
+      const at = a.createdAt ? Date.parse(a.createdAt) : 0;
+      const bt = b.createdAt ? Date.parse(b.createdAt) : 0;
+      return bt - at;
+    })[0];
+    if (newestRun?.status) agentStatus = newestRun.status;
+
     agentPrs = runs.find((run) => run.prs.length)?.prs ?? [];
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
@@ -276,7 +284,7 @@ export default async function ConversationPage({
                         {shortRunId(run.id)}
                       </td>
                       <td className="px-3 py-2">
-                        <RunStatusBadge status={run.status} />
+                        <RunStatusBadge status={run.status} showIdle />
                       </td>
                       <td className="px-3 py-2 tabular-nums">
                         {formatDurationMs(run.wallClockMs)}

@@ -20,6 +20,7 @@ export {
 export { upsertUserFromPassport, type PassportClaims } from './identity/upsert';
 export { createFlagReader } from './flags';
 export { checkRateLimit, checkRateLimitWindow, resetMemoryRateLimits } from './redis/rate-limit';
+export { kvGet, kvSet, kvDel, resetMemoryKv } from './redis/kv';
 export * from './projects';
 export * from './workitems';
 export * from './specs';

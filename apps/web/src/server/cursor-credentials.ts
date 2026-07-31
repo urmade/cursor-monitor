@@ -6,6 +6,10 @@ import {
   clearUserCursorApiKey,
   writeUserCursorApiKey,
 } from './cursor';
+import {
+  credentialFingerprint,
+  invalidateMonitoringCache,
+} from './monitoring-cache';
 
 export type ConnectCursorKeyResult =
   | { ok: true; identity: string }
@@ -26,6 +30,7 @@ export async function actionConnectCursorApiKey(
     const client = createCursorClient({ apiKey });
     const me = await client.getMe();
     await writeUserCursorApiKey(apiKey);
+    await invalidateMonitoringCache(credentialFingerprint(apiKey));
     revalidatePath('/monitoring');
     const identityParts = [
       me.userEmail,

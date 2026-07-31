@@ -64,7 +64,8 @@ describe('monitoring format helpers', () => {
     expect(classifyRunStatus('CANCELLED')).toBe('cancelled');
     expect(classifyRunStatus('EXPIRED')).toBe('expired');
     expect(classifyRunStatus('RUNNING')).toBe('running');
-    expect(classifyRunStatus('ACTIVE')).toBe('running');
+    // v1 agent-level ACTIVE is not a run-in-progress signal
+    expect(classifyRunStatus('ACTIVE')).toBe('unknown');
     expect(classifyRunStatus(undefined)).toBe('unknown');
     expect(classifyRunStatus('SOME_NEW_STATUS')).toBe('unknown');
 

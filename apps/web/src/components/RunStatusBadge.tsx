@@ -3,7 +3,7 @@ import {
   classifyRunStatus,
   RUN_OUTCOME_LABELS,
   type RunOutcome,
-} from '../server/cursor';
+} from '../lib/monitoring-status';
 
 const OUTCOME_TONES: Record<RunOutcome, BadgeTone> = {
   finished: 'success',
@@ -52,13 +52,35 @@ function OutcomeIcon({ outcome }: { outcome: RunOutcome }) {
   }
 }
 
+export type RunStatusBadgeProps = {
+  status: string | null | undefined;
+  /**
+   * When false (default), hide the badge unless the run is actively running
+   * or ended without finishing. Idle/finished/unknown conversations show
+   * nothing — v1 agent status is `ACTIVE` even when no run is in progress.
+   */
+  showIdle?: boolean;
+};
+
 /**
  * Status pill for a conversation or run. Runs that ended without completing
  * (failed / cancelled / expired) get a warning-or-danger tone plus an icon so
  * they stand out in tables.
  */
-export function RunStatusBadge({ status }: { status: string | null | undefined }) {
+export function RunStatusBadge({
+  status,
+  showIdle = false,
+}: RunStatusBadgeProps) {
   const outcome = classifyRunStatus(status);
+  if (
+    !showIdle &&
+    outcome !== 'running' &&
+    outcome !== 'failed' &&
+    outcome !== 'cancelled' &&
+    outcome !== 'expired'
+  ) {
+    return null;
+  }
   const label =
     outcome === 'unknown' && status?.trim()
       ? status.trim().toLowerCase().replace(/_/g, ' ')

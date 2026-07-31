@@ -1,13 +1,38 @@
+import { createHash } from 'node:crypto';
 import { cookies } from 'next/headers';
+import { cache } from 'react';
 import {
   createCursorClient,
   type AgentSummary,
   type ApiKeyInfo,
   type CursorClient,
 } from '@nexus/cursor-client';
+import {
+  NO_PR_GROUP,
+  sortConversationGroupsBy,
+  type ConversationGroupSort,
+} from '../lib/monitoring-format';
+
+export {
+  classifyRunStatus,
+  runDidNotFinish,
+  RUN_OUTCOME_LABELS,
+  type RunOutcome,
+} from '../lib/monitoring-status';
+export {
+  formatCentsUsd,
+  formatRelativeTime,
+  NO_PR_GROUP,
+  parseConversationGroupSort,
+  type ConversationGroupSort,
+} from '../lib/monitoring-format';
 
 /** httpOnly cookie holding a user-pasted Cursor API key (prototype BYOK). */
 export const CURSOR_USER_API_KEY_COOKIE = 'nexus_cursor_user_api_key';
+
+function fingerprintApiKey(apiKey: string): string {
+  return createHash('sha256').update(apiKey).digest('hex').slice(0, 24);
+}
 
 const COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 14; // 14 days
 
@@ -18,6 +43,8 @@ export type ResolvedCursorAuth = {
   source: CursorCredentialSource;
   me: ApiKeyInfo | null;
   error: string | null;
+  /** SHA-256 fingerprint of the API key in use (for cache keys); null when unauthenticated. */
+  fingerprint: string | null;
 };
 
 function envCursorApiKey(): string | null {
@@ -51,18 +78,20 @@ export async function clearUserCursorApiKey(): Promise<void> {
 }
 
 /** Prefer personal cookie key; fall back to env service-account / shared key. */
-export async function resolveCursorAuth(): Promise<ResolvedCursorAuth> {
+async function resolveCursorAuthUncached(): Promise<ResolvedCursorAuth> {
   const userKey = await readUserCursorApiKey();
   if (userKey) {
     const client = createCursorClient({ apiKey: userKey });
+    const fingerprint = fingerprintApiKey(userKey);
     try {
       const me = await client.getMe();
-      return { client, source: 'user_cookie', me, error: null };
+      return { client, source: 'user_cookie', me, error: null, fingerprint };
     } catch (err) {
       return {
         client: null,
         source: 'user_cookie',
         me: null,
+        fingerprint: null,
         error:
           err instanceof Error
             ? `Saved Cursor API key failed (/v1/me): ${err.message}`
@@ -73,18 +102,20 @@ export async function resolveCursorAuth(): Promise<ResolvedCursorAuth> {
 
   const envKey = envCursorApiKey();
   if (!envKey) {
-    return { client: null, source: 'none', me: null, error: null };
+    return { client: null, source: 'none', me: null, error: null, fingerprint: null };
   }
 
   const client = createCursorClient({ apiKey: envKey });
+  const fingerprint = fingerprintApiKey(envKey);
   try {
     const me = await client.getMe();
-    return { client, source: 'env', me, error: null };
+    return { client, source: 'env', me, error: null, fingerprint };
   } catch (err) {
     return {
       client: null,
       source: 'env',
       me: null,
+      fingerprint: null,
       error:
         err instanceof Error
           ? `Env Cursor API key failed (/v1/me): ${err.message}`
@@ -92,6 +123,11 @@ export async function resolveCursorAuth(): Promise<ResolvedCursorAuth> {
     };
   }
 }
+
+/** Deduped per React request — layouts + pages share one auth resolve. */
+export const resolveCursorAuth: () => Promise<ResolvedCursorAuth> = cache(
+  resolveCursorAuthUncached,
+);
 
 /** @deprecated Prefer resolveCursorAuth — kept for simple callers. */
 export function getCursorApiKey(): string | null {
@@ -243,68 +279,12 @@ export function runWallClockMs(
   return end >= start ? end - start : null;
 }
 
-/** Coarse lifecycle bucket for a run (or conversation) status string. */
-export type RunOutcome =
-  | 'finished'
-  | 'failed'
-  | 'cancelled'
-  | 'expired'
-  | 'running'
-  | 'unknown';
-
-export function classifyRunStatus(status: string | null | undefined): RunOutcome {
-  switch ((status ?? '').trim().toUpperCase()) {
-    case 'FINISHED':
-      return 'finished';
-    case 'ERROR':
-    case 'FAILED':
-      return 'failed';
-    case 'CANCELLED':
-      return 'cancelled';
-    case 'EXPIRED':
-      return 'expired';
-    case 'RUNNING':
-    case 'ACTIVE':
-    case 'CREATING':
-    case 'PENDING':
-    case 'QUEUED':
-      return 'running';
-    default:
-      return 'unknown';
-  }
-}
-
-/** True when a run ended without completing its work. */
-export function runDidNotFinish(status: string | null | undefined): boolean {
-  const outcome = classifyRunStatus(status);
-  return outcome === 'failed' || outcome === 'cancelled' || outcome === 'expired';
-}
-
-export const RUN_OUTCOME_LABELS: Record<RunOutcome, string> = {
-  finished: 'Finished',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-  expired: 'Expired',
-  running: 'Running',
-  unknown: 'Unknown',
-};
-
 /**
  * Format provider cents (may be fractional) as USD. Sub-dollar amounts keep
  * up to 4 decimals so small run costs stay meaningful; larger amounts round
  * to cents.
  */
-export function formatCentsUsd(cents: number | null | undefined): string {
-  if (cents == null || !Number.isFinite(cents)) return '—';
-  const dollars = cents / 100;
-  const subDollar = Math.abs(dollars) < 1;
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: subDollar ? 4 : 2,
-  }).format(dollars);
-}
+// formatCentsUsd / formatRelativeTime / classifyRunStatus re-exported from lib
 
 export type AgentPrLink = {
   prUrl: string;
@@ -328,8 +308,20 @@ export type AgentCostAggregate = {
 export type EnrichedAgent = AgentSummary & {
   prs: AgentPrLink[];
   cost: AgentCostAggregate;
+  /**
+   * Status of the newest run (from listRuns), when enrichment fetched it.
+   * Prefer this over agent-level `status` — v1 agents stay `ACTIVE` forever.
+   */
+  latestRunStatus?: string;
   enrichError?: string;
 };
+
+/** Prefer latest-run status when enrichment populated it; else agent status. */
+export function conversationDisplayStatus(
+  agent: Pick<EnrichedAgent, 'status' | 'latestRunStatus'>,
+): string | undefined {
+  return agent.latestRunStatus ?? agent.status;
+}
 
 /** Extract unique PR links from a run (or agent-level) git.branches snapshot. */
 export function extractPrLinksFromGit(
@@ -436,16 +428,20 @@ export async function enrichAgentsWithPrAndCost(
   agents: AgentSummary[],
   opts?: { concurrency?: number; limit?: number },
 ): Promise<{ agents: EnrichedAgent[]; truncatedEnrichment: boolean }> {
-  const concurrency = opts?.concurrency ?? 8;
+  // Higher default concurrency — Cursor handles ~16 parallel GETs fine and
+  // this is the dominant cost after the agents catalogue itself.
+  const concurrency = opts?.concurrency ?? 16;
   const limit = opts?.limit ?? 80;
   const truncatedEnrichment = agents.length > limit;
   const slice = agents.slice(0, limit);
 
   const enriched = await mapPool(slice, concurrency, async (agent) => {
     try {
+      // listRuns limit=5 is enough for newest-run status + PR git snapshot;
+      // getUsage carries the cost rollup. Skip the extra getRun round-trip.
       const [usage, runsPage] = await Promise.all([
         client.getUsage(agent.id).catch(() => null),
-        client.listRuns(agent.id, { limit: 20 }).catch(() => null),
+        client.listRuns(agent.id, { limit: 5 }).catch(() => null),
       ]);
       const runs = runsPage?.items ?? [];
       const withGit = [...runs].sort((a, b) => {
@@ -453,22 +449,16 @@ export async function enrichAgentsWithPrAndCost(
         const bt = b.createdAt ? Date.parse(b.createdAt) : 0;
         return bt - at;
       });
+      const latestRunStatus = withGit[0]?.status;
       let prs: AgentPrLink[] = [];
       for (const run of withGit) {
         prs = extractPrLinksFromGit(run.git);
         if (prs.length) break;
       }
-      if (!prs.length && agent.latestRunId) {
-        try {
-          const latest = await client.getRun(agent.id, agent.latestRunId);
-          prs = extractPrLinksFromGit(latest.git);
-        } catch {
-          /* ignore */
-        }
-      }
       return {
         ...agent,
         prs,
+        latestRunStatus,
         cost: aggregateUsageCost(usage, runs.length || usage?.runs?.length || 0),
       } satisfies EnrichedAgent;
     } catch (err) {
@@ -519,7 +509,7 @@ export function preferredRawCents(
 }
 
 /** Key for the bucket of conversations that do not target any pull request. */
-export const NO_PR_GROUP = 'no-pull-request';
+// NO_PR_GROUP re-exported from lib/monitoring-format
 
 export type ConversationPrGroup = {
   /** prUrl, or {@link NO_PR_GROUP}. */
@@ -532,14 +522,6 @@ export type ConversationPrGroup = {
   /** Newest conversation createdAt in the group (ISO), for "created" sorting. */
   latestCreatedAt: string | null;
 };
-
-export type ConversationGroupSort = 'cost' | 'created';
-
-export function parseConversationGroupSort(
-  value: string | null | undefined,
-): ConversationGroupSort {
-  return value === 'created' ? 'created' : 'cost';
-}
 
 /**
  * Group conversations by the pull request they target. A conversation that
@@ -600,29 +582,7 @@ export function sortConversationGroups(
   groups: ConversationPrGroup[],
   sort: ConversationGroupSort,
 ): ConversationPrGroup[] {
-  const noPr = groups.filter((g) => g.key === NO_PR_GROUP);
-  const rest = groups.filter((g) => g.key !== NO_PR_GROUP);
-
-  const byLatest = (a: ConversationPrGroup, b: ConversationPrGroup) => {
-    const at = a.latestCreatedAt ? Date.parse(a.latestCreatedAt) : 0;
-    const bt = b.latestCreatedAt ? Date.parse(b.latestCreatedAt) : 0;
-    return bt - at;
-  };
-
-  rest.sort((a, b) => {
-    if (sort === 'cost') {
-      const ac = a.totalChargedCents;
-      const bc = b.totalChargedCents;
-      if (ac != null && bc != null && ac !== bc) return bc - ac;
-      if (ac != null && bc == null) return -1;
-      if (ac == null && bc != null) return 1;
-      return byLatest(a, b);
-    }
-    const byCreated = byLatest(a, b);
-    return byCreated !== 0 ? byCreated : a.key.localeCompare(b.key);
-  });
-
-  return [...rest, ...noPr];
+  return sortConversationGroupsBy(groups, sort);
 }
 
 export type ProjectSummary = {
@@ -679,24 +639,4 @@ export function sortProjectSummaries(summaries: ProjectSummary[]): ProjectSummar
     return a.repo.localeCompare(b.repo);
   });
   return [...rest, ...noRepo];
-}
-
-/** Short relative timestamp ("5m ago", "2d ago") for activity columns. */
-export function formatRelativeTime(
-  iso: string | null | undefined,
-  nowMs: number = Date.now(),
-): string {
-  if (!iso) return '—';
-  const then = Date.parse(iso);
-  if (!Number.isFinite(then)) return '—';
-  const diff = nowMs - then;
-  if (diff < 0) return 'just now';
-  const min = Math.floor(diff / 60_000);
-  if (min < 1) return 'just now';
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const days = Math.floor(hr / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(then).toLocaleDateString();
 }

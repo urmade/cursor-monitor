@@ -1,73 +1,38 @@
-import type { AgentSummary } from '@nexus/cursor-client';
 import { EmptyState, PageHeader, Panel } from '@nexus/ui';
 import Link from 'next/link';
 import { CursorApiKeyConnectForm } from '../../../src/components/CursorApiKeyConnectForm';
 import {
-  enrichAgentsWithPrAndCost,
   formatApiKeyIdentity,
   formatCentsUsd,
   formatRelativeTime,
-  groupAgentsByRepo,
   NO_REPO_GROUP,
   resolveCursorAuth,
-  sortProjectSummaries,
-  summarizeProject,
-  type EnrichedAgent,
 } from '../../../src/server/cursor';
+import { getCachedProjectsPage } from '../../../src/server/monitoring-cache';
 
 export const dynamic = 'force-dynamic';
-
-function emptyCost() {
-  return {
-    chargedSumCents: null,
-    rawSumCents: null,
-    providerChargedCents: null,
-    providerRawCents: null,
-    runCountWithCost: 0,
-    runCount: 0,
-  };
-}
 
 export default async function MonitoringPage() {
   const auth = await resolveCursorAuth();
 
   let error: string | null = auth.error;
-  let agents: AgentSummary[] = [];
+  let projects: Awaited<ReturnType<typeof getCachedProjectsPage>>['projects'] =
+    [];
+  let agentCount = 0;
   let truncated = false;
   let truncatedEnrichment = false;
 
-  if (auth.client) {
+  if (auth.client && auth.fingerprint) {
     try {
-      const page = await auth.client.listAllAgents({ pageSize: 50, maxPages: 40 });
-      agents = page.items;
+      const page = await getCachedProjectsPage(auth.client, auth.fingerprint);
+      projects = page.projects;
+      agentCount = page.agentCount;
       truncated = page.truncated;
+      truncatedEnrichment = page.truncatedEnrichment;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     }
   }
-
-  // Cost/PR enrichment is bounded; prefer conversations that have repos,
-  // since those are what forms projects here.
-  let enriched: EnrichedAgent[] = agents.map((a) => ({
-    ...a,
-    prs: [],
-    cost: emptyCost(),
-  }));
-
-  if (auth.client && agents.length > 0) {
-    const targets = agents.filter((a) => (a.repos?.length ?? 0) > 0);
-    const result = await enrichAgentsWithPrAndCost(auth.client, targets, {
-      concurrency: 8,
-      limit: 60,
-    });
-    truncatedEnrichment = result.truncatedEnrichment;
-    const byId = new Map(result.agents.map((a) => [a.id, a]));
-    enriched = agents.map((a) => byId.get(a.id) ?? { ...a, prs: [], cost: emptyCost() });
-  }
-
-  const projects = sortProjectSummaries(
-    groupAgentsByRepo(enriched).map(summarizeProject),
-  );
 
   const totalCharged = projects.reduce(
     (sum, p) => (p.totalChargedCents != null ? sum + p.totalChargedCents : sum),
@@ -82,7 +47,7 @@ export default async function MonitoringPage() {
         subtitle="Every repository is a project. Open one to inspect the conversations running against it — grouped by pull request, with their cost."
         meta={
           auth.client && projects.length > 0
-            ? `${projects.length} project${projects.length === 1 ? '' : 's'} · ${agents.length} conversation${agents.length === 1 ? '' : 's'}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}`
+            ? `${projects.length} project${projects.length === 1 ? '' : 's'} · ${agentCount} conversation${agentCount === 1 ? '' : 's'}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}`
             : undefined
         }
       />
@@ -118,7 +83,9 @@ export default async function MonitoringPage() {
             >
               <div className="flex items-baseline justify-between gap-2">
                 <span className="truncate font-mono text-sm font-medium text-fg group-hover:underline">
-                  {project.repo === NO_REPO_GROUP ? 'No repository' : project.repo}
+                  {project.repo === NO_REPO_GROUP
+                    ? 'No repository'
+                    : project.repo}
                 </span>
                 <span className="shrink-0 text-xs text-fg-subtle">
                   {project.latestCreatedAt
@@ -136,7 +103,8 @@ export default async function MonitoringPage() {
                 {project.conversationCount} conversation
                 {project.conversationCount === 1 ? '' : 's'}
                 {' · '}
-                {project.prCount} pull request{project.prCount === 1 ? '' : 's'}
+                {project.prCount} pull request
+                {project.prCount === 1 ? '' : 's'}
               </div>
             </Link>
           ))}
@@ -145,7 +113,9 @@ export default async function MonitoringPage() {
 
       {auth.client && (truncated || truncatedEnrichment) ? (
         <p className="text-xs text-fg-subtle">
-          {truncated ? 'Conversation list truncated — hit the API page cap. ' : ''}
+          {truncated
+            ? 'Conversation list truncated — hit the API page cap. '
+            : ''}
           {truncatedEnrichment
             ? 'Cost/PR enrichment capped — project totals may be partial.'
             : ''}
