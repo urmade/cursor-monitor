@@ -14,6 +14,8 @@ import {
   enrichAgentsWithPrAndCost,
   groupAgentsByRepo,
   groupConversationsByPr,
+  NO_REPO_GROUP,
+  normalizeRepoLabel,
   sortConversationGroups,
   sortProjectSummaries,
   summarizeProject,
@@ -120,7 +122,9 @@ function projectsPageKey(fp: string): string {
 }
 
 function projectDetailKey(fp: string, project: string, sort: string): string {
-  return `monitor:v2:page:project:${fp}:${encodeURIComponent(project)}:${sort}`;
+  const canonical =
+    project === NO_REPO_GROUP ? project : normalizeRepoLabel(project);
+  return `monitor:v2:page:project:${fp}:${encodeURIComponent(canonical)}:${sort}`;
 }
 
 export type AgentCatalog = {

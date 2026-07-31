@@ -101,6 +101,9 @@ describe('monitoring format helpers', () => {
       agentRepoLabels([{ url: 'https://github.com/internalsphere/nexus' }]),
     ).toEqual(['internalsphere/nexus']);
     expect(
+      agentRepoLabels([{ url: 'https://github.com/internalsphere/Nexus' }]),
+    ).toEqual(['internalsphere/nexus']);
+    expect(
       agentMatchesRepoFilter(
         {
           name: 'Cloud agent runs costs',
@@ -158,13 +161,47 @@ describe('monitoring format helpers', () => {
     ]);
 
     expect(groups.map((g) => g.repo)).toEqual([
-      'acme/AnyExpenses',
+      'acme/anyexpenses',
       'internalsphere/nexus',
       NO_REPO_GROUP,
     ]);
     expect(groups[0]!.agents.map((a) => a.id)).toEqual(['c', 'e']);
     expect(groups[1]!.agents.map((a) => a.id)).toEqual(['a', 'b', 'e']);
     expect(groups[2]!.agents.map((a) => a.id)).toEqual(['d']);
+  });
+
+  it('combines repos that differ only by casing', () => {
+    const groups = groupAgentsByRepo([
+      {
+        id: 'lower',
+        name: 'lower',
+        createdAt: '2026-07-30T12:00:00.000Z',
+        repos: [{ url: 'https://github.com/internalsphere/nexus' }],
+      },
+      {
+        id: 'upper',
+        name: 'upper',
+        createdAt: '2026-07-29T12:00:00.000Z',
+        repos: [{ url: 'https://github.com/InternalSphere/Nexus' }],
+      },
+      {
+        id: 'mixed',
+        name: 'mixed',
+        createdAt: '2026-07-28T12:00:00.000Z',
+        repos: [
+          { url: 'https://github.com/internalsphere/Nexus' },
+          { url: 'https://github.com/internalsphere/nexus' },
+        ],
+      },
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.repo).toBe('internalsphere/nexus');
+    expect(groups[0]!.agents.map((a) => a.id)).toEqual([
+      'lower',
+      'upper',
+      'mixed',
+    ]);
   });
 
   it('extracts PR links from git.branches', () => {

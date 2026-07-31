@@ -157,22 +157,34 @@ export function formatApiKeyIdentity(me: ApiKeyInfo | null): string {
   return `${keyName} (service account / team key)`;
 }
 
+/**
+ * Normalize a repository label for grouping / matching.
+ * GitHub owner and repo names are case-insensitive; lowercasing merges
+ * variants like `nexus` and `Nexus` into one monitoring project.
+ */
+export function normalizeRepoLabel(label: string): string {
+  return label.trim().toLowerCase();
+}
+
 export function agentRepoLabels(
   repos: Array<{ url?: string } | string> | null | undefined,
 ): string[] {
   if (!repos?.length) return [];
-  return repos
+  const labels = repos
     .map((r) => {
       const url = typeof r === 'string' ? r : r.url;
       if (!url) return null;
       try {
         const u = new URL(url.includes('://') ? url : `https://${url}`);
-        return u.pathname.replace(/^\//, '').replace(/\.git$/, '') || u.host;
+        const label =
+          u.pathname.replace(/^\//, '').replace(/\.git$/, '') || u.host;
+        return normalizeRepoLabel(label);
       } catch {
-        return url;
+        return normalizeRepoLabel(url);
       }
     })
     .filter((x): x is string => Boolean(x));
+  return [...new Set(labels)];
 }
 
 export function agentMatchesRepoFilter(
@@ -200,8 +212,9 @@ export type AgentRepoGroup<T> = {
 };
 
 /**
- * Group agents by repo label. Multi-repo agents appear in each matching group.
- * Agents with no repos go under {@link NO_REPO_GROUP}.
+ * Group agents by repo label (lowercased). Multi-repo agents appear in each
+ * matching group. Case variants of the same repo (e.g. `Nexus` / `nexus`)
+ * share one group. Agents with no repos go under {@link NO_REPO_GROUP}.
  */
 export function groupAgentsByRepo<
   T extends { name?: string; repos?: Array<{ url?: string }>; createdAt?: string },

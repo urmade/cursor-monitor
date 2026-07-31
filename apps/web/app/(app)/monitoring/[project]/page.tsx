@@ -11,6 +11,7 @@ import {
   formatPrNumberLabel,
   NO_PR_GROUP,
   NO_REPO_GROUP,
+  normalizeRepoLabel,
   parseConversationGroupSort,
   preferredChargedCents,
   resolveCursorAuth,
@@ -26,21 +27,28 @@ function projectHref(project: string): string {
   return `/monitoring/${encodeURIComponent(project)}`;
 }
 
+/** Canonical project key: lowercased repo label, or the no-repo sentinel. */
+function canonicalProject(project: string): string {
+  return project === NO_REPO_GROUP ? project : normalizeRepoLabel(project);
+}
+
 function agentsForProject(
   agents: AgentSummary[],
   project: string,
 ): AgentSummary[] {
-  if (project === NO_REPO_GROUP) {
+  const key = canonicalProject(project);
+  if (key === NO_REPO_GROUP) {
     return agents.filter((a) => agentRepoLabels(a.repos).length === 0);
   }
-  return agents.filter((a) => agentRepoLabels(a.repos).includes(project));
+  return agents.filter((a) => agentRepoLabels(a.repos).includes(key));
 }
 
 function findRepoUrl(agents: AgentSummary[], project: string): string | null {
+  const key = canonicalProject(project);
   for (const agent of agents) {
     for (const repo of agent.repos ?? []) {
       if (!repo.url) continue;
-      if (agentRepoLabels([repo]).includes(project)) {
+      if (agentRepoLabels([repo]).includes(key)) {
         const url = repo.url;
         return url.includes('://') ? url : `https://${url}`;
       }
@@ -57,7 +65,7 @@ export default async function ProjectMonitoringPage({
   searchParams: Promise<{ sort?: string }>;
 }) {
   const { project: rawProject } = await params;
-  const project = decodeURIComponent(rawProject);
+  const project = canonicalProject(decodeURIComponent(rawProject));
   const sp = await searchParams;
   const sort = parseConversationGroupSort(sp.sort);
 
