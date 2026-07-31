@@ -84,6 +84,11 @@ export function globalBreadcrumbTrail(pathname: string): Array<{ label: string; 
     }
   } else if (pathname.startsWith('/monitoring')) {
     items.push({ label: 'Monitoring' });
+  } else if (pathname.startsWith('/hooks')) {
+    items.push({ label: 'Hooks', href: '/hooks' });
+    if (pathname.startsWith('/hooks/setup')) {
+      items.push({ label: 'Setup' });
+    }
   } else if (pathname.startsWith('/projects')) {
     items.push({ label: 'Projects' });
   } else if (pathname.startsWith('/design')) {
