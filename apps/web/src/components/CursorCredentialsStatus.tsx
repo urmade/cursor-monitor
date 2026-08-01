@@ -7,7 +7,7 @@ export function CursorCredentialsStatus({
   identityLabel,
 }: {
   connectedCount: number;
-  source: 'user_cookie' | 'env' | 'none';
+  source: 'db' | 'user_cookie' | 'env' | 'none';
   identityLabel: string | null;
 }) {
   return (
@@ -20,17 +20,18 @@ export function CursorCredentialsStatus({
               {connectedCount} organisation{connectedCount === 1 ? '' : 's'}
             </strong>
             {identityLabel ? ` · ${identityLabel}` : ''}
+            {source === 'db' ? ' · stored encrypted in DB' : ''}
           </span>
         ) : source === 'env' ? (
           <span>
             Using env / service-account key
-            {identityLabel ? ` (${identityLabel})` : ''}. Connect personal
-            organisation keys in Settings for multi-org Monitoring.
+            {identityLabel ? ` (${identityLabel})` : ''}. Connect organisation
+            keys in Settings for multi-identity Monitoring.
           </span>
         ) : (
           <span>
-            No Cursor organisations connected yet. Add API keys and org ids in
-            Settings to load Monitoring.
+            No Cursor organisations connected yet. Add organisations and attach
+            user / service-account API keys in Settings to load Monitoring.
           </span>
         )}
       </div>

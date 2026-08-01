@@ -63,7 +63,13 @@ export default async function MonitoringPage() {
   );
   const anyCost = projects.some((p) => p.totalChargedCents != null);
   const orgCount =
-    auth.source === 'user_cookie' ? auth.credentials.length : 0;
+    auth.source === 'db' || auth.source === 'user_cookie'
+      ? new Set(
+          auth.credentials
+            .map((c) => c.organisationConnectionId)
+            .filter((id): id is string => Boolean(id)),
+        ).size || auth.credentials.length
+      : 0;
 
   return (
     <div className="space-y-4 p-4">
@@ -72,7 +78,7 @@ export default async function MonitoringPage() {
         subtitle="Every repository is a project. Open one to inspect Automations, Cloud Agent runs, and local requests — with cost."
         meta={
           projects.length > 0
-            ? `${projects.length} project${projects.length === 1 ? '' : 's'}${agentCount > 0 ? ` · ${agentCount} Cloud Agent conversation${agentCount === 1 ? '' : 's'}` : ''}${hookEventCount > 0 ? ` · ${hookEventCount} local request${hookEventCount === 1 ? '' : 's'}` : ''}${orgCount > 1 ? ` · ${orgCount} orgs` : ''}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}`
+            ? `${projects.length} project${projects.length === 1 ? '' : 's'}${agentCount > 0 ? ` · ${agentCount} Cloud Agent conversation${agentCount === 1 ? '' : 's'}` : ''}${hookEventCount > 0 ? ` · ${hookEventCount} local request${hookEventCount === 1 ? '' : 's'}` : ''}${orgCount > 1 ? ` · ${orgCount} orgs` : ''}${auth.credentials.length > 1 ? ` · ${auth.credentials.length} keys` : ''}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}`
             : undefined
         }
         actions={
@@ -89,7 +95,8 @@ export default async function MonitoringPage() {
         connectedCount={orgCount}
         source={auth.source}
         identityLabel={
-          auth.source === 'user_cookie' && auth.credentials.length > 1
+          (auth.source === 'db' || auth.source === 'user_cookie') &&
+          auth.credentials.length > 1
             ? `${auth.credentials.length} API keys`
             : auth.me
               ? formatApiKeyIdentity(auth.me)

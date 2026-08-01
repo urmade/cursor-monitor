@@ -1,124 +1,90 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { resetMemoryKv } from '@nexus/core';
-import {
-  costEntriesFromOrganisations,
-  readOrgCostCredentialsStore,
-  resolveOrgCostCredentials,
-  writeOrgCostCredentialsStore,
-} from '../server/cursor-org-cost-credentials';
-import type { StoredCursorOrganisation } from '../server/cursor-org-store';
+import { resolveOrgCostCredentials } from '../server/cursor-org-cost-credentials';
 
 describe('cursor org cost credentials', () => {
   const prevEnv = { ...process.env };
 
   beforeEach(() => {
-    resetMemoryKv();
     delete process.env.CURSOR_ORGANIZATION_ID;
     delete process.env.CURSOR_ORG_ID;
     delete process.env.CURSOR_ORGANIZATION_API_KEY;
     delete process.env.CURSOR_ORG_API_KEY;
     delete process.env.CURSOR_ADMIN_API_KEY;
+    delete process.env.CURSOR_API_BASE_URL;
+    delete process.env.CURSOR_API_BASE_URL_ALLOWLIST;
   });
 
   afterEach(() => {
     process.env = { ...prevEnv };
-    resetMemoryKv();
   });
 
-  it('extracts cost-capable entries from stored organisations', () => {
-    const orgs: StoredCursorOrganisation[] = [
-      {
-        id: '1',
-        label: 'No cost',
-        organizationId: 'org_abc',
-        apiKey: 'cursor_user_key_aaaaaaaaaaaa',
-        orgApiKey: null,
-        baseUrl: 'https://api.cursor.com',
-      },
-      {
-        id: '2',
-        label: 'With cost',
-        organizationId: 'org_Ql4KK4BASeB0rdea',
-        apiKey: 'cursor_user_key_bbbbbbbbbbbb',
-        orgApiKey: 'crsr_org_key_cccccccccccccccccccc',
-        baseUrl: 'https://api.cursor.com',
-      },
-    ];
-    expect(costEntriesFromOrganisations(orgs)).toEqual([
-      {
-        organizationId: 'org_Ql4KK4BASeB0rdea',
-        orgApiKey: 'crsr_org_key_cccccccccccccccccccc',
-        baseUrl: 'https://api.cursor.com',
-      },
-    ]);
-  });
-
-  it('prefers env credentials over server store', async () => {
+  it('resolves deployment env credentials when baseUrl is allowlisted', async () => {
     process.env.CURSOR_ORGANIZATION_ID = 'org_from_env';
     process.env.CURSOR_ORGANIZATION_API_KEY = 'env-org-key-xxxxxxxxxxxxxxx';
-    await writeOrgCostCredentialsStore([
-      {
-        id: '1',
-        label: 'Stored',
-        organizationId: 'org_stored',
-        apiKey: 'cursor_user_key_bbbbbbbbbbbb',
-        orgApiKey: 'stored-org-key-xxxxxxxxxxxxxxx',
-        baseUrl: 'https://api.cursor.com',
-      },
-    ]);
 
     const resolved = await resolveOrgCostCredentials();
-    expect(resolved?.source).toBe('env');
-    expect(resolved?.organizationId).toBe('org_from_env');
-    expect(resolved?.orgApiKey).toBe('env-org-key-xxxxxxxxxxxxxxx');
+    expect(resolved).toEqual({
+      organizationId: 'org_from_env',
+      orgApiKey: 'env-org-key-xxxxxxxxxxxxxxx',
+      baseUrl: 'https://api.cursor.com',
+      source: 'env',
+    });
   });
 
-  it('falls back to server store when env is unset', async () => {
-    await writeOrgCostCredentialsStore([
-      {
-        id: '1',
-        label: 'Stored',
-        organizationId: 'org_stored',
-        apiKey: 'cursor_user_key_bbbbbbbbbbbb',
-        orgApiKey: 'stored-org-key-xxxxxxxxxxxxxxx',
-        baseUrl: 'https://api.cursor.com',
-      },
-    ]);
-
-    const resolved = await resolveOrgCostCredentials({ envOnly: false });
-    expect(resolved?.source).toBe('server_store');
-    expect(resolved?.organizationId).toBe('org_stored');
-
-    const stored = await readOrgCostCredentialsStore();
-    expect(stored).toHaveLength(1);
-  });
-
-  it('accepts explicit overrides', async () => {
+  it('accepts explicit overrides only when baseUrl is allowlisted', async () => {
     const resolved = await resolveOrgCostCredentials({
       organizationId: 'org_explicit',
       orgApiKey: 'explicit-org-key-xxxxxxxxxxxxx',
-      baseUrl: 'https://api.example.com/',
+      baseUrl: 'https://api.cursor.com/',
     });
     expect(resolved).toEqual({
       organizationId: 'org_explicit',
       orgApiKey: 'explicit-org-key-xxxxxxxxxxxxx',
-      baseUrl: 'https://api.example.com',
+      baseUrl: 'https://api.cursor.com',
       source: 'explicit',
     });
+
+    expect(
+      await resolveOrgCostCredentials({
+        organizationId: 'org_explicit',
+        orgApiKey: 'explicit-org-key-xxxxxxxxxxxxx',
+        baseUrl: 'https://evil.example',
+      }),
+    ).toBeNull();
   });
 
-  it('clears server store when no cost-capable orgs remain', async () => {
-    await writeOrgCostCredentialsStore([
-      {
-        id: '1',
-        label: 'Stored',
-        organizationId: 'org_stored',
-        apiKey: 'cursor_user_key_bbbbbbbbbbbb',
-        orgApiKey: 'stored-org-key-xxxxxxxxxxxxxxx',
-        baseUrl: 'https://api.cursor.com',
-      },
-    ]);
-    await writeOrgCostCredentialsStore([]);
-    expect(await readOrgCostCredentialsStore()).toEqual([]);
+  it('prefers explicit overrides over env', async () => {
+    process.env.CURSOR_ORGANIZATION_ID = 'org_from_env';
+    process.env.CURSOR_ORGANIZATION_API_KEY = 'env-org-key-xxxxxxxxxxxxxxx';
+
+    const resolved = await resolveOrgCostCredentials({
+      organizationId: 'org_explicit',
+      orgApiKey: 'explicit-org-key-xxxxxxxxxxxxx',
+      baseUrl: 'https://api.cursor.com',
+    });
+    expect(resolved?.source).toBe('explicit');
+    expect(resolved?.organizationId).toBe('org_explicit');
+  });
+
+  it('rejects env credentials when CURSOR_API_BASE_URL is not allowlisted', async () => {
+    process.env.CURSOR_ORGANIZATION_ID = 'org_from_env';
+    process.env.CURSOR_ORGANIZATION_API_KEY = 'env-org-key-xxxxxxxxxxxxxxx';
+    process.env.CURSOR_API_BASE_URL = 'https://evil.example';
+    expect(await resolveOrgCostCredentials()).toBeNull();
+  });
+
+  it('returns null when neither explicit nor env credentials are configured', async () => {
+    expect(await resolveOrgCostCredentials()).toBeNull();
+  });
+
+  it('does not consult DB/KV — unknown tenant opts cannot unlock credentials', async () => {
+    // Extra fields are ignored; without explicit/env secrets resolution is null.
+    expect(
+      await resolveOrgCostCredentials({
+        organizationId: null,
+        orgApiKey: null,
+        baseUrl: null,
+      }),
+    ).toBeNull();
   });
 });

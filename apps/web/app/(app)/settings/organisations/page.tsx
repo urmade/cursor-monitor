@@ -25,7 +25,7 @@ export default async function OrganisationsSettingsPage() {
     <div className="space-y-4 p-4 max-w-3xl">
       <PageHeader
         title="Cursor organisations"
-        subtitle="All configuration needed to connect Nexus to one or more Cursor organisations — API endpoint, API key, and organisation id."
+        subtitle="Connect Cursor organisations and attach multiple user / service-account API keys (encrypted in the database) so Monitoring can list Cloud Agents for every identity."
         meta="Settings"
       />
       <CursorOrganisationsSettings

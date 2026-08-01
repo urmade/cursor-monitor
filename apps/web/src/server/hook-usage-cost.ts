@@ -109,8 +109,8 @@ async function fetchUsageEvents(opts: {
  * Prefers Organization Admin API (`/organizations/filtered-usage-events`),
  * falls back to team Admin API. Never throws — returns an error string instead.
  *
- * Credentials resolve from: explicit opts → env → server store (synced from
- * Settings → Organisations) → browser cookie orgs.
+ * Credentials resolve from: explicit opts → env. Stop hooks have no Nexus org
+ * identity, so encrypted KV / DB mirrors are not consulted (tenant isolation).
  */
 export async function lookupStopHookUsageCost(input: {
   userEmail: string | null;

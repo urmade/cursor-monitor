@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { cookies } from 'next/headers';
 import { cache } from 'react';
 import {
   createCursorClient,
@@ -9,7 +8,6 @@ import {
   type CursorClient,
 } from '@nexus/cursor-client';
 import {
-  automationDisplayName,
   automationMetaFromRun,
   NO_PR_GROUP,
   parseGithubPrRef,
@@ -41,11 +39,6 @@ export {
   type GithubPrRef,
 } from '../lib/monitoring-format';
 
-/** httpOnly cookie holding user-pasted Cursor API keys (prototype BYOK). */
-export const CURSOR_USER_API_KEY_COOKIE = 'nexus_cursor_user_api_key';
-/** Multi-key cookie: JSON string array of API keys (different Cursor orgs). */
-export const CURSOR_USER_API_KEYS_COOKIE = 'nexus_cursor_user_api_keys';
-
 function fingerprintApiKey(apiKey: string): string {
   return createHash('sha256').update(apiKey).digest('hex').slice(0, 24);
 }
@@ -58,17 +51,14 @@ export function combinedCredentialFingerprint(fingerprints: string[]): string {
   return createHash('sha256').update(sorted.join('|')).digest('hex').slice(0, 24);
 }
 
-const COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 14; // 14 days
-const MAX_STORED_API_KEYS = 8;
-
-export type CursorCredentialSource = 'user_cookie' | 'env' | 'none';
+export type CursorCredentialSource = 'db' | 'user_cookie' | 'env' | 'none';
 
 export type ResolvedCursorCredential = {
   client: CursorClient;
   fingerprint: string;
   me: ApiKeyInfo | null;
   identityLabel: string;
-  source: 'user_cookie' | 'env';
+  source: 'db' | 'user_cookie' | 'env';
   /** Local organisation connection id when sourced from settings. */
   organisationConnectionId?: string;
   /** Public Cursor organization id (`org_…`) when configured. */
@@ -77,6 +67,8 @@ export type ResolvedCursorCredential = {
   baseUrl?: string;
   /** Admin-chosen organisation label. */
   organisationLabel?: string;
+  /** Attached team key id when sourced from DB. */
+  apiKeyId?: string;
 };
 
 export type ResolvedCursorAuth = {
@@ -101,77 +93,14 @@ function envCursorApiKey(): string | null {
   return key || null;
 }
 
-function cookieOptions() {
-  return {
-    httpOnly: true,
-    sameSite: 'lax' as const,
-    secure: process.env.VERCEL === '1' || process.env.NODE_ENV === 'production',
-    path: '/',
-    maxAge: COOKIE_MAX_AGE_SEC,
-  };
-}
-
-/** Parse stored keys from the multi-key cookie and legacy single-key cookie. */
-export async function readUserCursorApiKeys(): Promise<string[]> {
-  const store = await cookies();
-  const multi = store.get(CURSOR_USER_API_KEYS_COOKIE)?.value?.trim();
-  if (multi) {
-    try {
-      const parsed = JSON.parse(multi) as unknown;
-      if (Array.isArray(parsed)) {
-        return [
-          ...new Set(
-            parsed
-              .map((k) => (typeof k === 'string' ? k.trim() : ''))
-              .filter((k) => k.length >= 20),
-          ),
-        ].slice(0, MAX_STORED_API_KEYS);
-      }
-    } catch {
-      // fall through to legacy
-    }
-  }
-  const legacy = store.get(CURSOR_USER_API_KEY_COOKIE)?.value?.trim();
-  return legacy ? [legacy] : [];
-}
-
-/** @deprecated Prefer readUserCursorApiKeys — returns the first stored key. */
-export async function readUserCursorApiKey(): Promise<string | null> {
-  const keys = await readUserCursorApiKeys();
-  return keys[0] ?? null;
-}
-
-export async function writeUserCursorApiKeys(apiKeys: string[]): Promise<void> {
-  const store = await cookies();
-  const unique = [
-    ...new Set(apiKeys.map((k) => k.trim()).filter((k) => k.length >= 20)),
-  ].slice(0, MAX_STORED_API_KEYS);
-  const opts = cookieOptions();
-  if (unique.length === 0) {
-    store.delete(CURSOR_USER_API_KEYS_COOKIE);
-    store.delete(CURSOR_USER_API_KEY_COOKIE);
-    return;
-  }
-  store.set(CURSOR_USER_API_KEYS_COOKIE, JSON.stringify(unique), opts);
-  // Keep legacy cookie in sync for any older readers.
-  store.set(CURSOR_USER_API_KEY_COOKIE, unique[0]!, opts);
-}
-
-/** Replace stored keys with a single key (backward-compatible helper). */
-export async function writeUserCursorApiKey(apiKey: string): Promise<void> {
-  await writeUserCursorApiKeys([apiKey]);
-}
-
-export async function clearUserCursorApiKey(): Promise<void> {
-  await writeUserCursorApiKeys([]);
-}
-
 async function probeCredential(
   apiKey: string,
-  source: 'user_cookie' | 'env',
+  source: 'db' | 'user_cookie' | 'env',
   opts?: {
     baseUrl?: string;
     organisation?: StoredCursorOrganisation;
+    apiKeyId?: string;
+    keyLabel?: string | null;
   },
 ): Promise<ResolvedCursorCredential | { error: string }> {
   const baseUrl = opts?.baseUrl ?? defaultCursorApiBaseUrl();
@@ -182,8 +111,9 @@ async function probeCredential(
     const identity = formatApiKeyIdentity(me);
     const orgLabel = opts?.organisation?.label?.trim();
     const orgId = opts?.organisation?.organizationId;
+    const keyBit = opts?.keyLabel?.trim() ? ` · ${opts.keyLabel.trim()}` : '';
     const identityLabel = orgLabel
-      ? `${orgLabel}${orgId ? ` · ${orgId}` : ''} · ${identity}`
+      ? `${orgLabel}${orgId ? ` · ${orgId}` : ''}${keyBit} · ${identity}`
       : identity;
     return {
       client,
@@ -195,6 +125,7 @@ async function probeCredential(
       organizationId: orgId ?? null,
       baseUrl,
       organisationLabel: orgLabel,
+      apiKeyId: opts?.apiKeyId,
     };
   } catch (err) {
     return {
@@ -211,25 +142,53 @@ async function resolveCursorAuthUncached(): Promise<ResolvedCursorAuth> {
   // Lazy import avoids a circular init with cursor-org-store ↔ cursor.
   const { readCursorOrganisations } = await import('./cursor-org-store');
   const organisations = await readCursorOrganisations();
-  if (organisations.length > 0) {
-    const results = await Promise.all(
-      organisations.map((org) =>
-        probeCredential(org.apiKey, 'user_cookie', {
+  const probes: Array<Promise<ResolvedCursorCredential | { error: string }>> =
+    [];
+  for (const org of organisations) {
+    const source = org.source === 'db' ? 'db' : 'user_cookie';
+    const keys =
+      org.apiKeys.length > 0
+        ? org.apiKeys
+        : org.apiKey
+          ? [
+              {
+                id: `${org.id}:primary`,
+                label: 'Primary',
+                keyKind: 'user' as const,
+                apiKey: org.apiKey,
+                fingerprint: fingerprintApiKey(org.apiKey),
+                hint: '',
+                identityLabel: null,
+              },
+            ]
+          : [];
+    for (const key of keys) {
+      probes.push(
+        probeCredential(key.apiKey, source, {
           baseUrl: org.baseUrl,
           organisation: org,
+          apiKeyId: key.id,
+          keyLabel: key.label,
         }),
-      ),
-    );
+      );
+    }
+  }
+
+  if (probes.length > 0) {
+    const results = await Promise.all(probes);
     const credentials: ResolvedCursorCredential[] = [];
     const errors: string[] = [];
     for (const result of results) {
       if ('error' in result) errors.push(result.error);
       else credentials.push(result);
     }
+    const source: CursorCredentialSource = credentials.some((c) => c.source === 'db')
+      ? 'db'
+      : 'user_cookie';
     if (credentials.length === 0) {
       return {
         client: null,
-        source: 'user_cookie',
+        source,
         me: null,
         fingerprint: null,
         credentials: [],
@@ -240,7 +199,7 @@ async function resolveCursorAuthUncached(): Promise<ResolvedCursorAuth> {
     const primary = credentials[0]!;
     return {
       client: primary.client,
-      source: 'user_cookie',
+      source,
       me: primary.me,
       fingerprint: primary.fingerprint,
       credentials,

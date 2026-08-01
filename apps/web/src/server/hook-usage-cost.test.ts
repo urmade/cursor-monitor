@@ -1,11 +1,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { CursorAdminClient, FilteredUsageEvent } from '@nexus/cursor-client';
-import { resetMemoryKv } from '@nexus/core';
 import {
   lookupStopHookUsageCost,
   selectUsageEventForStopHook,
 } from './hook-usage-cost';
-import { writeOrgCostCredentialsStore } from './cursor-org-cost-credentials';
 
 describe('selectUsageEventForStopHook', () => {
   const events: FilteredUsageEvent[] = [
@@ -50,18 +48,17 @@ describe('lookupStopHookUsageCost', () => {
   const prev = { ...process.env };
 
   beforeEach(() => {
-    resetMemoryKv();
     delete process.env.CURSOR_ORGANIZATION_ID;
     delete process.env.CURSOR_ORG_ID;
     delete process.env.CURSOR_ORGANIZATION_API_KEY;
     delete process.env.CURSOR_ORG_API_KEY;
     delete process.env.CURSOR_ADMIN_API_KEY;
     delete process.env.CURSOR_TEAM_API_KEY;
+    delete process.env.CURSOR_API_BASE_URL;
   });
 
   afterEach(() => {
     process.env = { ...prev };
-    resetMemoryKv();
   });
 
   it('uses org filtered-usage-events when org id + key are set', async () => {
@@ -97,37 +94,42 @@ describe('lookupStopHookUsageCost', () => {
     expect(result.usageEvent?.chargedCents).toBe(12.34);
   });
 
-  it('uses server-store credentials synced from organisation settings', async () => {
-    await writeOrgCostCredentialsStore([
-      {
-        id: '1',
-        label: 'Acme',
-        organizationId: 'org_from_settings',
-        apiKey: 'cursor_user_key_bbbbbbbbbbbb',
-        orgApiKey: 'settings-org-key-xxxxxxxxxxxx',
-        baseUrl: 'https://api.cursor.com',
-      },
-    ]);
-
+  it('cannot use DB/settings credentials without env or explicit overrides', async () => {
+    // Stop hooks have no trusted Nexus org identity and no KV/DB mirror.
     const result = await lookupStopHookUsageCost({
       userEmail: 'dev@example.com',
       model: 'composer',
+      fetchEvents: async () => {
+        throw new Error('must not call Cursor without credentials');
+      },
+    });
+    expect(result.chargedCents).toBeNull();
+    expect(result.costLookupError).toMatch(/No Cursor Admin/i);
+  });
+
+  it('accepts explicit credential overrides (base-url validated)', async () => {
+    const result = await lookupStopHookUsageCost({
+      userEmail: 'dev@example.com',
+      model: 'composer',
+      organizationId: 'org_explicit',
+      orgApiKey: 'explicit-org-key-xxxxxxxxxxxxx',
+      baseUrl: 'https://api.cursor.com',
       fetchEvents: async (opts) => {
         expect(opts.mode).toBe('org');
-        expect(opts.organizationId).toBe('org_from_settings');
+        expect(opts.organizationId).toBe('org_explicit');
         return [
           {
             timestamp: String(Date.now()),
             userEmail: 'dev@example.com',
             model: 'composer',
-            chargedCents: 4.2,
+            chargedCents: 2,
           },
         ];
       },
     });
-    expect(result.chargedCents).toBe(4.2);
+    expect(result.chargedCents).toBe(2);
     expect(result.costSource).toBe(
-      'organizations.filtered-usage-events:server_store',
+      'organizations.filtered-usage-events:explicit',
     );
   });
 
