@@ -42,6 +42,10 @@ export class CursorAdminClient extends CursorClient {
   /**
    * Page through filtered usage events until exhausted or `maxPages` is hit.
    * Prefers `usageEvents`, falls back to legacy `events`.
+   *
+   * When `organizationId` is set, uses Organization Admin
+   * (`/organizations/filtered-usage-events`); otherwise Team Admin
+   * (`/teams/filtered-usage-events`).
    */
   async listAllFilteredUsageEvents(
     body: Omit<FilteredUsageEventsRequest, 'page' | 'pageSize'>,
@@ -50,13 +54,23 @@ export class CursorAdminClient extends CursorClient {
     const pageSize = opts?.pageSize ?? 1000;
     const maxPages = opts?.maxPages ?? 20;
     const items: FilteredUsageEvent[] = [];
+    const organizationId =
+      typeof body.organizationId === 'string' ? body.organizationId.trim() : '';
+    const useOrg = organizationId.length > 0;
 
     for (let page = 1; page <= maxPages; page += 1) {
-      const res = await this.filteredUsageEvents({
-        ...body,
-        page,
-        pageSize,
-      });
+      const res = useOrg
+        ? await this.filteredOrgUsageEvents({
+            ...body,
+            organizationId,
+            page,
+            pageSize,
+          })
+        : await this.filteredUsageEvents({
+            ...body,
+            page,
+            pageSize,
+          });
       const batch = res.usageEvents ?? res.events ?? [];
       items.push(...batch);
       const hasNext =

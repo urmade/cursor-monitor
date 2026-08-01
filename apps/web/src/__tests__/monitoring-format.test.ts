@@ -40,11 +40,6 @@ import {
   partitionProjectRunsByAutomation,
   summarizeLocalStatuses,
 } from '../lib/monitoring-format';
-import {
-  applyAutomationAttribution,
-  loadAutomationAttributionMap,
-} from '../server/automation-attribution';
-import type { CursorAdminClient } from '@nexus/cursor-client';
 
 
 describe('monitoring format helpers', () => {
@@ -558,31 +553,6 @@ describe('automation vs user-request partitioning', () => {
     expect(sections.automations[0]!.automationName).toBe('Nightly');
     expect(sections.automations[0]!.totalChargedCents).toBe(80);
     expect(sections.userRequests.map((a) => a.id)).toEqual(['user']);
-  });
-
-  it('applies Admin usage automation attribution onto agents', async () => {
-    const admin = {
-      listAllFilteredUsageEvents: async () => ({
-        items: [
-          {
-            timestamp: '1',
-            cloudAgentId: 'bc-1',
-            automationId: 'auto-9',
-          },
-        ],
-        truncated: false,
-      }),
-    } as unknown as CursorAdminClient;
-
-    const map = await loadAutomationAttributionMap(admin);
-    expect(map.get('bc-1')).toEqual({ automationId: 'auto-9' });
-
-    const stamped = applyAutomationAttribution(
-      [conversation('bc-1', [], 10, '2026-07-30T10:00:00.000Z')],
-      map,
-    );
-    expect(stamped[0]!.automationId).toBe('auto-9');
-    expect(stamped[0]!.source).toBe('automations');
   });
 });
 

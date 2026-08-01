@@ -289,6 +289,32 @@ describe('admin + automation webhook', () => {
     expect(res.items.map((e) => e.cloudAgentId)).toEqual(['bc-1', 'bc-2']);
   });
 
+  it('listAllFilteredUsageEvents uses org endpoint when organizationId set', async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(String(input)).toContain('/organizations/filtered-usage-events');
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        organizationId?: string;
+        automationId?: string;
+        page?: number;
+      };
+      expect(body.organizationId).toBe('org_abc');
+      expect(body.automationId).toBe('*');
+      return jsonResponse(200, {
+        usageEvents: [
+          { timestamp: '1', automationId: 'auto-1', cloudAgentId: 'bc-9' },
+        ],
+        pagination: { hasNextPage: false },
+      });
+    });
+    const admin = createCursorAdminClient({ apiKey: 'org-key', fetchImpl });
+    const res = await admin.listAllFilteredUsageEvents(
+      { automationId: '*', organizationId: 'org_abc' },
+      { pageSize: 100, maxPages: 2 },
+    );
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0]?.cloudAgentId).toBe('bc-9');
+  });
+
   it('postAutomationWebhook uses bearer auth', async () => {
     const fetchImpl = vi.fn(async (_input, init?: RequestInit) => {
       expect(new Headers(init?.headers).get('Authorization')).toBe(

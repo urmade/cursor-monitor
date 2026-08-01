@@ -10,8 +10,7 @@ import { kvGet, kvSet } from '@nexus/core';
 import type { AgentSummary, CursorClient } from '@nexus/cursor-client';
 import {
   applyAutomationAttribution,
-  createEnvAdminClient,
-  loadAutomationAttributionMap,
+  loadAutomationAttributionMapFromEnv,
 } from './automation-attribution';
 import {
   agentRepoLabels,
@@ -415,7 +414,7 @@ export async function getCachedEnrichedAgentsMulti(
 async function withAutomationAttribution(
   agents: EnrichedAgent[],
 ): Promise<EnrichedAgent[]> {
-  const attribution = await loadAutomationAttributionMap(createEnvAdminClient());
+  const attribution = await loadAutomationAttributionMapFromEnv();
   return applyAutomationAttribution(agents, attribution);
 }
 
