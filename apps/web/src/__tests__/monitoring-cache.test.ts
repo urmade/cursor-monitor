@@ -107,6 +107,8 @@ describe('monitoring cache', () => {
 
     expect(first.agents[0]?.latestRunStatus).toBe('FINISHED');
     expect(first.agents[0]?.cost.chargedSumCents).toBe(42);
+    // Branch comes from the newest run's git.branches snapshot.
+    expect(first.agents[0]?.branch).toBe('cursor/monitoring-perf-83be');
     expect(second.agents[0]?.cost.chargedSumCents).toBe(42);
     expect(counts.usage).toBe(1);
     expect(counts.runs).toBe(1);

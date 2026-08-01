@@ -124,7 +124,7 @@ describe('hook signals tree', () => {
         id: '2',
         userEmail: 'a@example.com',
         repo: 'acme/one',
-        gitBranch: 'main',
+        gitBranch: null,
         workspaceRoot: '/tmp/one',
         conversationId: 'c1',
         generationId: 'g2',
@@ -205,6 +205,10 @@ describe('hook signals tree', () => {
     expect(tree.repos[1]!.conversations[0]!.events).toHaveLength(2);
     expect(tree.repos[1]!.conversations[0]!.chargedCentsTotal).toBe(1.5);
     expect(tree.repos[1]!.conversations[0]!.userEmail).toBe('a@example.com');
+    // Conversation branch comes from the newest event that reported one.
+    expect(tree.repos[1]!.conversations[0]!.gitBranch).toBe('main');
+    expect(tree.repos[0]!.conversations[0]!.gitBranch).toBe('feat');
+    expect(tree.repos[2]!.conversations[0]!.gitBranch).toBeNull();
     expect(tree.repos[0]!.chargedCentsTotal).toBe(250);
     expect(tree.repos[2]!.conversations[0]!.conversationId).toBe(
       'Unknown conversation',

@@ -466,6 +466,11 @@ export type EnrichedAgent = AgentSummary & {
    * Prefer this over agent-level `status` — v1 agents stay `ACTIVE` forever.
    */
   latestRunStatus?: string;
+  /**
+   * Branch the newest run works on (from its git.branches snapshot), when
+   * known. Unlike `prs[].branch` this is populated even without a PR.
+   */
+  branch?: string | null;
   enrichError?: string;
   /** Credential fingerprint that could fetch this agent (multi-key). */
   credentialFingerprint?: string;
@@ -510,6 +515,23 @@ export function extractPrLinksFromGit(
     });
   }
   return out;
+}
+
+/**
+ * Branch a conversation targets, when known: the enriched run branch, else a
+ * branch carried by one of its PR links (older cached enrichments).
+ */
+export function runTargetBranch(agent: {
+  branch?: string | null;
+  prs?: Array<{ branch?: string }>;
+}): string | null {
+  const direct = agent.branch?.trim();
+  if (direct) return direct;
+  for (const pr of agent.prs ?? []) {
+    const b = pr.branch?.trim();
+    if (b) return b;
+  }
+  return null;
 }
 
 export function formatPrLabel(prUrl: string): string {
@@ -616,13 +638,21 @@ export async function enrichAgentsWithPrAndCost(
       });
       const latestRunStatus = withGit[0]?.status;
       let prs: AgentPrLink[] = [];
+      let branch: string | null = null;
       for (const run of withGit) {
-        prs = extractPrLinksFromGit(run.git);
-        if (prs.length) break;
+        if (!branch) {
+          branch =
+            run.git?.branches
+              ?.map((b) => b.branch?.trim())
+              .find((b): b is string => Boolean(b)) ?? null;
+        }
+        if (prs.length === 0) prs = extractPrLinksFromGit(run.git);
+        if (branch && prs.length) break;
       }
       return {
         ...agent,
         prs,
+        branch,
         latestRunStatus,
         cost: aggregateUsageCost(usage, runs.length || usage?.runs?.length || 0),
       } satisfies EnrichedAgent;
@@ -630,6 +660,7 @@ export async function enrichAgentsWithPrAndCost(
       return {
         ...agent,
         prs: [],
+        branch: null,
         cost: {
           chargedSumCents: null,
           rawSumCents: null,
@@ -646,6 +677,7 @@ export async function enrichAgentsWithPrAndCost(
   const rest: EnrichedAgent[] = agents.slice(limit).map((agent) => ({
     ...agent,
     prs: [],
+    branch: null,
     cost: {
       chargedSumCents: null,
       rawSumCents: null,

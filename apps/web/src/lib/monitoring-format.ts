@@ -128,6 +128,36 @@ export type SortableConversationGroup = {
   latestCreatedAt: string | null;
 };
 
+/** Where a monitored request ran: locally, as a Cloud Agent, or as an Automation. */
+export type MonitoringRunKind = 'local' | 'cloud' | 'automation';
+
+export const MONITORING_RUN_KIND_LABELS: Record<MonitoringRunKind, string> = {
+  local: 'local',
+  cloud: 'cloud agent',
+  automation: 'automation',
+};
+
+/** Group key for requests that do not target a known branch. */
+export const NO_BRANCH_GROUP = 'none';
+
+/**
+ * Collapse a local request's per-turn status counts into a single run-status
+ * token understood by `RunStatusBadge`: any error → ERROR, else any abort →
+ * CANCELLED, else any completed turn → FINISHED, else UNKNOWN.
+ */
+export function summarizeLocalStatuses(
+  statuses: Record<string, number>,
+): string {
+  const count = (name: string) =>
+    Object.entries(statuses).find(
+      ([s]) => s.trim().toLowerCase() === name,
+    )?.[1] ?? 0;
+  if (count('error') > 0) return 'ERROR';
+  if (count('aborted') > 0) return 'CANCELLED';
+  if (count('completed') > 0) return 'FINISHED';
+  return 'UNKNOWN';
+}
+
 /**
  * Order groups for display: by total charged cost or by newest conversation,
  * descending. The no-PR bucket always sorts last.
@@ -324,4 +354,54 @@ export function partitionProjectRunsByAutomation<T extends PartitionableRun>(
     automations,
     userRequests: sortPartitionableRuns(userRequests, sort),
   };
+}
+
+export type MonitoringRunBranchGroup<T extends PartitionableRun> = {
+  /** Branch name, or {@link NO_BRANCH_GROUP}. */
+  key: string;
+  /** Branch name for display; null for the no-branch group. */
+  branch: string | null;
+  runs: T[];
+  totalChargedCents: number | null;
+  latestCreatedAt: string | null;
+};
+
+/**
+ * Group runs of every kind (local / Cloud Agent / Automation) by the branch
+ * they target. Groups sort alphabetically by branch with the no-branch bucket
+ * last; `sort` orders runs within each group.
+ */
+export function groupMonitoringRunsByBranch<
+  T extends PartitionableRun & { branch?: string | null },
+>(runs: T[], sort: ConversationGroupSort = 'cost'): MonitoringRunBranchGroup<T>[] {
+  const byBranch = new Map<string, T[]>();
+  for (const run of runs) {
+    const branch = run.branch?.trim() || null;
+    const key = branch ?? NO_BRANCH_GROUP;
+    const list = byBranch.get(key);
+    if (list) list.push(run);
+    else byBranch.set(key, [run]);
+  }
+
+  const groups = [...byBranch.entries()].map(([key, groupRuns]) => {
+    const sorted = sortPartitionableRuns(groupRuns, sort);
+    const totals = sumChargedAndLatest(sorted);
+    return {
+      key,
+      branch: key === NO_BRANCH_GROUP ? null : key,
+      runs: sorted,
+      totalChargedCents: totals.totalChargedCents,
+      latestCreatedAt: totals.latestCreatedAt,
+    };
+  });
+
+  groups.sort((a, b) => {
+    if (a.branch == null) return b.branch == null ? 0 : 1;
+    if (b.branch == null) return -1;
+    return (
+      a.branch.localeCompare(b.branch, undefined, { sensitivity: 'base' }) ||
+      a.branch.localeCompare(b.branch)
+    );
+  });
+  return groups;
 }

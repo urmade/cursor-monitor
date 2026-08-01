@@ -298,6 +298,7 @@ function emptyEnrichment(agent: AgentSummary): EnrichedAgent {
   return {
     ...agent,
     prs: [],
+    branch: null,
     cost: {
       chargedSumCents: null,
       rawSumCents: null,

@@ -24,6 +24,7 @@ import {
   preferredChargedCents,
   resolvePrDisplayName,
   runDidNotFinish,
+  runTargetBranch,
   runWallClockMs,
   sortConversationGroups,
   sortProjectSummaries,
@@ -33,7 +34,11 @@ import {
 import {
   automationDisplayName,
   automationMetaFromRun,
+  groupMonitoringRunsByBranch,
+  MONITORING_RUN_KIND_LABELS,
+  NO_BRANCH_GROUP,
   partitionProjectRunsByAutomation,
+  summarizeLocalStatuses,
 } from '../lib/monitoring-format';
 import {
   applyAutomationAttribution,
@@ -578,5 +583,89 @@ describe('automation vs user-request partitioning', () => {
     );
     expect(stamped[0]!.automationId).toBe('auto-9');
     expect(stamped[0]!.source).toBe('automations');
+  });
+});
+
+describe('run target branch', () => {
+  it('prefers the enriched run branch, then PR branches, else null', () => {
+    expect(
+      runTargetBranch({ branch: 'cursor/feat-x', prs: [{ branch: 'other' }] }),
+    ).toBe('cursor/feat-x');
+    expect(runTargetBranch({ branch: '  ', prs: [{ branch: 'pr-branch' }] })).toBe(
+      'pr-branch',
+    );
+    expect(runTargetBranch({ prs: [{}, { branch: 'second' }] })).toBe('second');
+    expect(runTargetBranch({ prs: [] })).toBeNull();
+    expect(runTargetBranch({})).toBeNull();
+  });
+});
+
+describe('local status summarization', () => {
+  it('collapses per-turn counts into one run-status token', () => {
+    expect(summarizeLocalStatuses({ completed: 2, error: 1 })).toBe('ERROR');
+    expect(summarizeLocalStatuses({ completed: 1, aborted: 2 })).toBe(
+      'CANCELLED',
+    );
+    expect(summarizeLocalStatuses({ completed: 3 })).toBe('FINISHED');
+    expect(summarizeLocalStatuses({ unknown: 1 })).toBe('UNKNOWN');
+    expect(summarizeLocalStatuses({})).toBe('UNKNOWN');
+  });
+
+  it('labels every monitoring run kind', () => {
+    expect(MONITORING_RUN_KIND_LABELS).toEqual({
+      local: 'local',
+      cloud: 'cloud agent',
+      automation: 'automation',
+    });
+  });
+});
+
+describe('grouping runs by target branch', () => {
+  const run = (
+    id: string,
+    branch: string | null,
+    chargedCents: number | null,
+    createdAt: string,
+  ) => ({ id, branch, chargedCents, createdAt });
+
+  const runs = [
+    run('a', 'main', 100, '2026-07-29T10:00:00.000Z'),
+    run('b', 'feat/x', 500, '2026-07-30T10:00:00.000Z'),
+    run('c', 'main', null, '2026-07-31T10:00:00.000Z'),
+    run('d', null, 50, '2026-07-28T10:00:00.000Z'),
+    run('e', '  ', 10, '2026-07-27T10:00:00.000Z'),
+  ];
+
+  it('groups by branch, sorts groups alphabetically with no-branch last', () => {
+    const groups = groupMonitoringRunsByBranch(runs, 'created');
+    expect(groups.map((g) => g.key)).toEqual(['feat/x', 'main', NO_BRANCH_GROUP]);
+    expect(groups[2]!.branch).toBeNull();
+    expect(groups[2]!.runs.map((r) => r.id)).toEqual(['d', 'e']);
+  });
+
+  it('sorts runs within a group by cost or created and sums totals', () => {
+    const byCost = groupMonitoringRunsByBranch(runs, 'cost');
+    const main = byCost.find((g) => g.key === 'main')!;
+    // null cost sorts last, then newest created wins the tie-break.
+    expect(main.runs.map((r) => r.id)).toEqual(['a', 'c']);
+    expect(main.totalChargedCents).toBe(100);
+    expect(main.latestCreatedAt).toBe('2026-07-31T10:00:00.000Z');
+
+    const byCreated = groupMonitoringRunsByBranch(runs, 'created');
+    expect(
+      byCreated.find((g) => g.key === 'main')!.runs.map((r) => r.id),
+    ).toEqual(['c', 'a']);
+
+    const none = byCost.find((g) => g.key === NO_BRANCH_GROUP)!;
+    expect(none.totalChargedCents).toBe(60);
+  });
+
+  it('treats blank branches as no-branch', () => {
+    const groups = groupMonitoringRunsByBranch(
+      [run('x', '   ', 1, '2026-07-29T10:00:00.000Z')],
+      'cost',
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.key).toBe(NO_BRANCH_GROUP);
   });
 });

@@ -36,6 +36,8 @@ export type HookConversationBucket = {
   latestAt: string;
   statuses: Record<string, number>;
   chargedCentsTotal: number | null;
+  /** Branch of the newest event that reported one; null when unknown. */
+  gitBranch: string | null;
 };
 
 export type HookRepoBucket = {
@@ -209,6 +211,11 @@ export function buildHookSignalsTree(
         latestAt: conv.events[0]?.receivedAt ?? '',
         statuses,
         chargedCentsTotal: chargedAny ? chargedSum : null,
+        // Events arrive newest-first, so the first branch wins (like latestAt).
+        gitBranch:
+          conv.events
+            .map((e) => e.gitBranch?.trim())
+            .find((b): b is string => Boolean(b)) ?? null,
       };
     });
     conversations.sort((a, b) => b.latestAt.localeCompare(a.latestAt));

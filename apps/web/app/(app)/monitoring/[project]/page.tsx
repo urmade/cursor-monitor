@@ -2,7 +2,7 @@ import { EmptyState, PageHeader, Panel } from '@nexus/ui';
 import Link from 'next/link';
 import {
   ProjectConversationsClient,
-  type ProjectSectionsView,
+  type ProjectConversationRow,
 } from '../../../../src/components/ProjectConversationsClient';
 import {
   conversationDisplayStatus,
@@ -15,6 +15,7 @@ import {
   resolveCursorAuth,
   resolvePrDisplayName,
   runDidNotFinish,
+  runTargetBranch,
   type ProjectRunSections,
 } from '../../../../src/server/cursor';
 import { formatHookCostUsd } from '../../../../src/lib/monitoring-format';
@@ -117,52 +118,38 @@ export default async function ProjectMonitoringPage({
     );
   }
 
-  const sectionViews: ProjectSectionsView = {
-    automations: (sections?.automations ?? []).map((g) => ({
-      automationId: g.automationId,
-      automationName: g.automationName,
-      totalChargedCents: g.totalChargedCents,
-      latestCreatedAt: g.latestCreatedAt,
-      conversations: g.conversations.map((c) => {
-        const pr = c.prs[0] ?? null;
-        return {
-          id: c.id,
-          name: c.name?.trim() || '(unnamed conversation)',
-          status: conversationDisplayStatus(c),
-          chargedCents: preferredChargedCents(c),
-          createdAt: c.createdAt,
-          source: c.source,
-          automationId: g.automationId,
-          automationName: g.automationName,
-          prUrl: pr?.prUrl ?? null,
-          prLabel: pr?.label ?? null,
-          prName: resolvePrDisplayName({
-            prTitle: pr?.title,
-            conversations: [c],
-          }),
-          prNumber: formatPrNumberLabel(pr?.prUrl ?? pr?.label),
-        };
+  const toRow = (
+    c: ProjectRunSections['userRequests'][number],
+    automation?: { automationId: string; automationName: string },
+  ): ProjectConversationRow => {
+    const pr = c.prs[0] ?? null;
+    return {
+      id: c.id,
+      name: c.name?.trim() || '(unnamed conversation)',
+      status: conversationDisplayStatus(c),
+      chargedCents: preferredChargedCents(c),
+      createdAt: c.createdAt,
+      source: c.source,
+      branch: runTargetBranch(c),
+      automationId: automation?.automationId,
+      automationName: automation?.automationName,
+      prUrl: pr?.prUrl ?? null,
+      prLabel: pr?.label ?? null,
+      prName: resolvePrDisplayName({
+        prTitle: pr?.title,
+        conversations: [c],
       }),
-    })),
-    userRequests: (sections?.userRequests ?? []).map((c) => {
-      const pr = c.prs[0] ?? null;
-      return {
-        id: c.id,
-        name: c.name?.trim() || '(unnamed conversation)',
-        status: conversationDisplayStatus(c),
-        chargedCents: preferredChargedCents(c),
-        createdAt: c.createdAt,
-        source: c.source,
-        prUrl: pr?.prUrl ?? null,
-        prLabel: pr?.label ?? null,
-        prName: resolvePrDisplayName({
-          prTitle: pr?.title,
-          conversations: [c],
-        }),
-        prNumber: formatPrNumberLabel(pr?.prUrl ?? pr?.label),
-      };
-    }),
+      prNumber: formatPrNumberLabel(pr?.prUrl ?? pr?.label),
+    };
   };
+  const runRows: ProjectConversationRow[] = [
+    ...(sections?.automations ?? []).flatMap((g) =>
+      g.conversations.map((c) =>
+        toRow(c, { automationId: g.automationId, automationName: g.automationName }),
+      ),
+    ),
+    ...(sections?.userRequests ?? []).map((c) => toRow(c)),
+  ];
 
   const allRuns = [
     ...(sections?.automations.flatMap((g) => g.conversations) ?? []),
@@ -185,7 +172,7 @@ export default async function ProjectMonitoringPage({
   const href = projectHref(project);
   const localCount = localRequests?.conversations.length ?? 0;
   const automationCount = sections?.automations.length ?? 0;
-  const cloudAgentCount = sectionViews.userRequests.length;
+  const cloudAgentCount = sections?.userRequests.length ?? 0;
   const chargedLabel =
     anyCloudCost || anyLocalCost
       ? anyLocalCost && !anyCloudCost
@@ -248,7 +235,7 @@ export default async function ProjectMonitoringPage({
       <ProjectConversationsClient
         projectHref={href}
         initialSort={sort}
-        sections={sectionViews}
+        runs={runRows}
         localRequests={localRequests}
       />
 
