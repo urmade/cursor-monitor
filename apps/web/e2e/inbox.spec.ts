@@ -33,13 +33,19 @@ function seedBlockingQuestion(): void {
  *   DB_POSTGRES_URL=... pnpm db:exec-migrations && pnpm db:seed -- --demo
  *   pnpm dev
  */
+// /inbox is a Coming soon splash while the feature is parked.
+// Keep interaction journeys skipped so they can be revived later.
 test.describe('Phase 6 inbox journeys', () => {
-  test('inbox page renders attention shell', async ({ page }) => {
+  test('inbox tab shows coming soon splash', async ({ page }) => {
     const res = await page.goto('/inbox');
     expect(res?.status()).toBeLessThan(500);
+    await expect(page.getByTestId('coming-soon-splash')).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByRole('heading', { name: 'Coming soon' })).toBeVisible();
     await expect(
-      page.getByText(/Inbox|AI working|need you/i).first(),
-    ).toBeVisible({ timeout: 15_000 });
+      page.getByText(/Inbox is deprecated for now and will be revisited later/i),
+    ).toBeVisible();
   });
 
   test('health exposes attention reconciliation metadata', async ({ request }) => {
@@ -57,7 +63,7 @@ test.describe('Phase 6 inbox journeys', () => {
     await expect(page.getByRole('main').getByText('AI working', { exact: true })).toBeVisible();
   });
 
-  test('answer blocking question shows affirmative empty state', async ({ page }) => {
+  test.skip('answer blocking question shows affirmative empty state', async ({ page }) => {
     seedBlockingQuestion();
     await page.goto('/inbox');
     await page.waitForSelector('html[data-inbox-client="ready"]', { timeout: 30_000 });
@@ -72,7 +78,7 @@ test.describe('Phase 6 inbox journeys', () => {
     await expect(page.getByText(/Inbox · \d+ need you/i)).toHaveCount(0);
   });
 
-  test('keyboard 1 triggers the first inbox action button', async ({ page }) => {
+  test.skip('keyboard 1 triggers the first inbox action button', async ({ page }) => {
     seedBlockingQuestion();
     await page.goto('/inbox');
     await page.waitForSelector('html[data-inbox-client="ready"]', { timeout: 30_000 });
@@ -87,7 +93,7 @@ test.describe('Phase 6 inbox journeys', () => {
     await expect(page.getByText(label, { exact: true })).toHaveCount(0);
   });
 
-  test('answer blocking question from inbox resolves the row', async ({ page }) => {
+  test.skip('answer blocking question from inbox resolves the row', async ({ page }) => {
     seedBlockingQuestion();
     await page.goto('/inbox');
     await page.waitForSelector('html[data-inbox-client="ready"]', { timeout: 30_000 });
@@ -99,7 +105,7 @@ test.describe('Phase 6 inbox journeys', () => {
     await expect(row).toHaveCount(0, { timeout: 20_000 });
   });
 
-  test('B2: retry failed run from inbox removes the row', async ({ page }) => {
+  test.skip('B2: retry failed run from inbox removes the row', async ({ page }) => {
     seedB2FailedRun();
     await page.goto('/inbox');
     await page.waitForSelector('html[data-inbox-client="ready"]', { timeout: 30_000 });
@@ -109,7 +115,7 @@ test.describe('Phase 6 inbox journeys', () => {
     await expect(row).toHaveCount(0, { timeout: 30_000 });
   });
 
-  test('B3: raise item budget from inbox resolves budget block', async ({ page }) => {
+  test.skip('B3: raise item budget from inbox resolves budget block', async ({ page }) => {
     seedB3BudgetBlock();
     await page.goto('/inbox');
     await page.waitForSelector('html[data-inbox-client="ready"]', { timeout: 30_000 });

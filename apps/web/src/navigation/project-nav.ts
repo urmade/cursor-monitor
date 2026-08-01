@@ -43,7 +43,7 @@ export function projectBreadcrumbTrail(
   projectKey: string,
 ): Array<{ label: string; href?: string }> {
   const items: Array<{ label: string; href?: string }> = [
-    { label: 'Nexus', href: '/projects' },
+    { label: 'Nexus', href: '/monitoring' },
     { label: projectKey, href: projectSectionHref(projectKey, 'board') },
   ];
 
@@ -66,7 +66,7 @@ export function projectBreadcrumbTrail(
 }
 
 export function globalBreadcrumbTrail(pathname: string): Array<{ label: string; href?: string }> {
-  const items: Array<{ label: string; href?: string }> = [{ label: 'Nexus', href: '/projects' }];
+  const items: Array<{ label: string; href?: string }> = [{ label: 'Nexus', href: '/monitoring' }];
   if (pathname.startsWith('/inbox')) {
     items.push({ label: 'Inbox' });
   } else if (pathname.startsWith('/monitoring/')) {

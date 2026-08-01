@@ -36,21 +36,16 @@ test.describe('Phase 9 acceptance (deterministic)', () => {
     }
   });
 
-  test('projects list shows fixture projects (not Alpha fallback)', async ({ page }) => {
-    const fixture = loadFixture();
+  test('projects tab shows coming soon splash', async ({ page }) => {
     const res = await page.goto('/projects');
     expect(res?.status()).toBeLessThan(500);
-    await expect(page.getByText('PoC Acceptance').first()).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(page.getByText(fixture.acceptanceProjectKey).first()).toBeVisible({
+    await expect(page.getByTestId('coming-soon-splash')).toBeVisible({
       timeout: 15_000,
     });
-    if (fixture.coldProjectKey) {
-      await expect(page.getByText('Cold Start').first()).toBeVisible({
-        timeout: 15_000,
-      });
-    }
+    await expect(page.getByRole('heading', { name: 'Coming soon' })).toBeVisible();
+    await expect(
+      page.getByText(/Projects is deprecated for now and will be revisited later/i),
+    ).toBeVisible();
   });
 
   test('analytics page loads thin metrics for fixture project', async ({ page }) => {
