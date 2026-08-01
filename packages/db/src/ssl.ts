@@ -1,4 +1,4 @@
-/** Local Docker/dev Postgres has no TLS; Supabase requires it. */
+/** Loopback URLs skip TLS; Supabase (and any remote host) requires it. */
 export function sslOptionForUrl(url: string): 'require' | undefined {
   try {
     const host = new URL(url).hostname;

@@ -24,7 +24,7 @@ export function DialogContent({
       />
       <DialogPrimitive.Content
         className={cn(
-          'fixed left-1/2 top-[15%] z-50 w-full max-w-lg -translate-x-1/2 rounded-lg border border-border bg-overlay p-4 shadow-[var(--nx-shadow-overlay)]',
+          'fixed left-1/2 top-1/2 z-50 w-full max-w-lg max-h-[min(90vh,52rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto overscroll-contain rounded-lg border border-border bg-overlay p-4 shadow-[var(--nx-shadow-overlay)]',
           className,
         )}
         {...props}
@@ -32,7 +32,7 @@ export function DialogContent({
         {children}
         {showClose ? (
           <DialogPrimitive.Close
-            className="absolute right-3 top-3 rounded-sm p-1 text-fg-muted hover:bg-[var(--nx-hover)] hover:text-fg"
+            className="absolute right-3 top-3 z-10 rounded-sm p-1 text-fg-muted hover:bg-[var(--nx-hover)] hover:text-fg"
           >
             <X className="size-4" />
             <span className="sr-only">Close</span>

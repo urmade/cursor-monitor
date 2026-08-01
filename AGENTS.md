@@ -27,6 +27,17 @@ Prove changes with automated tests, command output, logs, and written verificati
 
 This also lives in `.cursor/rules/no-walkthrough-artifacts.mdc` (`alwaysApply: true`) so every Cursor agent respects it.
 
+### Supabase-only database — ever
+The **only** allowed database is the existing `integrations.db` Supabase integration in `app-manifest.yml`.
+
+- Do **not** add another DB integration (Postgres, Neon, a second Supabase alias, etc.).
+- Do **not** install or start apt/Docker/local Postgres in agent environments.
+- Do **not** point the app at any database other than that Supabase instance (preview/production via orchestrator).
+- `DB_POSTGRES_URL` / related `DB_*` env vars are the Supabase connection strings — that naming is fine. The `postgres` npm driver used to talk to Supabase stays.
+- Validate DB work on the PR preview deploy. If integration tests lack `DB_POSTGRES_URL`, skip them; never provision a substitute DB to run them.
+
+This also lives in `.cursor/rules/supabase-only-database.mdc` (`alwaysApply: true`) so every Cursor agent respects it.
+
 ## Cursor Cloud specific instructions
 
 ### What this repo is

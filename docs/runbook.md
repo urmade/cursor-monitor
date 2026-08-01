@@ -17,9 +17,10 @@
 ### Local demo
 
 ```bash
-export DB_POSTGRES_URL=postgres://nexus:nexus@localhost:5432/nexus
-export DB_POSTGRES_URL_NON_POOLING=$DB_POSTGRES_URL
-export DB_SSL=disable
+# DB_* must point at the existing Supabase integration (preview/production).
+# Do not install or start a local/apt/Docker Postgres.
+export DB_POSTGRES_URL=…          # from Supabase (integrations.db)
+export DB_POSTGRES_URL_NON_POOLING=…  # direct (non-pooler) URL when available
 export CURSOR_API_KEY=…          # or CURSOR_SERVICE_ACCOUNT_KEY
 export DEPLOYMENT_URL=http://localhost:3000
 export VERCEL_PROTECTION_BYPASS=… # when hitting Passport-protected preview from agents
@@ -139,22 +140,17 @@ Only `owner`/`maintainer` (`gate.override`). Reason required. Visible forever on
 5. Rework cost is spend on visits with `visit_index > 1` — it must be ≤ total `spend_micro_usd`. Reopening a stage creates a **new** stage instance; Phase 4 rollups never double-count the first visit.
 6. Escalation (`loop_escalated`) clears on the next **forward** move by design — it is attention, not a freeze.
 
-### Running DB-backed tests locally
+### Running DB-backed tests
 
-Cloud agent VMs do **not** have Docker. Use apt Postgres (installs in ~10s):
+The only allowed database is the existing Supabase integration (`integrations.db` in `app-manifest.yml`). Do **not** install apt Postgres, start Docker Postgres, or stand up any substitute database.
 
 ```bash
-sudo apt-get update -qq && sudo apt-get install -y -q postgresql
-sudo pg_ctlcluster 16 main start
-sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
-sudo -u postgres psql -c "CREATE DATABASE nexus_test;"
-export DB_POSTGRES_URL="postgres://postgres:postgres@127.0.0.1:5432/nexus_test"
-export DB_SSL=disable
+# When DB_POSTGRES_URL already points at Supabase (CI / preview / provisioned env):
 pnpm db:exec-migrations
 pnpm test
 ```
 
-Integration suites (`integration.services.test.ts`, `gates.integration.test.ts`, `cost.integration.test.ts`, `cost.rollups.property.test.ts`, `loops.integration.test.ts`, `attention.integration.test.ts`) require `DB_POSTGRES_URL`; without it they are skipped.
+Integration suites (`integration.services.test.ts`, `gates.integration.test.ts`, `cost.integration.test.ts`, `cost.rollups.property.test.ts`, `loops.integration.test.ts`, `attention.integration.test.ts`, cursor-credentials manage integration tests) require `DB_POSTGRES_URL`; without it they are skipped. Prefer validating DB behaviour on the PR preview deploy.
 
 ## Phase 6 — attention inbox
 
@@ -174,8 +170,9 @@ Integration suites (`integration.services.test.ts`, `gates.integration.test.ts`,
 ### Playwright (local)
 
 ```bash
-export DB_POSTGRES_URL=postgres://postgres:postgres@127.0.0.1:5432/nexus_test
-export DB_SSL=disable
+# DB_* must be the existing Supabase integration — never a local Postgres.
+export DB_POSTGRES_URL=…
+export DB_POSTGRES_URL_NON_POOLING=…
 pnpm db:exec-migrations && pnpm db:seed -- --demo
 pnpm --filter @nexus/web run build
 PORT=3001 DB_POSTGRES_URL=... pnpm --filter @nexus/web exec next start -p 3001   # separate terminal

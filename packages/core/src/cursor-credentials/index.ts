@@ -15,6 +15,7 @@ export {
   deleteCursorOrganisation,
   deleteAllCursorOrganisations,
   addCursorOrganisationApiKey,
+  updateCursorOrganisationApiKey,
   revokeCursorOrganisationApiKey,
   listActiveCursorApiKeys,
   normalizeCursorBaseUrl,

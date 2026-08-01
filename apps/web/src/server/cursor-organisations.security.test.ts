@@ -8,6 +8,7 @@ const {
   addCursorOrganisationApiKey,
   deleteCursorOrganisation,
   deleteAllCursorOrganisations,
+  updateCursorOrganisationApiKey,
   revokeCursorOrganisationApiKey,
   listCursorOrganisations,
   listDbOrganisationViews,
@@ -24,6 +25,7 @@ const {
   discoverOrganizationId: vi.fn(),
   upsertCursorOrganisation: vi.fn(),
   addCursorOrganisationApiKey: vi.fn(),
+  updateCursorOrganisationApiKey: vi.fn(),
   deleteCursorOrganisation: vi.fn(),
   deleteAllCursorOrganisations: vi.fn(),
   revokeCursorOrganisationApiKey: vi.fn(),
@@ -85,6 +87,8 @@ vi.mock('@nexus/cursor-client', async (importOriginal) => {
     }),
     createCursorOrgClient: () => ({
       pooledUsage: vi.fn(async () => ({ pool: { usedCents: 1 } })),
+      listMembers: vi.fn(async () => ({ members: [] })),
+      listGroups: vi.fn(async () => ({ groups: [] })),
     }),
     createCursorAdminClient: () => ({
       filteredOrgUsageEvents: vi.fn(async () => ({
@@ -103,6 +107,8 @@ vi.mock('@nexus/core', async (importOriginal) => {
       upsertCursorOrganisation(...args),
     addCursorOrganisationApiKey: (...args: unknown[]) =>
       addCursorOrganisationApiKey(...args),
+    updateCursorOrganisationApiKey: (...args: unknown[]) =>
+      updateCursorOrganisationApiKey(...args),
     deleteCursorOrganisation: (...args: unknown[]) =>
       deleteCursorOrganisation(...args),
     deleteAllCursorOrganisations: (...args: unknown[]) =>
@@ -123,6 +129,9 @@ const {
   actionDiscoverOrganizationId,
   actionUpsertCursorOrganisation,
   actionAddCursorOrganisationApiKey,
+  actionUpdateCursorOrganisationApiKey,
+  actionValidateOrganisationApiKey,
+  actionValidateUserTeamApiKey,
   actionRemoveCursorOrganisation,
   actionRemoveCursorOrganisationApiKey,
   actionRemoveAllCursorOrganisations,
@@ -451,6 +460,98 @@ describe('organisation server-boundary security', () => {
     expect(views[0]?.canManage).toBe(false);
     expect(views[0]?.canRemove).toBe(false);
     expect(views[0]?.keys.every((k) => k.canRemove === false)).toBe(true);
+    expect(views[0]?.keys.every((k) => k.canEdit === false)).toBe(true);
+  });
+
+  it('validates User / Team API keys via GET /v1/me without persisting', async () => {
+    const fd = new FormData();
+    fd.set('apiKey', 'cursor_user_key_long_enough_xx');
+    fd.set('baseUrl', 'https://api.cursor.com');
+
+    const result = await actionValidateUserTeamApiKey(fd);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.kind).toBe('user_team');
+    expect(result.note).toMatch(/Valid User \/ Team API key/);
+    expect(addCursorOrganisationApiKey).not.toHaveBeenCalled();
+    expect(cookiesSet).not.toHaveBeenCalled();
+    expectNoKvApis();
+  });
+
+  it('validates Organisation API keys via members probe without persisting', async () => {
+    const fd = new FormData();
+    fd.set('orgApiKey', 'crsr_org_key_long_enough_xxx');
+    fd.set('baseUrl', 'https://api.cursor.com');
+    fd.set('organizationId', 'org_Acme');
+
+    const result = await actionValidateOrganisationApiKey(fd);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.kind).toBe('organisation');
+    expect(result.note).toMatch(/Valid Organisation API key/);
+    expect(upsertCursorOrganisation).not.toHaveBeenCalled();
+    expect(cookiesSet).not.toHaveBeenCalled();
+    expectNoKvApis();
+  });
+
+  it('updates an attached API key label and optional secret', async () => {
+    listDbOrganisationViews.mockResolvedValue([
+      {
+        id: 'org-1',
+        label: 'Acme',
+        organizationId: 'org_Acme',
+        baseUrl: 'https://api.cursor.com',
+        hasOrgApiKey: false,
+        orgApiKeyHint: null,
+        canManage: true,
+        canRemove: true,
+        keys: [
+          {
+            id: 'key-1',
+            label: 'Old name',
+            keyKind: 'user',
+            fingerprint: 'fp-old',
+            hint: 'cursor…xxxx',
+            identityLabel: 'old',
+            lastValidatedAt: null,
+            createdAt: new Date('2026-01-01T00:00:00Z'),
+            canRemove: true,
+          },
+        ],
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    updateCursorOrganisationApiKey.mockResolvedValue({
+      ok: true,
+      value: {
+        id: 'key-1',
+        label: 'Alice',
+        keyKind: 'user',
+        fingerprint: 'fp-new',
+        identityLabel: 'test-identity',
+      },
+    });
+
+    const fd = new FormData();
+    fd.set('apiKeyId', 'key-1');
+    fd.set('label', 'Alice');
+    fd.set('keyKind', 'user');
+    fd.set('apiKey', 'cursor_replacement_key_xxxxx');
+
+    const result = await actionUpdateCursorOrganisationApiKey(fd);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.label).toBe('Alice');
+    expect(updateCursorOrganisationApiKey).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        apiKeyId: 'key-1',
+        label: 'Alice',
+        apiKey: 'cursor_replacement_key_xxxxx',
+      }),
+    );
+    expect(invalidateMonitoringCache).toHaveBeenCalled();
   });
 
   it('deprecated connect action returns a safe error and never writes cookies', async () => {

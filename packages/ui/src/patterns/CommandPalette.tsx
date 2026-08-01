@@ -36,7 +36,10 @@ export function CommandPalette({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="top-[12%] max-w-xl p-0" showClose={false}>
+      <DialogContent
+        className="top-[12%] max-h-none max-w-xl -translate-y-0 overflow-hidden p-0"
+        showClose={false}
+      >
         <DialogTitle className="sr-only">Command palette</DialogTitle>
         <Command className="rounded-lg">
           <Command.Input

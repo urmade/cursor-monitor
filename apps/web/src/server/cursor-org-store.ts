@@ -76,6 +76,8 @@ export type CursorOrganisationView = {
     fingerprint: string;
     hint: string;
     identityLabel: string | null;
+    lastValidatedAt: string | null;
+    canEdit: boolean;
     canRemove: boolean;
   }>;
   source: 'db' | 'cookie';

@@ -6,18 +6,20 @@ Internalsphere-managed `nexus` app. Phase 0 de-risked the platform loop; product
 
 - Node 22+ (see `.nvmrc`)
 - pnpm 10 (`packageManager` in root `package.json`)
-- Docker (optional, for local Postgres/Redis)
+- Docker (optional, for local Redis only)
 - `sops` ≥ 3.10 for secrets CLI encryption
 
 ## Local setup
 
 ```bash
 pnpm install
-docker compose up -d          # postgres:16 + redis:7
+docker compose up -d          # redis:7 (optional)
 cp .env.example .env.local
 # edit .env.local with local values (never commit it)
+# Database: use the existing Supabase integration only — set DB_POSTGRES_URL
+# from the preview/production Supabase instance. Do not stand up local Postgres.
 
-pnpm db:exec-migrations       # applies packages/db/migrations/*.sql
+pnpm db:exec-migrations       # applies packages/db/migrations/*.sql against Supabase
 pnpm dev                      # Next.js at http://localhost:3000
 ```
 
@@ -33,7 +35,7 @@ python3 scripts/app-manifest.py
 
 Everyone on the `anysphere-internal` Vercel team has **Viewer** access. Viewer cannot pull env vars or run a local Vercel runtime. Deploys and env sync happen only through the managed GitHub Actions workflow on PR previews and `main`.
 
-Locally: run Next against Docker Postgres/Redis with a hand-written `.env.local`. Anything that needs Passport, the protection bypass, or real Cursor credentials is validated on the PR preview URL.
+Locally: Redis may run via Docker; the **only** database is the existing Supabase integration (`integrations.db` in `app-manifest.yml`). Prefer validating DB-backed flows on the PR preview URL. Anything that needs Passport, the protection bypass, or real Cursor credentials is validated there too.
 
 ## Secrets
 

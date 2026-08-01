@@ -19,13 +19,14 @@ import {
   listCursorOrganisations,
   listCursorOrganisationViews,
   revokeCursorOrganisationApiKey,
+  updateCursorOrganisationApiKey,
   upsertCursorOrganisation,
 } from '../index';
 
 const hasDb = Boolean(process.env.DB_POSTGRES_URL);
 
 describe.runIf(hasDb)('cursor organisation API keys', () => {
-  const db = getDb();
+  const db = hasDb ? getDb() : (null as unknown as ReturnType<typeof getDb>);
 
   afterAll(async () => {
     await closeDb();
@@ -525,5 +526,60 @@ describe.runIf(hasDb)('cursor organisation API keys', () => {
       .where(eq(cursorOrganisations.id, orgB.value.id));
 
     await expect(listCursorOrganisations(tenant.ctx)).rejects.toThrow();
+  });
+
+  it('updates label/kind and can replace an attached team key secret', async () => {
+    process.env.CURSOR_CREDENTIALS_ENCRYPTION_KEY = 'integration-test-cursor-key';
+
+    const tenant = await createIsolatedOrg(`ck-upd-${Date.now().toString(36)}`);
+    const org = await upsertCursorOrganisation(tenant.ctx, {
+      label: 'Editable',
+      organizationId: 'org_Edit_Key',
+      baseUrl: 'https://api.cursor.com',
+    });
+    expect(org.ok).toBe(true);
+    if (!org.ok) throw new Error(org.error.message);
+
+    const attached = await addCursorOrganisationApiKey(tenant.ctx, {
+      cursorOrganisationId: org.value.id,
+      label: 'Before',
+      keyKind: 'user',
+      apiKey: 'cursor_before_key_aaaaaaaaaaaa',
+      identityLabel: 'before',
+    });
+    expect(attached.ok).toBe(true);
+    if (!attached.ok) throw new Error(attached.error.message);
+
+    const renamed = await updateCursorOrganisationApiKey(tenant.ctx, {
+      apiKeyId: attached.value.id,
+      label: 'After',
+      keyKind: 'service_account',
+    });
+    expect(renamed.ok).toBe(true);
+    if (!renamed.ok) throw new Error(renamed.error.message);
+    expect(renamed.value.label).toBe('After');
+    expect(renamed.value.keyKind).toBe('service_account');
+    expect(renamed.value.apiKey).toBe('cursor_before_key_aaaaaaaaaaaa');
+
+    const replaced = await updateCursorOrganisationApiKey(tenant.ctx, {
+      apiKeyId: attached.value.id,
+      label: 'After',
+      apiKey: 'cursor_after_key_bbbbbbbbbbbb',
+      identityLabel: 'after',
+    });
+    expect(replaced.ok).toBe(true);
+    if (!replaced.ok) throw new Error(replaced.error.message);
+    expect(replaced.value.apiKey).toBe('cursor_after_key_bbbbbbbbbbbb');
+    expect(replaced.value.identityLabel).toBe('after');
+    expect(replaced.value.lastValidatedAt).not.toBeNull();
+
+    const peer = await addSecondHuman(tenant.orgId, `ck-upd-peer`);
+    const peerDenied = await updateCursorOrganisationApiKey(peer.ctx, {
+      apiKeyId: attached.value.id,
+      label: 'Hijack',
+    });
+    expect(peerDenied.ok).toBe(false);
+    if (peerDenied.ok) throw new Error('expected forbidden');
+    expect(peerDenied.error.code).toBe('forbidden');
   });
 });

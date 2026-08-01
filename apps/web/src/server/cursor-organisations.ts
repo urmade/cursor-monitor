@@ -16,6 +16,7 @@ import {
   deleteCursorOrganisation,
   listCursorOrganisationViews as listDbOrganisationViews,
   revokeCursorOrganisationApiKey,
+  updateCursorOrganisationApiKey,
   upsertCursorOrganisation,
   type CursorApiKeyKind,
   type CursorOrganisationView as DbOrganisationView,
@@ -72,9 +73,35 @@ export type AddApiKeyResult =
     }
   | { ok: false; error: string };
 
+export type UpdateApiKeyResult =
+  | {
+      ok: true;
+      id: string;
+      identity: string | null;
+      keyKind: CursorApiKeyKind;
+      label: string;
+    }
+  | { ok: false; error: string };
+
 export type OrganisationMutationResult =
   | { ok: true }
   | { ok: false; error: string };
+
+export type ValidateApiKeyResult =
+  | {
+      ok: true;
+      kind: 'user_team' | 'organisation';
+      identity: string | null;
+      note: string;
+    }
+  | { ok: false; error: string };
+
+function parseKeyKind(raw: string): CursorApiKeyKind {
+  // UI calls these User / Team; storage keeps service_account for team keys.
+  return raw === 'service_account' || raw === 'team'
+    ? 'service_account'
+    : 'user';
+}
 
 async function invalidateFingerprints(fingerprints: string[]): Promise<void> {
   for (const fingerprint of new Set(fingerprints.filter(Boolean))) {
@@ -225,6 +252,10 @@ function viewFromDb(org: DbOrganisationView): CursorOrganisationView {
       fingerprint: key.fingerprint,
       hint: key.hint,
       identityLabel: key.identityLabel,
+      lastValidatedAt: key.lastValidatedAt
+        ? key.lastValidatedAt.toISOString()
+        : null,
+      canEdit: key.canRemove,
       canRemove: key.canRemove,
     })),
     source: 'db',
@@ -253,6 +284,8 @@ function viewFromCookie(org: StoredCursorOrganisation): CursorOrganisationView {
       fingerprint: key.fingerprint,
       hint: key.hint,
       identityLabel: key.identityLabel,
+      lastValidatedAt: null,
+      canEdit: false,
       canRemove: false,
     })),
     source: org.source,
@@ -293,9 +326,7 @@ export async function actionUpsertCursorOrganisation(
   // Optional: seed the first team key while creating the organisation.
   const apiKeyRaw = String(formData.get('apiKey') ?? '').trim();
   const keyLabel = String(formData.get('keyLabel') ?? '').trim();
-  const keyKindRaw = String(formData.get('keyKind') ?? 'user').trim();
-  const keyKind: CursorApiKeyKind =
-    keyKindRaw === 'service_account' ? 'service_account' : 'user';
+  const keyKind = parseKeyKind(String(formData.get('keyKind') ?? 'user'));
 
   if (!label) {
     return { ok: false, error: 'Enter a name for this organisation connection.' };
@@ -361,10 +392,10 @@ export async function actionUpsertCursorOrganisation(
       });
       await orgClient.pooledUsage(organizationId);
       discoveryNote =
-        'Organisation id verified. Attach user / service-account keys below so Monitoring can list Cloud Agents.';
+        'Organisation id verified. Attach User / Team API keys below so Monitoring can list agents.';
     } catch {
       discoveryNote =
-        'Saved organisation id. Attach user / service-account API keys to list Cloud Agents; add an Organisation API key (usage:*) for cost.';
+        'Saved organisation id. Attach User / Team API keys to list agents; add an Organisation API key (usage:*) for cost.';
     }
   }
 
@@ -406,9 +437,11 @@ export async function actionUpsertCursorOrganisation(
       cursorOrganisationId: saved.value.id,
       label:
         keyLabel ||
-        (me ? formatApiKeyIdentity(me) : keyKind === 'service_account'
-          ? 'Service account'
-          : 'Team API key'),
+        (me
+          ? formatApiKeyIdentity(me)
+          : keyKind === 'service_account'
+            ? 'Team API key'
+            : 'User API key'),
       keyKind,
       apiKey: apiKeyRaw,
       identityLabel: me ? formatApiKeyIdentity(me) : null,
@@ -461,9 +494,7 @@ export async function actionAddCursorOrganisationApiKey(
   const organisationId = String(formData.get('organisationId') ?? '').trim();
   const apiKey = String(formData.get('apiKey') ?? '').trim();
   const label = String(formData.get('label') ?? '').trim();
-  const keyKindRaw = String(formData.get('keyKind') ?? 'user').trim();
-  const keyKind: CursorApiKeyKind =
-    keyKindRaw === 'service_account' ? 'service_account' : 'user';
+  const keyKind = parseKeyKind(String(formData.get('keyKind') ?? 'user'));
 
   if (!organisationId) {
     return { ok: false, error: 'Missing organisation id.' };
@@ -471,7 +502,7 @@ export async function actionAddCursorOrganisationApiKey(
   if (apiKey.length < 20) {
     return {
       ok: false,
-      error: 'Paste a Cursor API key (Cloud Agents / user / service account).',
+      error: 'Paste a Cursor User or Team API key (at least 20 characters).',
     };
   }
 
@@ -501,7 +532,13 @@ export async function actionAddCursorOrganisationApiKey(
 
   const added = await addCursorOrganisationApiKey(session.ctx, {
     cursorOrganisationId: organisationId,
-    label: label || (me ? formatApiKeyIdentity(me) : 'Team API key'),
+    label:
+      label ||
+      (me
+        ? formatApiKeyIdentity(me)
+        : keyKind === 'service_account'
+          ? 'Team API key'
+          : 'User API key'),
     keyKind,
     apiKey,
     identityLabel: me ? formatApiKeyIdentity(me) : null,
@@ -527,6 +564,245 @@ export async function actionAddCursorOrganisationApiKey(
     id: added.value.id,
     identity: me ? formatApiKeyIdentity(me) : null,
     keyKind,
+  };
+}
+
+/**
+ * Immediate, non-mutating check for a User / Team API key via GET /v1/me.
+ */
+export async function actionValidateUserTeamApiKey(
+  formData: FormData,
+): Promise<ValidateApiKeyResult> {
+  const session = await requireSession();
+  const rateLimit = await checkRateLimit(
+    `cursor-key-validate-user:${session.userId}`,
+    30,
+  );
+  if (!rateLimit.allowed) {
+    return {
+      ok: false,
+      error: `Too many validation attempts. Try again in ${rateLimit.retryAfterSec} seconds.`,
+    };
+  }
+
+  const apiKey = String(formData.get('apiKey') ?? '').trim();
+  const baseUrlResult = normalizeBaseUrl(String(formData.get('baseUrl') ?? ''));
+  if (!baseUrlResult.ok) {
+    return { ok: false, error: baseUrlResult.error.message };
+  }
+  if (apiKey.length < 20) {
+    return {
+      ok: false,
+      error: 'Paste a Cursor User or Team API key (at least 20 characters).',
+    };
+  }
+
+  try {
+    const client = createCursorClient({
+      apiKey,
+      baseUrl: baseUrlResult.value,
+      maxRetries: 0,
+    });
+    const me = await client.getMe();
+    const identity = formatApiKeyIdentity(me);
+    return {
+      ok: true,
+      kind: 'user_team',
+      identity,
+      note: `Valid User / Team API key · ${identity}`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error
+          ? `Key rejected by Cursor (/v1/me): ${err.message}`
+          : 'Key rejected by Cursor (/v1/me).',
+    };
+  }
+}
+
+/**
+ * Immediate, non-mutating check for an Organisation API key.
+ * Uses members listing (no org id required) and optionally pooled-usage when
+ * an organisation id is provided.
+ */
+export async function actionValidateOrganisationApiKey(
+  formData: FormData,
+): Promise<ValidateApiKeyResult> {
+  const session = await requireSession();
+  const rateLimit = await checkRateLimit(
+    `cursor-key-validate-org:${session.userId}`,
+    30,
+  );
+  if (!rateLimit.allowed) {
+    return {
+      ok: false,
+      error: `Too many validation attempts. Try again in ${rateLimit.retryAfterSec} seconds.`,
+    };
+  }
+
+  const orgApiKey = String(formData.get('orgApiKey') ?? '').trim();
+  const organizationId = normalizeOrganizationId(
+    String(formData.get('organizationId') ?? ''),
+  );
+  const baseUrlResult = normalizeBaseUrl(String(formData.get('baseUrl') ?? ''));
+  if (!baseUrlResult.ok) {
+    return { ok: false, error: baseUrlResult.error.message };
+  }
+  if (orgApiKey.length < 20) {
+    return {
+      ok: false,
+      error: 'Paste an Organisation API key (at least 20 characters).',
+    };
+  }
+
+  const orgClient = createCursorOrgClient({
+    apiKey: orgApiKey,
+    baseUrl: baseUrlResult.value,
+    maxRetries: 0,
+  });
+
+  const notes: string[] = [];
+  let authenticated = false;
+
+  try {
+    await orgClient.listMembers({ page: 1, pageSize: 1 });
+    authenticated = true;
+    notes.push('members endpoint accepted the key');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // usage-scoped keys may reject members.read but still be valid for cost.
+    if (/organization\.(members|groups)\.read|usage:\*/i.test(message)) {
+      notes.push('key authenticates (usage-scoped; members.read unavailable)');
+      authenticated = true;
+    } else if (/401|invalid|unauthorized|forbidden/i.test(message)) {
+      return {
+        ok: false,
+        error: `Organisation API key rejected: ${message}`,
+      };
+    } else {
+      notes.push(`members probe: ${message}`);
+    }
+  }
+
+  if (organizationId) {
+    try {
+      const pooled = await orgClient.pooledUsage(organizationId);
+      authenticated = true;
+      const used =
+        typeof pooled.pool?.usedCents === 'number'
+          ? ` · pooled usage ${(pooled.pool.usedCents / 100).toFixed(2)} used`
+          : '';
+      notes.push(`pooled-usage ok for ${organizationId}${used}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!authenticated) {
+        return {
+          ok: false,
+          error: `Organisation API key rejected (pooled-usage): ${message}`,
+        };
+      }
+      notes.push(`pooled-usage failed: ${message}`);
+    }
+  }
+
+  if (!authenticated) {
+    return {
+      ok: false,
+      error:
+        notes.join(' · ') ||
+        'Organisation API key could not be verified. Check the key and try again.',
+    };
+  }
+
+  return {
+    ok: true,
+    kind: 'organisation',
+    identity: null,
+    note: `Valid Organisation API key · ${notes.join(' · ')}`,
+  };
+}
+
+export async function actionUpdateCursorOrganisationApiKey(
+  formData: FormData,
+): Promise<UpdateApiKeyResult> {
+  const session = await requireSession();
+  const apiKeyId = String(formData.get('apiKeyId') ?? '').trim();
+  const label = String(formData.get('label') ?? '').trim();
+  const keyKind = parseKeyKind(String(formData.get('keyKind') ?? 'user'));
+  const apiKeyRaw = String(formData.get('apiKey') ?? '').trim();
+
+  if (!apiKeyId) {
+    return { ok: false, error: 'Missing API key id.' };
+  }
+  if (!label) {
+    return { ok: false, error: 'Enter a name for this API key.' };
+  }
+
+  const views = await listDbOrganisationViews(session.ctx);
+  const previousFingerprints = activeFingerprints(views);
+  const existingKey = views
+    .flatMap((org) => org.keys.map((key) => ({ org, key })))
+    .find((row) => row.key.id === apiKeyId);
+  if (!existingKey) {
+    return { ok: false, error: 'API key not found.' };
+  }
+
+  let me: ApiKeyInfo | null = null;
+  if (apiKeyRaw.length >= 20) {
+    try {
+      const client = createCursorClient({
+        apiKey: apiKeyRaw,
+        baseUrl: existingKey.org.baseUrl,
+        maxRetries: 1,
+      });
+      me = await client.getMe();
+    } catch (err) {
+      return {
+        ok: false,
+        error:
+          err instanceof Error
+            ? `API key rejected by Cursor (/v1/me): ${err.message}`
+            : 'API key rejected by Cursor (/v1/me).',
+      };
+    }
+  } else if (apiKeyRaw.length > 0) {
+    return {
+      ok: false,
+      error: 'Paste a Cursor User or Team API key (at least 20 characters).',
+    };
+  }
+
+  const updated = await updateCursorOrganisationApiKey(session.ctx, {
+    apiKeyId,
+    label,
+    keyKind,
+    apiKey: apiKeyRaw.length >= 20 ? apiKeyRaw : undefined,
+    identityLabel: me ? formatApiKeyIdentity(me) : undefined,
+    markValidated: Boolean(me),
+  });
+  if (!updated.ok) {
+    return { ok: false, error: updated.error.message };
+  }
+
+  const nextViews = await listDbOrganisationViews(session.ctx);
+  await invalidateCredentialSets(
+    [previousFingerprints, activeFingerprints(nextViews)],
+    [
+      existingKey.key.fingerprint,
+      updated.value.fingerprint,
+    ].filter(Boolean),
+  );
+  revalidatePath('/settings/organisations');
+  revalidatePath('/monitoring');
+
+  return {
+    ok: true,
+    id: updated.value.id,
+    identity: updated.value.identityLabel,
+    keyKind: updated.value.keyKind,
+    label: updated.value.label,
   };
 }
 
@@ -649,7 +925,7 @@ export async function actionDiscoverOrganizationId(
     return {
       ok: false,
       error:
-        'Paste an Organization API key (or Cloud Agents key) to look up the org id.',
+        'Paste an Organisation API key (or User / Team API key) to look up the org id.',
     };
   }
   const result = await discoverOrganizationId({ apiKey, baseUrl });

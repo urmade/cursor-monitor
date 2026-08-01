@@ -18,11 +18,22 @@ import {
   actionRemoveAllCursorOrganisations,
   actionRemoveCursorOrganisation,
   actionRemoveCursorOrganisationApiKey,
+  actionUpdateCursorOrganisationApiKey,
   actionUpsertCursorOrganisation,
+  actionValidateOrganisationApiKey,
+  actionValidateUserTeamApiKey,
 } from '../server/cursor-organisations';
 import type { CursorOrganisationView } from '../server/cursor-org-store';
 
 const DEFAULT_BASE_URL = 'https://api.cursor.com';
+
+type KeyKind = 'user' | 'service_account';
+
+type KeyCheckState =
+  | { status: 'idle' }
+  | { status: 'checking' }
+  | { status: 'ok'; note: string }
+  | { status: 'error'; note: string };
 
 type EditorState = {
   open: boolean;
@@ -33,19 +44,26 @@ type EditorState = {
   organizationId: string;
   apiKey: string;
   keyLabel: string;
-  keyKind: 'user' | 'service_account';
+  keyKind: KeyKind;
   orgApiKey: string;
   hasExistingOrgApiKey: boolean;
   clearOrgApiKey: boolean;
+  orgKeyCheck: KeyCheckState;
+  teamKeyCheck: KeyCheckState;
 };
 
 type KeyEditorState = {
   open: boolean;
+  mode: 'create' | 'edit';
   organisationId: string;
   organisationLabel: string;
+  organisationBaseUrl: string;
+  apiKeyId: string;
   label: string;
-  keyKind: 'user' | 'service_account';
+  keyKind: KeyKind;
   apiKey: string;
+  hasExistingSecret: boolean;
+  keyCheck: KeyCheckState;
 };
 
 const emptyEditor = (): EditorState => ({
@@ -61,16 +79,46 @@ const emptyEditor = (): EditorState => ({
   orgApiKey: '',
   hasExistingOrgApiKey: false,
   clearOrgApiKey: false,
+  orgKeyCheck: { status: 'idle' },
+  teamKeyCheck: { status: 'idle' },
 });
 
 const emptyKeyEditor = (): KeyEditorState => ({
   open: false,
+  mode: 'create',
   organisationId: '',
   organisationLabel: '',
+  organisationBaseUrl: DEFAULT_BASE_URL,
+  apiKeyId: '',
   label: '',
   keyKind: 'user',
   apiKey: '',
+  hasExistingSecret: false,
+  keyCheck: { status: 'idle' },
 });
+
+function keyKindLabel(kind: KeyKind): string {
+  return kind === 'service_account' ? 'Team' : 'User';
+}
+
+function KeyCheckFeedback({ state }: { state: KeyCheckState }) {
+  if (state.status === 'idle') return null;
+  if (state.status === 'checking') {
+    return <p className="text-xs text-fg-muted">Checking key with Cursor…</p>;
+  }
+  if (state.status === 'ok') {
+    return (
+      <p className="text-xs text-success-fg" role="status">
+        {state.note}
+      </p>
+    );
+  }
+  return (
+    <p className="text-xs text-danger-fg" role="alert">
+      {state.note}
+    </p>
+  );
+}
 
 export function CursorOrganisationsSettings({
   organisations,
@@ -96,18 +144,14 @@ export function CursorOrganisationsSettings({
     setError(null);
     setMessage(null);
     setEditor({
+      ...emptyEditor(),
       open: true,
       mode: 'edit',
       id: org.id,
       label: org.label,
       baseUrl: org.baseUrl || DEFAULT_BASE_URL,
       organizationId: org.organizationId ?? '',
-      apiKey: '',
-      keyLabel: '',
-      keyKind: 'user',
-      orgApiKey: '',
       hasExistingOrgApiKey: org.hasOrgApiKey,
-      clearOrgApiKey: false,
     });
   }
 
@@ -115,12 +159,32 @@ export function CursorOrganisationsSettings({
     setError(null);
     setMessage(null);
     setKeyEditor({
+      ...emptyKeyEditor(),
       open: true,
+      mode: 'create',
       organisationId: org.id,
       organisationLabel: org.label,
-      label: '',
-      keyKind: 'user',
-      apiKey: '',
+      organisationBaseUrl: org.baseUrl || DEFAULT_BASE_URL,
+    });
+  }
+
+  function openEditKey(
+    org: CursorOrganisationView,
+    key: CursorOrganisationView['keys'][number],
+  ) {
+    setError(null);
+    setMessage(null);
+    setKeyEditor({
+      ...emptyKeyEditor(),
+      open: true,
+      mode: 'edit',
+      organisationId: org.id,
+      organisationLabel: org.label,
+      organisationBaseUrl: org.baseUrl || DEFAULT_BASE_URL,
+      apiKeyId: key.id,
+      label: key.label,
+      keyKind: key.keyKind,
+      hasExistingSecret: true,
     });
   }
 
@@ -132,15 +196,56 @@ export function CursorOrganisationsSettings({
     setKeyEditor(emptyKeyEditor());
   }
 
+  function checkOrgApiKey(orgApiKey = editor.orgApiKey) {
+    const fd = new FormData();
+    fd.set('baseUrl', editor.baseUrl);
+    fd.set('orgApiKey', orgApiKey);
+    if (editor.organizationId) {
+      fd.set('organizationId', editor.organizationId);
+    }
+    setEditor((prev) => ({
+      ...prev,
+      orgKeyCheck: { status: 'checking' },
+    }));
+    startTransition(async () => {
+      const result = await actionValidateOrganisationApiKey(fd);
+      setEditor((prev) => ({
+        ...prev,
+        orgKeyCheck: result.ok
+          ? { status: 'ok', note: result.note }
+          : { status: 'error', note: result.error },
+      }));
+    });
+  }
+
+  function checkUserTeamApiKey(opts: {
+    apiKey: string;
+    baseUrl: string;
+    onResult: (state: KeyCheckState) => void;
+  }) {
+    const fd = new FormData();
+    fd.set('baseUrl', opts.baseUrl);
+    fd.set('apiKey', opts.apiKey);
+    opts.onResult({ status: 'checking' });
+    startTransition(async () => {
+      const result = await actionValidateUserTeamApiKey(fd);
+      opts.onResult(
+        result.ok
+          ? { status: 'ok', note: result.note }
+          : { status: 'error', note: result.error },
+      );
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="max-w-2xl">
           <p className="text-sm text-fg-muted">
-            Connect Cursor organisations in the Nexus database. Each organisation
-            can hold many user and service-account API keys — Cloud Agents are
-            only listable in that key&apos;s identity context. Keys are encrypted
-            at rest (AES-256-GCM) and never sent back to the browser.
+            Connect Cursor organisations and attach multiple named User and Team
+            API keys. Organisation Admin keys unlock cost; User / Team keys list
+            agents for each identity. Keys are encrypted at rest and never sent
+            back to the browser.
           </p>
         </div>
         <Button type="button" onClick={openCreate}>
@@ -151,8 +256,8 @@ export function CursorOrganisationsSettings({
       {envFallbackLabel && organisations.length === 0 ? (
         <p className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-warning-fg">
           Currently falling back to the env / service-account key (
-          {envFallbackLabel}). Add a Cursor organisation and attach team keys
-          below to monitor Cloud Agents across identities.
+          {envFallbackLabel}). Add a Cursor organisation and attach User / Team
+          API keys below to monitor agents across identities.
         </p>
       ) : null}
 
@@ -160,8 +265,8 @@ export function CursorOrganisationsSettings({
         <div className="rounded-md border border-dashed border-border px-4 py-8 text-center">
           <p className="text-sm font-medium text-fg">No organisations connected</p>
           <p className="mt-1 text-xs text-fg-muted">
-            Add a Cursor organisation, then attach every user and service-account
-            token that should contribute Cloud Agents to Monitoring.
+            Add a Cursor organisation, then attach every User and Team API key
+            that should contribute agents to Monitoring.
           </p>
           <Button type="button" className="mt-4" onClick={openCreate}>
             Set up organisation
@@ -199,15 +304,15 @@ export function CursorOrganisationsSettings({
                   <p className="text-xs text-fg-muted">
                     {org.hasOrgApiKey ? (
                       <span className="text-success-fg">
-                        Org Admin key saved
+                        Organisation API key saved
                         {org.orgApiKeyHint ? ` (${org.orgApiKeyHint})` : ''}
                       </span>
                     ) : (
                       <span className="text-warning-fg">
-                        No Org Admin key — usage verification unavailable
+                        No Organisation API key — usage verification unavailable
                       </span>
                     )}
-                    {` · ${org.keys.length} team key${org.keys.length === 1 ? '' : 's'}`}
+                    {` · ${org.keys.length} User/Team key${org.keys.length === 1 ? '' : 's'}`}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -267,8 +372,8 @@ export function CursorOrganisationsSettings({
 
               {org.keys.length === 0 ? (
                 <p className="mt-3 text-xs text-warning-fg">
-                  No team API keys yet — Cloud Agents cannot be listed until a
-                  user or service-account key is attached.
+                  No User or Team API keys yet — agents cannot be listed until at
+                  least one key is attached.
                 </p>
               ) : (
                 <ul className="mt-3 divide-y divide-border rounded-md border border-border">
@@ -280,39 +385,50 @@ export function CursorOrganisationsSettings({
                       <div className="min-w-0">
                         <p className="text-sm text-fg">{key.label}</p>
                         <p className="text-xs text-fg-muted">
-                          {key.keyKind === 'service_account'
-                            ? 'Service account'
-                            : 'User'}{' '}
-                          · {key.identityLabel ?? 'identity unknown'} ·{' '}
+                          {keyKindLabel(key.keyKind)} ·{' '}
+                          {key.identityLabel ?? 'identity unknown'} ·{' '}
                           <span className="font-mono">{key.hint}</span>
                         </p>
                       </div>
-                      {key.canRemove ? (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          disabled={pending}
-                          onClick={() => {
-                            setError(null);
-                            setMessage(null);
-                            startTransition(async () => {
-                              const result =
-                                await actionRemoveCursorOrganisationApiKey(
-                                  key.id,
-                                );
-                              if (!result.ok) {
-                                setError(result.error);
-                                return;
-                              }
-                              setMessage(`Removed key “${key.label}”.`);
-                              router.refresh();
-                            });
-                          }}
-                        >
-                          Remove key
-                        </Button>
-                      ) : null}
+                      <div className="flex flex-wrap gap-2">
+                        {key.canEdit ? (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            disabled={pending}
+                            onClick={() => openEditKey(org, key)}
+                          >
+                            Edit
+                          </Button>
+                        ) : null}
+                        {key.canRemove ? (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            disabled={pending}
+                            onClick={() => {
+                              setError(null);
+                              setMessage(null);
+                              startTransition(async () => {
+                                const result =
+                                  await actionRemoveCursorOrganisationApiKey(
+                                    key.id,
+                                  );
+                                if (!result.ok) {
+                                  setError(result.error);
+                                  return;
+                                }
+                                setMessage(`Removed key “${key.label}”.`);
+                                router.refresh();
+                              });
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        ) : null}
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -368,9 +484,8 @@ export function CursorOrganisationsSettings({
                 : 'Edit organisation connection'}
             </DialogTitle>
             <DialogDescription>
-              Organisation metadata and the optional Org Admin key are stored
-              encrypted in the database. Attach user / service-account keys to
-              list Cloud Agents.
+              Organisation Admin key and org id first, then an optional User /
+              Team key. Dialog scrolls when content is tall.
             </DialogDescription>
           </DialogHeader>
 
@@ -441,23 +556,187 @@ export function CursorOrganisationsSettings({
               />
             </Field>
 
+            <div className="space-y-2 rounded-md border border-border px-3 py-3">
+              <Field
+                label={
+                  editor.hasExistingOrgApiKey
+                    ? 'Organisation API key (leave blank to keep current)'
+                    : 'Organisation API key (required for cost)'
+                }
+              >
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={editor.orgApiKey}
+                  onChange={(e) =>
+                    setEditor((prev) => ({
+                      ...prev,
+                      orgApiKey: e.target.value,
+                      orgKeyCheck: { status: 'idle' },
+                    }))
+                  }
+                  onBlur={(e) => {
+                    if (e.target.value.trim().length < 20) return;
+                    checkOrgApiKey(e.target.value);
+                  }}
+                  placeholder="Organisation Admin key with usage:* scope"
+                  disabled={pending}
+                  className="font-mono text-sm"
+                />
+              </Field>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={pending || editor.orgApiKey.trim().length < 20}
+                  onClick={() => checkOrgApiKey()}
+                >
+                  Check key
+                </Button>
+                <KeyCheckFeedback state={editor.orgKeyCheck} />
+              </div>
+              <p className="text-xs text-fg-subtle">
+                Non-mutating check via{' '}
+                <span className="font-mono">/organizations/members</span>
+                {editor.organizationId ? (
+                  <>
+                    {' '}
+                    and <span className="font-mono">pooled-usage</span>
+                  </>
+                ) : null}
+                .
+              </p>
+              {editor.hasExistingOrgApiKey ? (
+                <label className="flex items-center gap-2 text-xs text-fg-muted">
+                  <input
+                    type="checkbox"
+                    checked={editor.clearOrgApiKey}
+                    onChange={(e) =>
+                      setEditor((prev) => ({
+                        ...prev,
+                        clearOrgApiKey: e.target.checked,
+                      }))
+                    }
+                  />
+                  Remove saved Organisation API key
+                </label>
+              ) : null}
+
+              <Field label="Organisation id">
+                <Input
+                  value={editor.organizationId}
+                  onChange={(e) =>
+                    setEditor((prev) => ({
+                      ...prev,
+                      organizationId: e.target.value,
+                    }))
+                  }
+                  placeholder="org_…"
+                  disabled={pending}
+                  className="font-mono text-sm"
+                />
+              </Field>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => {
+                    setError(null);
+                    setMessage(null);
+                    startTransition(async () => {
+                      const fd = new FormData();
+                      fd.set('baseUrl', editor.baseUrl);
+                      if (editor.orgApiKey) {
+                        fd.set('orgApiKey', editor.orgApiKey);
+                      }
+                      if (editor.apiKey) fd.set('apiKey', editor.apiKey);
+                      const result = await actionDiscoverOrganizationId(fd);
+                      if (!result.ok) {
+                        setError(result.error);
+                        return;
+                      }
+                      if (result.organizationId) {
+                        setEditor((prev) => ({
+                          ...prev,
+                          organizationId: result.organizationId!,
+                        }));
+                        setMessage(
+                          `Found organisation id ${result.organizationId}`,
+                        );
+                      } else {
+                        setMessage(
+                          result.note ??
+                            'Could not resolve organisation id from this key.',
+                        );
+                      }
+                    });
+                  }}
+                >
+                  Look up from API key
+                </Button>
+              </div>
+              <p className="text-xs text-fg-subtle">
+                If lookup fails, copy <span className="font-mono">org_…</span>{' '}
+                from the organisation dashboard URL.
+              </p>
+            </div>
+
             {editor.mode === 'create' ? (
-              <>
-                <Field label="First team API key (optional)">
+              <div className="space-y-2 rounded-md border border-border px-3 py-3">
+                <p className="text-xs font-medium text-fg">
+                  First User / Team API key (optional)
+                </p>
+                <Field label="API key">
                   <Input
                     type="password"
                     autoComplete="off"
                     spellCheck={false}
                     value={editor.apiKey}
                     onChange={(e) =>
-                      setEditor((prev) => ({ ...prev, apiKey: e.target.value }))
+                      setEditor((prev) => ({
+                        ...prev,
+                        apiKey: e.target.value,
+                        teamKeyCheck: { status: 'idle' },
+                      }))
                     }
-                    placeholder="cursor_… user or service-account key"
+                    onBlur={(e) => {
+                      if (e.target.value.trim().length < 20) return;
+                      checkUserTeamApiKey({
+                        apiKey: e.target.value,
+                        baseUrl: editor.baseUrl,
+                        onResult: (teamKeyCheck) =>
+                          setEditor((prev) => ({ ...prev, teamKeyCheck })),
+                      });
+                    }}
+                    placeholder="cursor_… User or Team API key"
                     disabled={pending}
                     className="font-mono text-sm"
                   />
                 </Field>
-                <Field label="Key label">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={pending || editor.apiKey.trim().length < 20}
+                    onClick={() =>
+                      checkUserTeamApiKey({
+                        apiKey: editor.apiKey,
+                        baseUrl: editor.baseUrl,
+                        onResult: (teamKeyCheck) =>
+                          setEditor((prev) => ({ ...prev, teamKeyCheck })),
+                      })
+                    }
+                  >
+                    Check key
+                  </Button>
+                  <KeyCheckFeedback state={editor.teamKeyCheck} />
+                </div>
+                <Field label="Key name">
                   <Input
                     value={editor.keyLabel}
                     onChange={(e) =>
@@ -466,11 +745,11 @@ export function CursorOrganisationsSettings({
                         keyLabel: e.target.value,
                       }))
                     }
-                    placeholder="Alice / cloud-agent"
+                    placeholder="Alice · personal"
                     disabled={pending}
                   />
                 </Field>
-                <Field label="Key kind">
+                <Field label="Key type">
                   <select
                     className="h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-fg"
                     value={editor.keyKind}
@@ -486,113 +765,13 @@ export function CursorOrganisationsSettings({
                     }
                   >
                     <option value="user">User</option>
-                    <option value="service_account">Service account</option>
+                    <option value="service_account">Team</option>
                   </select>
                 </Field>
-              </>
+              </div>
             ) : null}
 
-            <Field
-              label={
-                editor.hasExistingOrgApiKey
-                  ? 'Organisation API key (leave blank to keep current)'
-                  : 'Organisation API key (required for cost)'
-              }
-            >
-              <Input
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                value={editor.orgApiKey}
-                onChange={(e) =>
-                  setEditor((prev) => ({ ...prev, orgApiKey: e.target.value }))
-                }
-                placeholder="Organisation Admin key with usage:* scope"
-                disabled={pending}
-                className="font-mono text-sm"
-              />
-            </Field>
-            <p className="text-xs text-fg-subtle">
-              Verifies pooled usage and recent events while saving (
-              <span className="font-mono">filtered-usage-events</span>). Team /
-              user keys cannot call Organization cost APIs. Stop-hook cost uses
-              deployment credentials until hook requests carry a trusted Nexus
-              organisation identity.
-            </p>
-            {editor.hasExistingOrgApiKey ? (
-              <label className="flex items-center gap-2 text-xs text-fg-muted">
-                <input
-                  type="checkbox"
-                  checked={editor.clearOrgApiKey}
-                  onChange={(e) =>
-                    setEditor((prev) => ({
-                      ...prev,
-                      clearOrgApiKey: e.target.checked,
-                    }))
-                  }
-                />
-                Remove saved Organisation API key
-              </label>
-            ) : null}
-
-            <div className="space-y-2">
-              <Field label="Organisation id">
-                <Input
-                  value={editor.organizationId}
-                  onChange={(e) =>
-                    setEditor((prev) => ({
-                      ...prev,
-                      organizationId: e.target.value,
-                    }))
-                  }
-                  placeholder="org_…"
-                  disabled={pending}
-                  className="font-mono text-sm"
-                />
-              </Field>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={pending}
-                onClick={() => {
-                  setError(null);
-                  setMessage(null);
-                  startTransition(async () => {
-                    const fd = new FormData();
-                    fd.set('baseUrl', editor.baseUrl);
-                    if (editor.orgApiKey) fd.set('orgApiKey', editor.orgApiKey);
-                    if (editor.apiKey) fd.set('apiKey', editor.apiKey);
-                    const result = await actionDiscoverOrganizationId(fd);
-                    if (!result.ok) {
-                      setError(result.error);
-                      return;
-                    }
-                    if (result.organizationId) {
-                      setEditor((prev) => ({
-                        ...prev,
-                        organizationId: result.organizationId!,
-                      }));
-                      setMessage(
-                        `Found organisation id ${result.organizationId}`,
-                      );
-                    } else {
-                      setMessage(
-                        result.note ??
-                          'Could not resolve organisation id from this key.',
-                      );
-                    }
-                  });
-                }}
-              >
-                Look up from API key
-              </Button>
-              <p className="text-xs text-fg-subtle">
-                Cursor’s documented APIs usually do not return the public org id.
-                If lookup fails, copy it from the organisation dashboard URL.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap justify-end gap-2 pt-2">
+            <div className="sticky bottom-0 z-[1] -mx-4 -mb-4 flex flex-wrap justify-end gap-2 border-t border-border bg-overlay px-4 py-3">
               <Button
                 type="button"
                 variant="secondary"
@@ -621,11 +800,15 @@ export function CursorOrganisationsSettings({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Attach team API key</DialogTitle>
+            <DialogTitle>
+              {keyEditor.mode === 'create'
+                ? 'Add User / Team API key'
+                : 'Edit User / Team API key'}
+            </DialogTitle>
             <DialogDescription>
-              Add a user or service-account key to “
-              {keyEditor.organisationLabel}”. Each identity can only see its own
-              Cloud Agents, so attach every token you want Monitoring to cover.
+              {keyEditor.mode === 'create'
+                ? `Attach a named User or Team API key to “${keyEditor.organisationLabel}”. Each identity only sees its own agents.`
+                : `Update the name, type, or secret for a key under “${keyEditor.organisationLabel}”.`}
             </DialogDescription>
           </DialogHeader>
           <form
@@ -635,35 +818,51 @@ export function CursorOrganisationsSettings({
               setError(null);
               setMessage(null);
               const fd = new FormData();
-              fd.set('organisationId', keyEditor.organisationId);
-              fd.set('apiKey', keyEditor.apiKey);
-              fd.set('label', keyEditor.label);
-              fd.set('keyKind', keyEditor.keyKind);
               startTransition(async () => {
-                const result = await actionAddCursorOrganisationApiKey(fd);
-                if (!result.ok) {
-                  setError(result.error);
-                  return;
+                if (keyEditor.mode === 'create') {
+                  fd.set('organisationId', keyEditor.organisationId);
+                  fd.set('apiKey', keyEditor.apiKey);
+                  fd.set('label', keyEditor.label);
+                  fd.set('keyKind', keyEditor.keyKind);
+                  const result = await actionAddCursorOrganisationApiKey(fd);
+                  if (!result.ok) {
+                    setError(result.error);
+                    return;
+                  }
+                  setMessage(
+                    `Attached ${keyKindLabel(result.keyKind).toLowerCase()} key${result.identity ? ` · ${result.identity}` : ''}`,
+                  );
+                } else {
+                  fd.set('apiKeyId', keyEditor.apiKeyId);
+                  fd.set('label', keyEditor.label);
+                  fd.set('keyKind', keyEditor.keyKind);
+                  if (keyEditor.apiKey) fd.set('apiKey', keyEditor.apiKey);
+                  const result = await actionUpdateCursorOrganisationApiKey(fd);
+                  if (!result.ok) {
+                    setError(result.error);
+                    return;
+                  }
+                  setMessage(
+                    `Updated key “${result.label}”${result.identity ? ` · ${result.identity}` : ''}`,
+                  );
                 }
-                setMessage(
-                  `Attached ${result.keyKind === 'service_account' ? 'service-account' : 'user'} key${result.identity ? ` · ${result.identity}` : ''}`,
-                );
                 closeKeyEditor();
                 router.refresh();
               });
             }}
           >
-            <Field label="Label">
+            <Field label="Name">
               <Input
+                required
                 value={keyEditor.label}
                 onChange={(e) =>
                   setKeyEditor((prev) => ({ ...prev, label: e.target.value }))
                 }
-                placeholder="Alice / cloud-agent"
+                placeholder="Alice · personal"
                 disabled={pending}
               />
             </Field>
-            <Field label="Key kind">
+            <Field label="Key type">
               <select
                 className="h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-fg"
                 value={keyEditor.keyKind}
@@ -679,24 +878,62 @@ export function CursorOrganisationsSettings({
                 }
               >
                 <option value="user">User</option>
-                <option value="service_account">Service account</option>
+                <option value="service_account">Team</option>
               </select>
             </Field>
-            <Field label="Cloud Agents API key">
+            <Field
+              label={
+                keyEditor.mode === 'edit'
+                  ? 'API key (leave blank to keep current)'
+                  : 'API key'
+              }
+            >
               <Input
                 type="password"
                 autoComplete="off"
                 spellCheck={false}
-                required
+                required={keyEditor.mode === 'create'}
                 value={keyEditor.apiKey}
                 onChange={(e) =>
-                  setKeyEditor((prev) => ({ ...prev, apiKey: e.target.value }))
+                  setKeyEditor((prev) => ({
+                    ...prev,
+                    apiKey: e.target.value,
+                    keyCheck: { status: 'idle' },
+                  }))
                 }
+                onBlur={(e) => {
+                  if (e.target.value.trim().length < 20) return;
+                  checkUserTeamApiKey({
+                    apiKey: e.target.value,
+                    baseUrl: keyEditor.organisationBaseUrl,
+                    onResult: (keyCheck) =>
+                      setKeyEditor((prev) => ({ ...prev, keyCheck })),
+                  });
+                }}
                 placeholder="cursor_…"
                 disabled={pending}
                 className="font-mono text-sm"
               />
             </Field>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={pending || keyEditor.apiKey.trim().length < 20}
+                onClick={() =>
+                  checkUserTeamApiKey({
+                    apiKey: keyEditor.apiKey,
+                    baseUrl: keyEditor.organisationBaseUrl,
+                    onResult: (keyCheck) =>
+                      setKeyEditor((prev) => ({ ...prev, keyCheck })),
+                  })
+                }
+              >
+                Check key
+              </Button>
+              <KeyCheckFeedback state={keyEditor.keyCheck} />
+            </div>
             <div className="flex flex-wrap justify-end gap-2 pt-2">
               <Button
                 type="button"
@@ -707,7 +944,11 @@ export function CursorOrganisationsSettings({
                 Cancel
               </Button>
               <Button type="submit" disabled={pending}>
-                {pending ? 'Saving…' : 'Attach key'}
+                {pending
+                  ? 'Saving…'
+                  : keyEditor.mode === 'create'
+                    ? 'Attach key'
+                    : 'Save key'}
               </Button>
             </div>
           </form>

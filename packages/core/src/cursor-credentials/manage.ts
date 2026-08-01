@@ -487,19 +487,19 @@ export async function addCursorOrganisationApiKey(
     return err(
       coreError(
         'validation',
-        'Paste a Cursor API key (Cloud Agents / user / service account).',
+        'Paste a Cursor User or Team API key (at least 20 characters).',
       ),
     );
   }
   if (input.keyKind !== 'user' && input.keyKind !== 'service_account') {
-    return err(coreError('validation', 'Key kind must be user or service_account.'));
+    return err(coreError('validation', 'Key kind must be user or team.'));
   }
 
   const fingerprint = fingerprintCursorApiKey(apiKey);
   const now = ctx.clock();
   const label = normalizeLabel(
     input.label,
-    input.keyKind === 'service_account' ? 'Service account' : 'Team API key',
+    input.keyKind === 'service_account' ? 'Team API key' : 'User API key',
   );
   const identityLabel = input.identityLabel?.trim() || null;
   const hint = maskCursorApiKey(apiKey);
@@ -622,6 +622,146 @@ export async function addCursorOrganisationApiKey(
     createdByUserId: userId,
     lastValidatedAt: now,
     createdAt: now,
+  });
+}
+
+export async function updateCursorOrganisationApiKey(
+  ctx: ServiceContext,
+  input: {
+    apiKeyId: string;
+    label?: string;
+    keyKind?: CursorApiKeyKind;
+    /** Pass plaintext to replace the secret; omit to keep the current key. */
+    apiKey?: string;
+    identityLabel?: string | null;
+    /** When true, bump lastValidatedAt without changing the secret. */
+    markValidated?: boolean;
+  },
+): Promise<Result<DecryptedCursorApiKey, CoreError>> {
+  const human = requireHumanUserId(ctx);
+  if (!human.ok) return human;
+
+  const row = await ctx.db.query.cursorOrganisationApiKeys.findFirst({
+    where: and(
+      eq(cursorOrganisationApiKeys.id, input.apiKeyId),
+      eq(cursorOrganisationApiKeys.orgId, ctx.orgId),
+    ),
+  });
+  if (!row || row.revokedAt) {
+    return err(coreError('not_found', 'API key not found'));
+  }
+  if (!isOwnedBy(row.createdByUserId, human.value)) {
+    return err(
+      coreError(
+        'forbidden',
+        'Only the member who attached this API key can edit it',
+      ),
+    );
+  }
+
+  const keyKind = input.keyKind ?? row.keyKind;
+  if (keyKind !== 'user' && keyKind !== 'service_account') {
+    return err(coreError('validation', 'Key kind must be user or team.'));
+  }
+
+  const now = ctx.clock();
+  const label = normalizeLabel(
+    input.label ?? row.label,
+    keyKind === 'service_account' ? 'Team API key' : 'User API key',
+  );
+
+  let apiKeyEncrypted = row.apiKeyEncrypted;
+  let fingerprint = row.apiKeyFingerprint;
+  let hint = row.apiKeyHint;
+  let plaintext = decryptCursorApiKey(row.apiKeyEncrypted, {
+    purpose: 'team-api-key',
+    orgId: row.orgId,
+    recordId: row.id,
+  });
+  let lastValidatedAt = row.lastValidatedAt;
+  let identityLabel =
+    input.identityLabel === undefined
+      ? row.identityLabel
+      : input.identityLabel?.trim() || null;
+
+  const nextApiKey = input.apiKey?.trim();
+  if (nextApiKey) {
+    if (nextApiKey.length < 20) {
+      return err(
+        coreError(
+          'validation',
+          'Paste a Cursor User or Team API key (at least 20 characters).',
+        ),
+      );
+    }
+    fingerprint = fingerprintCursorApiKey(nextApiKey);
+    const conflict = await ctx.db.query.cursorOrganisationApiKeys.findFirst({
+      where: and(
+        eq(
+          cursorOrganisationApiKeys.cursorOrganisationId,
+          row.cursorOrganisationId,
+        ),
+        eq(cursorOrganisationApiKeys.apiKeyFingerprint, fingerprint),
+        isNull(cursorOrganisationApiKeys.revokedAt),
+      ),
+    });
+    if (conflict && conflict.id !== row.id) {
+      return err(
+        coreError(
+          'conflict',
+          `That API key is already attached as “${conflict.label}”.`,
+        ),
+      );
+    }
+    apiKeyEncrypted = encryptCursorApiKey(nextApiKey, {
+      purpose: 'team-api-key',
+      orgId: row.orgId,
+      recordId: row.id,
+    });
+    hint = maskCursorApiKey(nextApiKey);
+    plaintext = nextApiKey;
+    lastValidatedAt = now;
+  } else if (input.markValidated) {
+    lastValidatedAt = now;
+  }
+
+  await ctx.db
+    .update(cursorOrganisationApiKeys)
+    .set({
+      label,
+      keyKind,
+      apiKeyEncrypted,
+      apiKeyFingerprint: fingerprint,
+      apiKeyHint: hint,
+      identityLabel,
+      lastValidatedAt,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(cursorOrganisationApiKeys.id, row.id),
+        eq(cursorOrganisationApiKeys.orgId, ctx.orgId),
+        eq(cursorOrganisationApiKeys.createdByUserId, human.value),
+      ),
+    );
+
+  await ctx.db
+    .update(cursorOrganisations)
+    .set({ updatedAt: now })
+    .where(eq(cursorOrganisations.id, row.cursorOrganisationId));
+
+  return ok({
+    id: row.id,
+    cursorOrganisationId: row.cursorOrganisationId,
+    label,
+    keyKind,
+    apiKey: plaintext,
+    fingerprint,
+    hint,
+    identityLabel,
+    createdByUserId: row.createdByUserId,
+    lastValidatedAt,
+    createdAt: row.createdAt,
   });
 }
 
