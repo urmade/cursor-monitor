@@ -8,6 +8,7 @@ import {
   classifyRunStatus,
   extractPrLinksFromGit,
   formatCentsUsd,
+  formatHookCostUsd,
   formatDurationMs,
   formatPrLabel,
   formatPrNumberLabel,
@@ -99,6 +100,14 @@ describe('monitoring format helpers', () => {
     expect(formatCentsUsd(57.36916)).toBe('$0.5737');
     expect(formatCentsUsd(100)).toBe('$1.00');
     expect(formatCentsUsd(432.41)).toBe('$4.32');
+  });
+
+  it('formats hook costs as dollars rounded to two digits', () => {
+    expect(formatHookCostUsd(undefined)).toBe('—');
+    expect(formatHookCostUsd(57.36916)).toBe('$0.57');
+    expect(formatHookCostUsd(100)).toBe('$1.00');
+    expect(formatHookCostUsd(432.41)).toBe('$4.32');
+    expect(formatHookCostUsd(1.5)).toBe('$0.02');
   });
 
   it('formats relative time', () => {

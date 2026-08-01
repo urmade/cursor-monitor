@@ -22,6 +22,17 @@ export function formatCentsUsd(cents: number | null | undefined): string {
   }).format(dollars);
 }
 
+/** Stop-hook / local-request costs: dollars only, always two fraction digits. */
+export function formatHookCostUsd(cents: number | null | undefined): string {
+  if (cents == null || !Number.isFinite(cents)) return '—';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(cents / 100);
+}
+
 export function formatRelativeTime(
   iso: string | null | undefined,
   nowMs: number = Date.now(),

@@ -3,6 +3,7 @@
 import { EmptyState, Panel, PanelBody, PanelHeader } from '@nexus/ui';
 import Link from 'next/link';
 import { useMemo, useState, useTransition } from 'react';
+import { LocalRequestsPanel } from './HookSignalsDashboard';
 import { RunStatusBadge } from './RunStatusBadge';
 import {
   formatCentsUsd,
@@ -10,6 +11,7 @@ import {
   partitionProjectRunsByAutomation,
   type ConversationGroupSort,
 } from '../lib/monitoring-format';
+import type { HookRepoBucket } from '../server/hook-signals';
 
 export type ProjectConversationRow = {
   id: string;
@@ -36,6 +38,7 @@ export type ProjectAutomationGroupView = {
 
 export type ProjectSectionsView = {
   automations: ProjectAutomationGroupView[];
+  /** Non-automation Cloud Agent runs (formerly "user requests"). */
   userRequests: ProjectConversationRow[];
 };
 
@@ -139,17 +142,19 @@ function RunRowLink({
 }
 
 /**
- * Project detail: Automations (grouped, with totals) then User requests.
- * Sorting is pure in-memory within each bucket.
+ * Project detail: Automations, Cloud Agent runs, then local request (hooks).
+ * Sorting is pure in-memory within Cloud Agent / Automations buckets.
  */
 export function ProjectConversationsClient({
   projectHref,
   initialSort,
   sections,
+  localRequests,
 }: {
   projectHref: string;
   initialSort: ConversationGroupSort;
   sections: ProjectSectionsView;
+  localRequests?: HookRepoBucket | null;
 }) {
   const [sort, setSort] = useState<ConversationGroupSort>(initialSort);
   const [pending, startTransition] = useTransition();
@@ -169,15 +174,17 @@ export function ProjectConversationsClient({
     return partitionProjectRunsByAutomation(flat, sort);
   }, [sections, sort]);
 
-  const empty =
+  const emptyCloud =
     sorted.automations.length === 0 && sorted.userRequests.length === 0;
+  const emptyLocal =
+    !localRequests || localRequests.conversations.length === 0;
 
-  if (empty) {
+  if (emptyCloud && emptyLocal) {
     return (
       <Panel>
         <EmptyState
           title="No conversations in this project"
-          description="Cloud Agents and Automations started against this repository will appear here."
+          description="Cloud Agents, Automations, and local requests against this repository will appear here."
         />
       </Panel>
     );
@@ -244,12 +251,12 @@ export function ProjectConversationsClient({
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-medium text-fg">User requests</h2>
+        <h2 className="text-sm font-medium text-fg">Cloud Agent</h2>
         {sorted.userRequests.length === 0 ? (
           <Panel>
             <PanelBody>
               <p className="text-sm text-fg-muted">
-                No user-requested conversations in this repository yet.
+                No Cloud Agent conversations in this repository yet.
               </p>
             </PanelBody>
           </Panel>
@@ -259,7 +266,7 @@ export function ProjectConversationsClient({
               <ul className="divide-y divide-border">
                 {sorted.userRequests.map((run) => (
                   <RunRowLink
-                    key={`user-${run.id}`}
+                    key={`cloud-${run.id}`}
                     projectHref={projectHref}
                     run={run}
                   />
@@ -268,6 +275,11 @@ export function ProjectConversationsClient({
             </PanelBody>
           </Panel>
         )}
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-fg">local request</h2>
+        <LocalRequestsPanel bucket={localRequests ?? null} />
       </section>
     </div>
   );

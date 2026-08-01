@@ -15,7 +15,10 @@ import {
   resolveCursorAuth,
   resolvePrDisplayName,
   runDidNotFinish,
+  type ProjectRunSections,
 } from '../../../../src/server/cursor';
+import { formatHookCostUsd } from '../../../../src/lib/monitoring-format';
+import { loadHookSignalsForRepo } from '../../../../src/server/hook-signals';
 import { getCachedProjectDetail } from '../../../../src/server/monitoring-cache';
 
 export const dynamic = 'force-dynamic';
@@ -42,30 +45,50 @@ export default async function ProjectMonitoringPage({
   const sort = parseConversationGroupSort(sp.sort);
 
   const auth = await resolveCursorAuth();
-  if (auth.credentials.length === 0 || !auth.combinedFingerprint) {
-    return (
-      <div className="space-y-4 p-4">
-        <Link href="/monitoring" className="text-sm text-accent hover:underline">
-          ← Monitoring
-        </Link>
-        <p className="text-sm text-danger-fg" role="alert">
-          {auth.error ??
-            'Connect one or more Cursor organisations in Settings (or set CURSOR_API_KEY).'}
-        </p>
-      </div>
-    );
+
+  let sections: ProjectRunSections | null = null;
+  let truncatedEnrichment = false;
+  let repoUrl: string | null = null;
+  let cloudError: string | null = null;
+
+  if (auth.credentials.length > 0 && auth.combinedFingerprint) {
+    try {
+      const detail = await getCachedProjectDetail(
+        auth.credentials.map((c) => ({
+          client: c.client,
+          fingerprint: c.fingerprint,
+        })),
+        project,
+        sort,
+      );
+
+      if (!('empty' in detail)) {
+        sections = detail.sections;
+        truncatedEnrichment = detail.truncatedEnrichment;
+        repoUrl = detail.repoUrl;
+      }
+    } catch (err) {
+      cloudError = err instanceof Error ? err.message : String(err);
+    }
+  } else if (auth.error) {
+    cloudError = auth.error;
   }
 
-  const detail = await getCachedProjectDetail(
-    auth.credentials.map((c) => ({
-      client: c.client,
-      fingerprint: c.fingerprint,
-    })),
-    project,
-    sort,
-  );
+  let localRequests = null;
+  let hookError: string | null = null;
+  try {
+    localRequests = await loadHookSignalsForRepo(project);
+  } catch (err) {
+    hookError = err instanceof Error ? err.message : String(err);
+  }
 
-  if ('empty' in detail) {
+  const hasCloud =
+    sections != null &&
+    (sections.automations.length > 0 || sections.userRequests.length > 0);
+  const hasLocal =
+    localRequests != null && localRequests.conversations.length > 0;
+
+  if (!hasCloud && !hasLocal) {
     return (
       <div className="space-y-4 p-4">
         <Link
@@ -74,20 +97,28 @@ export default async function ProjectMonitoringPage({
         >
           ← All projects
         </Link>
+        {cloudError ? (
+          <p className="text-sm text-danger-fg" role="alert">
+            {cloudError}
+          </p>
+        ) : null}
+        {hookError ? (
+          <p className="text-sm text-warning-fg" role="alert">
+            Local requests unavailable: {hookError}
+          </p>
+        ) : null}
         <Panel>
           <EmptyState
             title="No such project"
-            description={`No conversations are working against “${project}” with the connected Cursor API key(s).`}
+            description={`No Cloud Agent conversations or local requests are recorded for “${project}”.`}
           />
         </Panel>
       </div>
     );
   }
 
-  const { sections, enrichedCount, truncatedEnrichment, repoUrl } = detail;
-
   const sectionViews: ProjectSectionsView = {
-    automations: sections.automations.map((g) => ({
+    automations: (sections?.automations ?? []).map((g) => ({
       automationId: g.automationId,
       automationName: g.automationName,
       totalChargedCents: g.totalChargedCents,
@@ -113,7 +144,7 @@ export default async function ProjectMonitoringPage({
         };
       }),
     })),
-    userRequests: sections.userRequests.map((c) => {
+    userRequests: (sections?.userRequests ?? []).map((c) => {
       const pr = c.prs[0] ?? null;
       return {
         id: c.id,
@@ -134,18 +165,37 @@ export default async function ProjectMonitoringPage({
   };
 
   const allRuns = [
-    ...sections.automations.flatMap((g) => g.conversations),
-    ...sections.userRequests,
+    ...(sections?.automations.flatMap((g) => g.conversations) ?? []),
+    ...(sections?.userRequests ?? []),
   ];
-  const totalCharged = allRuns.reduce((sum, c) => {
+  const cloudCharged = allRuns.reduce((sum, c) => {
     const cc = preferredChargedCents(c);
     return cc != null ? sum + cc : sum;
   }, 0);
-  const anyCost = allRuns.some((c) => preferredChargedCents(c) != null);
+  const localCharged = localRequests?.chargedCentsTotal ?? 0;
+  const anyCloudCost = allRuns.some((c) => preferredChargedCents(c) != null);
+  const anyLocalCost = localRequests?.chargedCentsTotal != null;
+  const totalCharged =
+    anyCloudCost || anyLocalCost
+      ? cloudCharged + (anyLocalCost ? localCharged : 0)
+      : 0;
   const unfinishedCount = allRuns.filter((a) =>
     runDidNotFinish(conversationDisplayStatus(a)),
   ).length;
   const href = projectHref(project);
+  const localCount = localRequests?.conversations.length ?? 0;
+  const automationCount = sections?.automations.length ?? 0;
+  const cloudAgentCount = sectionViews.userRequests.length;
+  const chargedLabel =
+    anyCloudCost || anyLocalCost
+      ? anyLocalCost && !anyCloudCost
+        ? formatHookCostUsd(totalCharged)
+        : formatCentsUsd(totalCharged)
+      : null;
+
+  if (!repoUrl && project !== NO_REPO_GROUP) {
+    repoUrl = `https://github.com/${project}`;
+  }
 
   return (
     <div className="space-y-4 p-4">
@@ -160,26 +210,46 @@ export default async function ProjectMonitoringPage({
           className="mt-1"
           title={project === NO_REPO_GROUP ? 'No repository' : project}
           meta="Project"
-          subtitle={`${enrichedCount} conversation${enrichedCount === 1 ? '' : 's'} · ${sections.automations.length} automation${sections.automations.length === 1 ? '' : 's'} · ${sections.userRequests.length} user request${sections.userRequests.length === 1 ? '' : 's'}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}${unfinishedCount > 0 ? ` · ${unfinishedCount} did not finish` : ''}`}
+          subtitle={`${automationCount} automation${automationCount === 1 ? '' : 's'} · ${cloudAgentCount} Cloud Agent · ${localCount} local request${localCount === 1 ? '' : 's'}${chargedLabel ? ` · ${chargedLabel} charged` : ''}${unfinishedCount > 0 ? ` · ${unfinishedCount} did not finish` : ''}`}
           actions={
-            repoUrl ? (
-              <a
-                href={repoUrl}
-                target="_blank"
-                rel="noreferrer"
+            <div className="flex items-center gap-3">
+              <Link
+                href="/hooks/setup"
                 className="text-xs text-accent hover:underline"
               >
-                Open repository ↗
-              </a>
-            ) : undefined
+                Copy stop hook
+              </Link>
+              {repoUrl ? (
+                <a
+                  href={repoUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-accent hover:underline"
+                >
+                  Open repository ↗
+                </a>
+              ) : null}
+            </div>
           }
         />
       </div>
+
+      {cloudError && !hasCloud ? (
+        <p className="text-sm text-warning-fg" role="alert">
+          Cloud Agent data unavailable: {cloudError}
+        </p>
+      ) : null}
+      {hookError ? (
+        <p className="text-sm text-warning-fg" role="alert">
+          Local requests unavailable: {hookError}
+        </p>
+      ) : null}
 
       <ProjectConversationsClient
         projectHref={href}
         initialSort={sort}
         sections={sectionViews}
+        localRequests={localRequests}
       />
 
       {truncatedEnrichment ? (

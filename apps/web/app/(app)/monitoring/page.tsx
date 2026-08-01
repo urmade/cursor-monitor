@@ -8,6 +8,11 @@ import {
   NO_REPO_GROUP,
   resolveCursorAuth,
 } from '../../../src/server/cursor';
+import {
+  loadHookSignalsTree,
+  mergeProjectsWithHookSummaries,
+  summarizeHookRepos,
+} from '../../../src/server/hook-signals';
 import { getCachedProjectsPage } from '../../../src/server/monitoring-cache';
 
 export const dynamic = 'force-dynamic';
@@ -39,6 +44,19 @@ export default async function MonitoringPage() {
     }
   }
 
+  let hookError: string | null = null;
+  let hookEventCount = 0;
+  try {
+    const hookTree = await loadHookSignalsTree();
+    hookEventCount = hookTree.totalEvents;
+    projects = mergeProjectsWithHookSummaries(
+      projects,
+      summarizeHookRepos(hookTree),
+    );
+  } catch (err) {
+    hookError = err instanceof Error ? err.message : String(err);
+  }
+
   const totalCharged = projects.reduce(
     (sum, p) => (p.totalChargedCents != null ? sum + p.totalChargedCents : sum),
     0,
@@ -51,11 +69,19 @@ export default async function MonitoringPage() {
     <div className="space-y-4 p-4">
       <PageHeader
         title="Monitoring"
-        subtitle="Every repository is a project. Open one to inspect Automations and user requests running against it — with cost."
+        subtitle="Every repository is a project. Open one to inspect Automations, Cloud Agent runs, and local requests — with cost."
         meta={
-          auth.credentials.length > 0 && projects.length > 0
-            ? `${projects.length} project${projects.length === 1 ? '' : 's'} · ${agentCount} conversation${agentCount === 1 ? '' : 's'}${orgCount > 1 ? ` · ${orgCount} orgs` : ''}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}`
+          projects.length > 0
+            ? `${projects.length} project${projects.length === 1 ? '' : 's'}${agentCount > 0 ? ` · ${agentCount} Cloud Agent conversation${agentCount === 1 ? '' : 's'}` : ''}${hookEventCount > 0 ? ` · ${hookEventCount} local request${hookEventCount === 1 ? '' : 's'}` : ''}${orgCount > 1 ? ` · ${orgCount} orgs` : ''}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}`
             : undefined
+        }
+        actions={
+          <Link
+            href="/hooks/setup"
+            className="text-xs text-accent hover:underline"
+          >
+            Copy stop hook
+          </Link>
         }
       />
 
@@ -76,12 +102,17 @@ export default async function MonitoringPage() {
           {error}
         </p>
       ) : null}
+      {hookError ? (
+        <p className="text-sm text-warning-fg" role="alert">
+          Local requests unavailable: {hookError}
+        </p>
+      ) : null}
 
-      {auth.credentials.length > 0 && !error && projects.length === 0 ? (
+      {projects.length === 0 && !error ? (
         <Panel>
           <EmptyState
             title="No conversations yet"
-            description="Cloud Agents and Automations started in Cursor show up here as conversations, grouped by the repository they work on."
+            description="Cloud Agents, Automations, and local requests (stop hooks) show up here grouped by the repository they work on."
           />
         </Panel>
       ) : null}

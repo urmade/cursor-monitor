@@ -29,6 +29,7 @@ export {
   automationDisplayName,
   automationMetaFromRun,
   formatCentsUsd,
+  formatHookCostUsd,
   formatRelativeTime,
   formatPrNumberLabel,
   NO_PR_GROUP,

@@ -31,7 +31,7 @@ export default async function HooksSetupPage() {
         meta="Hooks / Setup"
         actions={
           <Button asChild size="sm" variant="ghost">
-            <Link href="/hooks">← Signals</Link>
+            <Link href="/monitoring">← Monitoring</Link>
           </Button>
         }
       />

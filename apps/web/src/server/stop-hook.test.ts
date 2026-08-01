@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildHookSignalsTree, type HookSignalEvent } from './hook-signals';
+import { buildHookSignalsTree, mergeProjectsWithHookSummaries, type HookSignalEvent } from './hook-signals';
 import {
   authorizeStopHookRequest,
   buildStopHookArtifact,
@@ -94,12 +94,12 @@ describe('stop-hook helpers', () => {
 });
 
 describe('hook signals tree', () => {
-  it('groups events by user → repo → conversation', () => {
+  it('groups events by repository → conversation', () => {
     const events: HookSignalEvent[] = [
       {
         id: '1',
         userEmail: 'a@example.com',
-        repo: 'acme/one',
+        repo: 'Acme/One',
         gitBranch: 'main',
         workspaceRoot: '/tmp/one',
         conversationId: 'c1',
@@ -168,23 +168,83 @@ describe('hook signals tree', () => {
         payload: {},
         receivedAt: '2026-07-31T10:00:00.000Z',
       },
+      {
+        id: '4',
+        userEmail: 'c@example.com',
+        repo: 'acme/two',
+        gitBranch: 'feat',
+        workspaceRoot: '/tmp/two',
+        conversationId: 'c2',
+        generationId: 'g3',
+        model: 'm',
+        modelId: null,
+        hookEventName: 'stop',
+        status: 'completed',
+        loopCount: 0,
+        cursorVersion: '3',
+        transcriptPath: null,
+        workspaceRoots: [],
+        modelParams: null,
+        chargedCents: 250,
+        costSource: 'teams.filtered-usage-events',
+        costLookupError: null,
+        usageEvent: null,
+        payload: {},
+        receivedAt: '2026-07-31T13:00:00.000Z',
+      },
     ];
 
     const tree = buildHookSignalsTree(events);
-    expect(tree.totalEvents).toBe(3);
-    expect(tree.users.map((u) => u.userEmail)).toEqual([
-      'a@example.com',
-      'b@example.com',
+    expect(tree.totalEvents).toBe(4);
+    expect(tree.repos.map((r) => r.repo)).toEqual([
+      'acme/two',
+      'acme/one',
+      'No repository',
     ]);
-    expect(tree.users[0]!.repos[0]!.repo).toBe('acme/one');
-    expect(tree.users[0]!.repos[0]!.branches).toEqual(['main']);
-    expect(tree.users[0]!.repos[0]!.conversations[0]!.events).toHaveLength(2);
-    expect(tree.users[0]!.repos[0]!.conversations[0]!.chargedCentsTotal).toBe(
-      1.5,
-    );
-    expect(tree.users[1]!.repos[0]!.repo).toBe('Unknown repo');
-    expect(tree.users[1]!.repos[0]!.conversations[0]!.conversationId).toBe(
+    expect(tree.repos[1]!.branches).toEqual(['main']);
+    expect(tree.repos[1]!.conversations[0]!.events).toHaveLength(2);
+    expect(tree.repos[1]!.conversations[0]!.chargedCentsTotal).toBe(1.5);
+    expect(tree.repos[1]!.conversations[0]!.userEmail).toBe('a@example.com');
+    expect(tree.repos[0]!.chargedCentsTotal).toBe(250);
+    expect(tree.repos[2]!.conversations[0]!.conversationId).toBe(
       'Unknown conversation',
     );
+  });
+
+  it('merges hook repo summaries into monitoring projects', () => {
+    const merged = mergeProjectsWithHookSummaries(
+      [
+        {
+          repo: 'acme/one',
+          conversationCount: 2,
+          prCount: 1,
+          totalChargedCents: 100,
+          totalRawCents: 140,
+          latestCreatedAt: '2026-07-30T10:00:00.000Z',
+        },
+      ],
+      [
+        {
+          repo: 'acme/one',
+          eventCount: 3,
+          conversationCount: 1,
+          totalChargedCents: 50,
+          latestAt: '2026-07-31T10:00:00.000Z',
+        },
+        {
+          repo: 'acme/hooks-only',
+          eventCount: 2,
+          conversationCount: 2,
+          totalChargedCents: 12.34,
+          latestAt: '2026-07-29T10:00:00.000Z',
+        },
+      ],
+    );
+    expect(merged.map((p) => p.repo)).toEqual(['acme/one', 'acme/hooks-only']);
+    expect(merged[0]!.totalChargedCents).toBe(150);
+    expect(merged[0]!.conversationCount).toBe(3);
+    expect(merged[0]!.latestCreatedAt).toBe('2026-07-31T10:00:00.000Z');
+    expect(merged[1]!.conversationCount).toBe(2);
+    expect(merged[1]!.prCount).toBe(0);
   });
 });

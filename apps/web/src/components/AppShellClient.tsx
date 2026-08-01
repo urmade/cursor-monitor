@@ -48,7 +48,7 @@ export function AppShellClient({
         { slug: 'inbox', label: 'Inbox', href: '/inbox' },
         { slug: 'projects', label: 'Projects', href: '/projects' },
         { slug: 'monitoring', label: 'Monitoring', href: '/monitoring' },
-        { slug: 'hooks', label: 'Hooks', href: '/hooks' },
+        { slug: 'hooks', label: 'Stop hook', href: '/hooks/setup' },
         {
           slug: 'settings',
           label: 'Settings',
@@ -71,7 +71,7 @@ export function AppShellClient({
     : [
         { label: 'Inbox', href: '/inbox' },
         { label: 'Monitoring', href: '/monitoring' },
-        { label: 'Hooks', href: '/hooks' },
+        { label: 'Stop hook setup', href: '/hooks/setup' },
         { label: 'Settings', href: '/settings/organisations' },
       ];
 
