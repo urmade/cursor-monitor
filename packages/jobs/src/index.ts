@@ -22,4 +22,4 @@ export {
 
 // Side-effect: register Phase 2 job handlers.
 import './handlers';
-export { ensureSweepJob } from './handlers';
+export { ensureSweepJob, ensureAutomationUsageSyncJob } from './handlers';

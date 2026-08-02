@@ -54,6 +54,8 @@ const CORE_QUERY_RELATIONS = [
   'estimateCache',
   'estimateBacktests',
   'analyticsDaily',
+  'automationUsageEvents',
+  'automationAgentRuns',
 ] as const;
 
 describe.runIf(hasDb)('drizzle relational query API', () => {

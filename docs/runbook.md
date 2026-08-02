@@ -10,9 +10,10 @@
 | Questions | `/projects/[key]/questions` | Open questions stopgap (Phase 6 inbox later) |
 | Settings | `/projects/[key]/settings` | Pipeline, labels, automation bindings |
 | Audit | `/projects/[key]/audit` | Filtered read of `events` outbox |
-| Health | `/api/health` | DB, migration, cron, queue, MCP calls/min |
+| Health | `/api/health` | DB, migration, cron, queue, MCP calls/min, automation usage sync |
 | MCP | `/api/mcp` | nexus-mcp/1 tools; Bearer run token |
-| Cron | `/api/cron/tick` | Requires `CRON_SECRET`; claims `jobs` (`poll_run`, `sweep_stuck_runs`) |
+| Cron | `/api/cron/tick` | Requires `CRON_SECRET`; claims `jobs` (`poll_run`, `sweep_stuck_runs`, `sync_automation_usage_events`) |
+| Automation usage sync | `/api/cron/automation-usage-sync` | Requires `CRON_SECRET`; optional `?validate=fde-adm` |
 
 ### Local demo
 

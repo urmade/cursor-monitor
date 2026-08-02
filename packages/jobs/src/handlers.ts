@@ -20,6 +20,9 @@ import {
   runBacktest,
   yesterdayUtc,
   resumeAfterQuestion,
+  syncAutomationUsageEvents,
+  validateFdeAdmAutomationUsageSync,
+  DEFAULT_VALIDATION_LABELS,
 } from '@nexus/core';
 import { CursorClient } from '@nexus/cursor-client';
 import { getDb } from '@nexus/db';
@@ -101,6 +104,48 @@ registerJobHandler('reconcile_costs_admin', async (db) => {
   const to = new Date();
   const from = new Date(to.getTime() - 72 * 60 * 60 * 1000);
   await reconcileWindow(ctx, { from, to });
+});
+
+/**
+ * Cadence sync: last ~6 minutes of automation usage events every ~5 minutes.
+ * Uses Team `/teams/filtered-usage-events` with `automationId: "*"`, falls
+ * back to Organisation Admin when needed, then enriches repo + duration.
+ */
+registerJobHandler('sync_automation_usage_events', async (db, job) => {
+  const payload = job.payload as {
+    orgId?: string;
+    lookbackMs?: number;
+    validateFdeAdm?: boolean;
+  };
+  const orgRows = payload.orgId
+    ? await db.query.orgs.findMany({
+        where: (o, { eq }) => eq(o.id, payload.orgId!),
+      })
+    : await db.query.orgs.findMany();
+
+  for (const org of orgRows) {
+    const ctx = createContext({
+      db,
+      orgId: org.id,
+      actor: { kind: 'system', reason: 'sync_automation_usage_events' },
+      flags: createFlagReader(db),
+      logger: silentLogger,
+    });
+    if (payload.validateFdeAdm) {
+      const summary = await validateFdeAdmAutomationUsageSync(ctx, {
+        lookbackMs: payload.lookbackMs,
+      });
+      if (summary.validation && !summary.validation.ok) {
+        throw new Error(
+          `FDE/ADM automation usage validation failed; missing or unsuccessful: ${summary.validation.missing.join(', ') || DEFAULT_VALIDATION_LABELS.join(', ')}`,
+        );
+      }
+    } else {
+      await syncAutomationUsageEvents(ctx, {
+        lookbackMs: payload.lookbackMs,
+      });
+    }
+  }
 });
 
 registerJobHandler('dispatch_attention_events', async (db) => {
@@ -395,4 +440,19 @@ export async function ensureSweepJob(): Promise<void> {
     dedupeKey: `sweep_stuck_runs:${new Date().toISOString().slice(0, 13)}`,
     priority: 5,
   });
+}
+
+/**
+ * Enqueue automation usage sync on a 5-minute cadence (6-minute lookback).
+ * Overlap avoids missing late-arriving Admin events.
+ */
+export async function ensureAutomationUsageSyncJob(): Promise<void> {
+  const db = getDb();
+  const fiveMinBucket = Math.floor(Date.now() / (5 * 60 * 1000));
+  await enqueueJob(db, {
+    kind: 'sync_automation_usage_events',
+    payload: {},
+    dedupeKey: `sync_automation_usage_events:${fiveMinBucket}`,
+    priority: 6,
+  }).catch(() => undefined);
 }

@@ -106,3 +106,4 @@ export type {
 } from './workitems/transition';
 export * from './estimates';
 export * from './cursor-credentials';
+export * from './automations';

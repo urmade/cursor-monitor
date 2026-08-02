@@ -10,4 +10,9 @@ describe('job handlers registry', () => {
     expect(kinds).toContain('dispatch_webhook_events');
     expect(kinds).toContain('poll_run');
   });
+
+  it('registers automation usage cadence sync', () => {
+    const kinds = listRegisteredKinds();
+    expect(kinds).toContain('sync_automation_usage_events');
+  });
 });

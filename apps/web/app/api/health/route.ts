@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getMigrationVersion, pingDb, getDb, mcpCallLog } from '@nexus/db';
 import { queueDepth, readLastCronTick } from '@nexus/jobs';
-import { readLastReconciliation } from '@nexus/core';
+import { readLastReconciliation, readLastAutomationUsageSync } from '@nexus/core';
 import { sql } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
@@ -18,6 +18,28 @@ export async function GET() {
   let mcp: { callsLastMinute: number } | null = null;
   let attention: { lastReconcileAt: string | null; drift: number | null } | null =
     null;
+  let automationUsage: {
+    at: string | null;
+    orgsOk: number;
+    orgsFailed: number;
+    validationOk: boolean | null;
+    validationMissing: string[] | null;
+    fdeAdm?: Array<{
+      label: string;
+      ok: boolean;
+      source: string | null;
+      eventsFetched: number;
+      agentsUpserted: number;
+      sample: {
+        automationId: string | null;
+        cloudAgentId: string | null;
+        targetRepo: string | null;
+        chargedCentsTotal: number;
+        durationMs: number | null;
+      } | null;
+      error: string | null;
+    }>;
+  } | null = null;
 
   try {
     dbOk = await pingDb();
@@ -74,6 +96,33 @@ export async function GET() {
     }
 
     webhookPending = await loadWebhookPending();
+
+    try {
+      const last = await readLastAutomationUsageSync();
+      if (last) {
+        const fdeAdm = last.orgResults.filter((r) =>
+          /\b(FDE|ADM)\b/i.test(r.label),
+        );
+        automationUsage = {
+          at: last.at,
+          orgsOk: last.orgResults.filter((r) => r.ok).length,
+          orgsFailed: last.orgResults.filter((r) => !r.ok).length,
+          validationOk: last.validation?.ok ?? null,
+          validationMissing: last.validation?.missing ?? null,
+          fdeAdm: fdeAdm.map((r) => ({
+            label: r.label,
+            ok: r.ok,
+            source: r.source,
+            eventsFetched: r.eventsFetched,
+            agentsUpserted: r.agentsUpserted,
+            sample: r.sample ?? null,
+            error: r.error ?? null,
+          })),
+        };
+      }
+    } catch {
+      automationUsage = null;
+    }
   }
 
   return NextResponse.json({
@@ -86,6 +135,7 @@ export async function GET() {
     mcp,
     attention,
     webhooks: { pendingDeliveries: webhookPending },
+    automationUsage,
   });
 }
 

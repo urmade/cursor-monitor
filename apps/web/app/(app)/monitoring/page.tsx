@@ -1,6 +1,7 @@
 import { EmptyState, PageHeader, Panel } from '@nexus/ui';
 import Link from 'next/link';
 import { CursorCredentialsStatus } from '../../../src/components/CursorCredentialsStatus';
+import { SyncedCloudAgentRunsSection } from '../../../src/components/SyncedCloudAgentRunsSection';
 import {
   formatApiKeyIdentity,
   formatCentsUsd,
@@ -14,6 +15,7 @@ import {
   summarizeHookRepos,
 } from '../../../src/server/hook-signals';
 import { getCachedProjectsPage } from '../../../src/server/monitoring-cache';
+import { loadSyncedMonitoringSection } from '../../../src/server/synced-cloud-agent-monitoring';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,6 +59,10 @@ export default async function MonitoringPage() {
     hookError = err instanceof Error ? err.message : String(err);
   }
 
+  const synced = await loadSyncedMonitoringSection({
+    clients: auth.credentials.map((c) => c.client),
+  });
+
   const totalCharged = projects.reduce(
     (sum, p) => (p.totalChargedCents != null ? sum + p.totalChargedCents : sum),
     0,
@@ -75,7 +81,7 @@ export default async function MonitoringPage() {
     <div className="space-y-4 p-4">
       <PageHeader
         title="Monitoring"
-        subtitle="Every repository is a project. Open one to inspect Automations, Cloud Agent runs, and local requests — with cost."
+        subtitle="Every repository is a project. Open one to inspect Automations, Cloud Agent runs, and local requests — with cost. Cadence-synced Admin usage appears in a separate section below."
         meta={
           projects.length > 0
             ? `${projects.length} project${projects.length === 1 ? '' : 's'}${agentCount > 0 ? ` · ${agentCount} Cloud Agent conversation${agentCount === 1 ? '' : 's'}` : ''}${hookEventCount > 0 ? ` · ${hookEventCount} local request${hookEventCount === 1 ? '' : 's'}` : ''}${orgCount > 1 ? ` · ${orgCount} orgs` : ''}${auth.credentials.length > 1 ? ` · ${auth.credentials.length} keys` : ''}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}`
@@ -172,6 +178,12 @@ export default async function MonitoringPage() {
             : ''}
         </p>
       ) : null}
+
+      <SyncedCloudAgentRunsSection
+        runs={synced.runs}
+        lastSyncAt={synced.lastSyncAt}
+        error={synced.error}
+      />
     </div>
   );
 }
