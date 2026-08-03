@@ -125,7 +125,7 @@ describe('stop-hook helpers', () => {
     expect(artifact.script.trimEnd().endsWith("printf '%s\\n' '{}'")).toBe(true);
   });
 
-  it('embeds endpoint and bypass into a native shell script', () => {
+  it('embeds endpoint and bypass into a POSIX sh script for Linux and macOS', () => {
     const artifact = buildStopHookArtifact({
       baseUrl: 'https://nexus.example',
       bypass: 'hardcoded-bypass-token',
@@ -133,19 +133,69 @@ describe('stop-hook helpers', () => {
     expect(artifact.endpoint).toBe('https://nexus.example/api/hooks/stop');
     expect(artifact.bypassConfigured).toBe(true);
     expect(artifact.scriptFilename).toBe('nexus-stop-to-supabase.sh');
-    expect(artifact.script.startsWith('#!/bin/bash')).toBe(true);
+    expect(artifact.script.startsWith('#!/bin/sh')).toBe(true);
+    expect(artifact.script).toContain('Native Linux + macOS');
     expect(artifact.script).toContain('hardcoded-bypass-token');
     expect(artifact.script).toContain('https://nexus.example/api/hooks/stop');
     expect(artifact.script).toContain('x-vercel-protection-bypass');
     expect(artifact.script).toContain('curl ');
     expect(artifact.script).toContain('detect_git');
-    expect(artifact.script).not.toMatch(/python3|urllib|#!\/usr\/bin\/env python/i);
+    expect(artifact.script).toContain('nexus-cursor-stop-hook/1.3');
+    // No bash-only arrays / locals — must parse under Linux /bin/sh (dash).
+    expect(artifact.script).not.toMatch(/CURL_ARGS=|\$\{CURL_ARGS\[@\]\}|local /);
+    expect(artifact.script).not.toMatch(/python3|urllib|#!\/usr\/bin\/env python|#!\/bin\/bash/i);
+    expect(artifact.installSteps.some((s) => /Linux and macOS/i.test(s))).toBe(
+      true,
+    );
     expect(JSON.parse(artifact.hooksJson)).toMatchObject({
       version: 1,
       hooks: {
         stop: [{ command: `.cursor/hooks/${artifact.scriptFilename}` }],
       },
     });
+  });
+
+  it('generated script runs under dash and bash without syntax errors', async () => {
+    const { writeFileSync, chmodSync, mkdtempSync, rmSync } = await import(
+      'node:fs'
+    );
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { spawnSync } = await import('node:child_process');
+
+    const artifact = buildStopHookArtifact({
+      baseUrl: 'https://example.test',
+      bypass: 'tok',
+    });
+    const dir = mkdtempSync(join(tmpdir(), 'nexus-stop-hook-'));
+    const scriptPath = join(dir, artifact.scriptFilename);
+    const logPath = join(dir, 'hook.log');
+    writeFileSync(scriptPath, artifact.script, { mode: 0o755 });
+    chmodSync(scriptPath, 0o755);
+
+    const payload = JSON.stringify({
+      conversation_id: 'c1',
+      status: 'completed',
+      workspace_roots: [process.cwd()],
+    });
+
+    for (const shell of ['sh', 'bash'] as const) {
+      const result = spawnSync(shell, [scriptPath], {
+        input: payload,
+        encoding: 'utf8',
+        env: { ...process.env, NEXUS_STOP_HOOK_LOG: logPath },
+      });
+      expect(result.status, `${shell} exit`).toBe(0);
+      expect(result.stdout.trim(), `${shell} stdout`).toBe('{}');
+      expect(result.stderr ?? '', `${shell} stderr`).toBe('');
+    }
+
+    const { readFileSync } = await import('node:fs');
+    const log = readFileSync(logPath, 'utf8');
+    expect(log).toMatch(/FAILED status=/);
+    expect(log).toContain('https://example.test/api/hooks/stop');
+
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('normalizes git remotes into owner/repo', () => {

@@ -40,7 +40,7 @@ export default async function HooksSetupPage() {
     <div className="space-y-4 p-4 max-w-3xl">
       <PageHeader
         title="Install stop hook"
-        subtitle="Pure bash + curl + git (macOS native, no language runtimes). The Vercel protection bypass from this deployment is embedded so any project can POST."
+        subtitle="POSIX sh + curl + git (native on Linux and macOS, no language runtimes). The Vercel protection bypass from this deployment is embedded so any project can POST."
         meta="Hooks / Setup"
         actions={
           <Button asChild size="sm" variant="ghost">
