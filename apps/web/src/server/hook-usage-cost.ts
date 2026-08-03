@@ -44,6 +44,9 @@ function modelMatches(
 /**
  * Pick the best usage event for a stop-hook turn: prefer model match, then
  * most recent timestamp within the lookback window.
+ *
+ * A turn that reports a user email is only ever priced from that user's events —
+ * borrowing a teammate's event would bill their spend to this repository.
  */
 export function selectUsageEventForStopHook(
   events: FilteredUsageEvent[],
@@ -54,10 +57,10 @@ export function selectUsageEventForStopHook(
   const email = opts.userEmail?.trim().toLowerCase() || null;
   let candidates = events;
   if (email) {
-    const byEmail = events.filter(
+    candidates = events.filter(
       (e) => (e.userEmail ?? '').trim().toLowerCase() === email,
     );
-    if (byEmail.length > 0) candidates = byEmail;
+    if (candidates.length === 0) return null;
   }
 
   const withModel = candidates.filter((e) =>
@@ -181,11 +184,14 @@ export async function lookupStopHookUsageCost(input: {
     });
 
     if (!matched) {
+      const window = `${Math.round(lookbackMs / 60000)}m`;
       return {
         chargedCents: null,
         costSource: source,
         usageEvent: null,
-        costLookupError: `No usage events matched in the last ${Math.round(lookbackMs / 60000)}m`,
+        costLookupError: email
+          ? `No usage events for ${email} in the last ${window}`
+          : `No usage events matched in the last ${window}`,
       };
     }
 
@@ -202,7 +208,9 @@ export async function lookupStopHookUsageCost(input: {
       costLookupError:
         charged == null
           ? 'Matched usage event lacked chargedCents'
-          : null,
+          : email
+            ? null
+            : 'Turn reported no user email — cost comes from the newest matching usage event and may belong to another user',
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

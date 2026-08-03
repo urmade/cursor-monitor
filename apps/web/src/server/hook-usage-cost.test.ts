@@ -42,6 +42,23 @@ describe('selectUsageEventForStopHook', () => {
     });
     expect(hit?.timestamp).toBe('2000');
   });
+
+  it('never prices a turn from another user’s usage event', () => {
+    expect(
+      selectUsageEventForStopHook(events, {
+        userEmail: 'nobody@example.com',
+        model: 'gpt-5',
+      }),
+    ).toBeNull();
+  });
+
+  it('still matches on model when the turn reports no email', () => {
+    const hit = selectUsageEventForStopHook(events, {
+      userEmail: null,
+      model: 'composer',
+    });
+    expect(hit?.chargedCents).toBe(1);
+  });
 });
 
 describe('lookupStopHookUsageCost', () => {
@@ -131,6 +148,27 @@ describe('lookupStopHookUsageCost', () => {
     expect(result.costSource).toBe(
       'organizations.filtered-usage-events:explicit',
     );
+  });
+
+  it('reports no cost when the turn’s user has no usage events', async () => {
+    process.env.CURSOR_ORGANIZATION_ID = 'org_test';
+    process.env.CURSOR_ORGANIZATION_API_KEY = 'org-key';
+
+    const result = await lookupStopHookUsageCost({
+      userEmail: 'dev@example.com',
+      model: 'composer',
+      fetchEvents: async () => [
+        {
+          timestamp: String(Date.now()),
+          userEmail: 'someone-else@example.com',
+          model: 'composer',
+          chargedCents: 99,
+        },
+      ],
+    });
+    expect(result.chargedCents).toBeNull();
+    expect(result.usageEvent).toBeNull();
+    expect(result.costLookupError).toMatch(/No usage events for dev@example.com/);
   });
 
   it('returns a soft error when no API key is configured', async () => {

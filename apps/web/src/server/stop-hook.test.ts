@@ -13,6 +13,8 @@ import {
   normalizeRepoLabel,
   readProtectionBypass,
   resolvePublicBaseUrl,
+  resolvePublicBaseUrlDetailed,
+  STOP_HOOK_LOG_FILE,
 } from './stop-hook';
 
 describe('stop-hook helpers', () => {
@@ -59,6 +61,68 @@ describe('stop-hook helpers', () => {
   it('resolves public base URL from DEPLOYMENT_URL', () => {
     process.env.DEPLOYMENT_URL = 'https://nexus.example/';
     expect(resolvePublicBaseUrl()).toBe('https://nexus.example');
+  });
+
+  it('prefers the stable production domain over the deployment host', () => {
+    delete process.env.DEPLOYMENT_URL;
+    process.env.VERCEL_ENV = 'production';
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = 'nexus.example.com';
+    process.env.VERCEL_URL = 'nexus-abc123.example.com';
+
+    const resolved = resolvePublicBaseUrlDetailed(
+      new Request('https://nexus-abc123.example.com/hooks/setup', {
+        headers: { 'x-forwarded-host': 'nexus-abc123.example.com' },
+      }),
+    );
+    expect(resolved.baseUrl).toBe('https://nexus.example.com');
+    expect(resolved.source).toBe('production_domain');
+    expect(resolved.stable).toBe(true);
+  });
+
+  it('uses the branch domain on preview so redeploys keep the endpoint', () => {
+    delete process.env.DEPLOYMENT_URL;
+    process.env.VERCEL_ENV = 'preview';
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = 'nexus.example.com';
+    process.env.VERCEL_BRANCH_URL = 'nexus-git-feat-x.example.com';
+    process.env.VERCEL_URL = 'nexus-xyz789.example.com';
+
+    const resolved = resolvePublicBaseUrlDetailed();
+    expect(resolved.baseUrl).toBe('https://nexus-git-feat-x.example.com');
+    expect(resolved.source).toBe('branch_domain');
+    expect(resolved.environment).toBe('preview');
+    expect(resolved.stable).toBe(true);
+  });
+
+  it('flags a deployment-scoped endpoint as unstable', () => {
+    delete process.env.DEPLOYMENT_URL;
+    delete process.env.VERCEL_ENV;
+    delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    delete process.env.VERCEL_BRANCH_URL;
+    process.env.VERCEL_URL = 'nexus-abc123.example.com';
+
+    const resolved = resolvePublicBaseUrlDetailed(
+      new Request('https://nexus-abc123.example.com/hooks/setup', {
+        headers: { 'x-forwarded-host': 'nexus-abc123.example.com' },
+      }),
+    );
+    expect(resolved.baseUrl).toBe('https://nexus-abc123.example.com');
+    expect(resolved.source).toBe('vercel_deployment');
+    expect(resolved.stable).toBe(false);
+  });
+
+  it('records POST outcomes so rejected hooks are not silent', () => {
+    const artifact = buildStopHookArtifact({
+      baseUrl: 'https://nexus.example',
+      bypass: 'hardcoded-bypass-token',
+    });
+    expect(artifact.logFile).toBe(STOP_HOOK_LOG_FILE);
+    expect(artifact.script).toContain("-w '%{http_code}'");
+    expect(artifact.script).toContain('FAILED status=');
+    expect(artifact.script).toContain(
+      'LOG_FILE="${NEXUS_STOP_HOOK_LOG:-$HOME/.cursor/nexus-stop-hook.log}"',
+    );
+    // stdout must stay a bare hook response, whatever the POST did.
+    expect(artifact.script.trimEnd().endsWith("printf '%s\\n' '{}'")).toBe(true);
   });
 
   it('embeds endpoint and bypass into a native shell script', () => {

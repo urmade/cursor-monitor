@@ -2,6 +2,8 @@
 
 import { useMemo, useRef, useState } from 'react';
 import { Button, Panel, PanelBody, PanelHeader } from '@nexus/ui';
+import { formatRelativeTime } from '../lib/monitoring-format';
+import type { HookIngestStatus } from '../server/hook-signals';
 
 async function copyText(value: string): Promise<void> {
   try {
@@ -108,6 +110,11 @@ export function StopHookCopyPanel({
   endpoint,
   bypassConfigured,
   installSteps,
+  logFile,
+  environment,
+  endpointStable,
+  ingest,
+  ingestError,
 }: {
   hooksJson: string;
   script: string;
@@ -115,6 +122,11 @@ export function StopHookCopyPanel({
   endpoint: string;
   bypassConfigured: boolean;
   installSteps: string[];
+  logFile: string;
+  environment: string | null;
+  endpointStable: boolean;
+  ingest: HookIngestStatus | null;
+  ingestError: string | null;
 }) {
   const combined = [
     `# 1) Save as .cursor/hooks/${scriptFilename}`,
@@ -143,6 +155,34 @@ export function StopHookCopyPanel({
           through deployment protection into Supabase.
         </p>
       )}
+
+      {environment === 'preview' ? (
+        <p className="rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning-fg">
+          This is a <strong>preview</strong> deployment: turns posted to the
+          endpoint above land in the preview database and never appear in
+          production Monitoring. Copy the hook from the production URL for
+          day-to-day use.
+        </p>
+      ) : null}
+
+      {!endpointStable ? (
+        <p className="rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning-fg">
+          The endpoint resolves to a single deployment host, which changes on
+          every deploy. Set <code className="font-mono text-xs">DEPLOYMENT_URL</code>{' '}
+          to a stable domain so already-installed hooks keep reaching the current
+          build.
+        </p>
+      ) : null}
+
+      <p className="text-sm text-fg-muted">
+        {ingestError
+          ? `Stored turns unavailable: ${ingestError}`
+          : ingest == null || ingest.totalEvents === 0
+            ? 'No stop-hook turns stored yet in this environment.'
+            : `${ingest.totalEvents} turn${ingest.totalEvents === 1 ? '' : 's'} stored · newest ${formatRelativeTime(ingest.latest?.receivedAt)}${ingest.latest?.repo ? ` from ${ingest.latest.repo}` : ''}${ingest.latest?.userEmail ? ` (${ingest.latest.userEmail})` : ''}.`}{' '}
+        Local POST outcomes are appended to{' '}
+        <code className="font-mono text-xs text-fg">{logFile}</code>.
+      </p>
 
       <ol className="list-decimal space-y-1 pl-5 text-sm text-fg-muted">
         {installSteps.map((step) => (

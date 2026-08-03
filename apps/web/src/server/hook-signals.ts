@@ -1,4 +1,4 @@
-import { desc } from 'drizzle-orm';
+import { count, desc, sql } from 'drizzle-orm';
 import { cursorStopHookEvents, getDb } from '@nexus/db';
 
 /** Aligns with Monitoring's {@link NO_REPO_GROUP} in `cursor.ts`. */
@@ -122,15 +122,72 @@ export async function loadHookSignalsTree(limit = 500): Promise<HookSignalsTree>
   return buildHookSignalsTree(events, rows.length >= limit);
 }
 
-/** Hook signals for one Monitoring project (repository). */
+/**
+ * Hook signals for one Monitoring project (repository).
+ *
+ * Scoped in SQL: filtering a global newest-N page would hide a project's whole
+ * history as soon as busier repositories fill that page.
+ */
 export async function loadHookSignalsForRepo(
   repo: string,
   limit = 500,
 ): Promise<HookRepoBucket | null> {
   const canonical =
     repo === HOOK_NO_REPO_GROUP ? HOOK_NO_REPO_GROUP : normalizeRepoKey(repo);
-  const tree = await loadHookSignalsTree(limit);
+
+  const rows = await getDb()
+    .select()
+    .from(cursorStopHookEvents)
+    .where(
+      canonical === HOOK_NO_REPO_GROUP
+        ? sql`${cursorStopHookEvents.repo} is null or btrim(${cursorStopHookEvents.repo}) = ''`
+        : sql`lower(btrim(${cursorStopHookEvents.repo})) = ${canonical}`,
+    )
+    .orderBy(desc(cursorStopHookEvents.receivedAt))
+    .limit(limit);
+
+  const tree = buildHookSignalsTree(rows.map(mapRowToEvent), rows.length >= limit);
   return tree.repos.find((r) => r.repo === canonical) ?? null;
+}
+
+/** Newest stored stop-hook event, for "is ingestion alive?" checks. */
+export type HookIngestStatus = {
+  totalEvents: number;
+  latest: {
+    receivedAt: string;
+    repo: string | null;
+    userEmail: string | null;
+  } | null;
+};
+
+export async function loadHookIngestStatus(): Promise<HookIngestStatus> {
+  const db = getDb();
+  const [totals] = await db
+    .select({ value: count() })
+    .from(cursorStopHookEvents);
+  const [newest] = await db
+    .select({
+      receivedAt: cursorStopHookEvents.receivedAt,
+      repo: cursorStopHookEvents.repo,
+      userEmail: cursorStopHookEvents.userEmail,
+    })
+    .from(cursorStopHookEvents)
+    .orderBy(desc(cursorStopHookEvents.receivedAt))
+    .limit(1);
+
+  return {
+    totalEvents: Number(totals?.value ?? 0),
+    latest: newest
+      ? {
+          receivedAt:
+            newest.receivedAt instanceof Date
+              ? newest.receivedAt.toISOString()
+              : String(newest.receivedAt),
+          repo: newest.repo,
+          userEmail: newest.userEmail,
+        }
+      : null,
+  };
 }
 
 export function summarizeHookRepos(tree: HookSignalsTree): HookRepoSummary[] {

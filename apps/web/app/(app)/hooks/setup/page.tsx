@@ -3,9 +3,13 @@ import { headers } from 'next/headers';
 import Link from 'next/link';
 import { StopHookCopyPanel } from '../../../../src/components/StopHookCopyPanel';
 import {
+  loadHookIngestStatus,
+  type HookIngestStatus,
+} from '../../../../src/server/hook-signals';
+import {
   buildStopHookArtifact,
   readProtectionBypass,
-  resolvePublicBaseUrl,
+  resolvePublicBaseUrlDetailed,
 } from '../../../../src/server/stop-hook';
 
 export const dynamic = 'force-dynamic';
@@ -18,10 +22,19 @@ export default async function HooksSetupPage() {
     headers: h,
   });
 
+  const target = resolvePublicBaseUrlDetailed(req);
   const artifact = buildStopHookArtifact({
-    baseUrl: resolvePublicBaseUrl(req),
+    baseUrl: target.baseUrl,
     bypass: readProtectionBypass(),
   });
+
+  let ingest: HookIngestStatus | null = null;
+  let ingestError: string | null = null;
+  try {
+    ingest = await loadHookIngestStatus();
+  } catch (err) {
+    ingestError = err instanceof Error ? err.message : String(err);
+  }
 
   return (
     <div className="space-y-4 p-4 max-w-3xl">
@@ -42,6 +55,11 @@ export default async function HooksSetupPage() {
         endpoint={artifact.endpoint}
         bypassConfigured={artifact.bypassConfigured}
         installSteps={artifact.installSteps}
+        logFile={artifact.logFile}
+        environment={target.environment}
+        endpointStable={target.stable}
+        ingest={ingest}
+        ingestError={ingestError}
       />
     </div>
   );

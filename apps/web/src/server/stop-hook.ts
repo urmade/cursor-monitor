@@ -9,19 +9,113 @@ export function readProtectionBypass(): string | null {
   return value.length > 0 ? value : null;
 }
 
-export function resolvePublicBaseUrl(req?: Request): string {
-  const fromEnv =
-    process.env.DEPLOYMENT_URL?.trim() ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
-  if (fromEnv) return fromEnv.replace(/\/$/, '');
+/** Where {@link resolvePublicBaseUrlDetailed} took the base URL from. */
+export type PublicBaseUrlSource =
+  | 'deployment_url_env'
+  | 'production_domain'
+  | 'branch_domain'
+  | 'request_host'
+  | 'vercel_deployment'
+  | 'localhost';
 
-  if (req) {
-    const proto = req.headers.get('x-forwarded-proto') ?? 'https';
-    const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host');
-    if (host) return `${proto}://${host}`.replace(/\/$/, '');
+export type ResolvedPublicBaseUrl = {
+  baseUrl: string;
+  source: PublicBaseUrlSource;
+  /** Vercel environment this URL belongs to, when the platform reports one. */
+  environment: string | null;
+  /**
+   * False when the URL is tied to one immutable deployment: hooks installed
+   * from it keep posting to that build and stop matching later deploys.
+   */
+  stable: boolean;
+};
+
+function withoutTrailingSlash(value: string): string {
+  return value.replace(/\/$/, '');
+}
+
+function envValue(name: string): string | null {
+  const value = process.env[name]?.trim();
+  return value ? value : null;
+}
+
+/**
+ * Resolve the base URL that external tooling (Cursor stop hooks) should post to.
+ *
+ * Deployment-scoped hosts (`VERCEL_URL`) are a last resort: they change on every
+ * deploy, so a hook installed from one silently keeps writing to an old build —
+ * and a preview host writes into the preview database, invisible in production.
+ */
+export function resolvePublicBaseUrlDetailed(req?: Request): ResolvedPublicBaseUrl {
+  const environment = envValue('VERCEL_ENV');
+
+  const override = envValue('DEPLOYMENT_URL');
+  if (override) {
+    return {
+      baseUrl: withoutTrailingSlash(override),
+      source: 'deployment_url_env',
+      environment,
+      stable: true,
+    };
   }
 
-  return 'http://localhost:3000';
+  const productionDomain = envValue('VERCEL_PROJECT_PRODUCTION_URL');
+  if (environment === 'production' && productionDomain) {
+    return {
+      baseUrl: `https://${withoutTrailingSlash(productionDomain)}`,
+      source: 'production_domain',
+      environment,
+      stable: true,
+    };
+  }
+
+  const branchDomain = envValue('VERCEL_BRANCH_URL');
+  if (environment === 'preview' && branchDomain) {
+    return {
+      baseUrl: `https://${withoutTrailingSlash(branchDomain)}`,
+      source: 'branch_domain',
+      environment,
+      stable: true,
+    };
+  }
+
+  const deploymentHost = envValue('VERCEL_URL');
+  if (req) {
+    const host = (
+      req.headers.get('x-forwarded-host') ??
+      req.headers.get('host') ??
+      ''
+    ).trim();
+    if (host && host !== deploymentHost) {
+      const proto = req.headers.get('x-forwarded-proto') ?? 'https';
+      return {
+        baseUrl: withoutTrailingSlash(`${proto}://${host}`),
+        source: 'request_host',
+        environment,
+        stable: true,
+      };
+    }
+  }
+
+  if (deploymentHost) {
+    return {
+      baseUrl: `https://${withoutTrailingSlash(deploymentHost)}`,
+      source: 'vercel_deployment',
+      environment,
+      stable: false,
+    };
+  }
+
+  return {
+    baseUrl: 'http://localhost:3000',
+    source: 'localhost',
+    environment,
+    stable: true,
+  };
+}
+
+export function resolvePublicBaseUrl(req?: Request): string {
+  return resolvePublicBaseUrlDetailed(req).baseUrl;
 }
 
 export function authorizeStopHookRequest(req: Request): boolean {
@@ -116,8 +210,13 @@ export type StopHookArtifact = {
   hooksJson: string;
   scriptFilename: string;
   script: string;
+  /** Local file the script appends every POST outcome to. */
+  logFile: string;
   installSteps: string[];
 };
+
+/** Default local log path written by the generated script. */
+export const STOP_HOOK_LOG_FILE = '~/.cursor/nexus-stop-hook.log';
 
 /**
  * Build a ready-to-paste Cursor stop hook that POSTs stdin metadata to Nexus.
@@ -261,14 +360,34 @@ export function buildStopHookArtifact(opts: {
     'CURL_ARGS=(-sS --connect-timeout 5 --max-time 12 -X POST "$ENDPOINT"',
     '  -H "Content-Type: application/json"',
     '  -H "Accept: application/json"',
-    '  -H "User-Agent: nexus-cursor-stop-hook/1.1")',
+    '  -H "User-Agent: nexus-cursor-stop-hook/1.2")',
     'if [ -n "$BYPASS" ]; then',
     '  CURL_ARGS+=(-H "x-vercel-protection-bypass: $BYPASS")',
     'fi',
     'CURL_ARGS+=(--data-binary "$BODY")',
     '',
-    '# Never block the agent on telemetry failure.',
-    'curl "${CURL_ARGS[@]}" >/dev/null 2>&1',
+    'LOG_FILE="${NEXUS_STOP_HOOK_LOG:-' +
+      STOP_HOOK_LOG_FILE.replace('~', '$HOME') +
+      '}"',
+    'mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null',
+    'STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)',
+    'BODY_FILE="${TMPDIR:-/tmp}/nexus-stop-hook-$$.out"',
+    '',
+    '# Never block the agent on telemetry failure — but do record the outcome, so a',
+    '# rejected POST (401 bypass, 404 removed deployment) is not silently lost.',
+    "STATUS=$(curl \"${CURL_ARGS[@]}\" -o \"$BODY_FILE\" -w '%{http_code}' 2>/dev/null)",
+    'if [ -z "$STATUS" ]; then STATUS="000"; fi',
+    'if [ "$STATUS" = "200" ]; then',
+    '  printf \'%s ok %s\\n\' "$STAMP" "$ENDPOINT" >>"$LOG_FILE" 2>/dev/null',
+    'else',
+    '  printf \'%s FAILED status=%s %s %s\\n\' "$STAMP" "$STATUS" "$ENDPOINT" "$(head -c 300 "$BODY_FILE" 2>/dev/null | tr -d \'\\r\\n\')" >>"$LOG_FILE" 2>/dev/null',
+    'fi',
+    'rm -f "$BODY_FILE" 2>/dev/null',
+    '',
+    'LOG_LINES=$(wc -l <"$LOG_FILE" 2>/dev/null | tr -d \' \')',
+    'if [ -n "$LOG_LINES" ] && [ "$LOG_LINES" -gt 500 ] 2>/dev/null; then',
+    '  tail -n 200 "$LOG_FILE" >"$LOG_FILE.tmp" 2>/dev/null && mv "$LOG_FILE.tmp" "$LOG_FILE" 2>/dev/null',
+    'fi',
     '',
     "printf '%s\\n' '{}'",
     '',
@@ -280,11 +399,13 @@ export function buildStopHookArtifact(opts: {
     hooksJson,
     scriptFilename,
     script,
+    logFile: STOP_HOOK_LOG_FILE,
     installSteps: [
       `Create directory .cursor/hooks/ in your project (if missing).`,
       `Save the shell script as .cursor/hooks/${scriptFilename} and run: chmod +x .cursor/hooks/${scriptFilename}`,
       `Merge the hooks.json snippet into .cursor/hooks.json (project) or ~/.cursor/hooks.json (user).`,
       `Requires only bash, curl, and git (included with macOS). On stop, metadata plus detected repo/branch are POSTed to Nexus.`,
+      `Every POST appends its HTTP status to ${STOP_HOOK_LOG_FILE} — check it (tail -n 5 ${STOP_HOOK_LOG_FILE}) when turns stop appearing in Monitoring.`,
     ],
   };
 }
