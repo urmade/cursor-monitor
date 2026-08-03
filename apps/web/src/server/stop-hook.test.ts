@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildHookSignalsTree, mergeProjectsWithHookSummaries, type HookSignalEvent } from './hook-signals';
+import {
+  buildHookSignalsTree,
+  projectsFromHookSummaries,
+  summarizeHookRepos,
+  type HookSignalEvent,
+} from './hook-signals';
 import {
   authorizeStopHookRequest,
   buildStopHookArtifact,
@@ -215,40 +220,42 @@ describe('hook signals tree', () => {
     );
   });
 
-  it('merges hook repo summaries into monitoring projects', () => {
-    const merged = mergeProjectsWithHookSummaries(
-      [
-        {
-          repo: 'acme/one',
-          conversationCount: 2,
-          prCount: 1,
-          totalChargedCents: 100,
-          totalRawCents: 140,
-          latestCreatedAt: '2026-07-30T10:00:00.000Z',
-        },
-      ],
-      [
-        {
-          repo: 'acme/one',
-          eventCount: 3,
-          conversationCount: 1,
-          totalChargedCents: 50,
-          latestAt: '2026-07-31T10:00:00.000Z',
-        },
-        {
-          repo: 'acme/hooks-only',
-          eventCount: 2,
-          conversationCount: 2,
-          totalChargedCents: 12.34,
-          latestAt: '2026-07-29T10:00:00.000Z',
-        },
-      ],
-    );
-    expect(merged.map((p) => p.repo)).toEqual(['acme/one', 'acme/hooks-only']);
-    expect(merged[0]!.totalChargedCents).toBe(150);
-    expect(merged[0]!.conversationCount).toBe(3);
-    expect(merged[0]!.latestCreatedAt).toBe('2026-07-31T10:00:00.000Z');
-    expect(merged[1]!.conversationCount).toBe(2);
-    expect(merged[1]!.prCount).toBe(0);
+  it('builds monitoring projects from hook repo summaries', () => {
+    const projects = projectsFromHookSummaries([
+      {
+        repo: 'acme/one',
+        eventCount: 3,
+        conversationCount: 1,
+        totalChargedCents: 50,
+        latestAt: '2026-07-31T10:00:00.000Z',
+      },
+      {
+        repo: 'acme/hooks-only',
+        eventCount: 2,
+        conversationCount: 2,
+        totalChargedCents: 12.34,
+        latestAt: '2026-07-29T10:00:00.000Z',
+      },
+      {
+        repo: 'No repository',
+        eventCount: 1,
+        conversationCount: 1,
+        totalChargedCents: null,
+        latestAt: '2026-07-28T10:00:00.000Z',
+      },
+    ]);
+    expect(projects.map((p) => p.repo)).toEqual([
+      'acme/one',
+      'acme/hooks-only',
+      'No repository',
+    ]);
+    expect(projects[0]).toMatchObject({
+      conversationCount: 1,
+      eventCount: 3,
+      totalChargedCents: 50,
+      latestCreatedAt: '2026-07-31T10:00:00.000Z',
+    });
+    expect(projects[1]!.conversationCount).toBe(2);
+    expect(summarizeHookRepos(buildHookSignalsTree([])).length).toBe(0);
   });
 });

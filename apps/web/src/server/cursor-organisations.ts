@@ -21,10 +21,7 @@ import {
   type CursorApiKeyKind,
   type CursorOrganisationView as DbOrganisationView,
 } from '@nexus/core';
-import {
-  combinedCredentialFingerprint,
-  formatApiKeyIdentity,
-} from './cursor';
+import { formatApiKeyIdentity } from './cursor';
 import {
   clearCursorOrganisations,
   maskApiKey,
@@ -35,7 +32,6 @@ import {
   type StoredCursorOrganisation,
 } from './cursor-org-store';
 import { currentUser } from './identity';
-import { invalidateMonitoringCache } from './monitoring-cache';
 import { requireSession } from './session';
 
 export type {
@@ -101,26 +97,6 @@ function parseKeyKind(raw: string): CursorApiKeyKind {
   return raw === 'service_account' || raw === 'team'
     ? 'service_account'
     : 'user';
-}
-
-async function invalidateFingerprints(fingerprints: string[]): Promise<void> {
-  for (const fingerprint of new Set(fingerprints.filter(Boolean))) {
-    await invalidateMonitoringCache(fingerprint);
-  }
-}
-
-function activeFingerprints(views: DbOrganisationView[]): string[] {
-  return views.flatMap((org) => org.keys.map((key) => key.fingerprint));
-}
-
-async function invalidateCredentialSets(
-  fingerprintSets: string[][],
-  changedFingerprints: string[] = [],
-): Promise<void> {
-  await invalidateFingerprints([
-    ...changedFingerprints,
-    ...fingerprintSets.map(combinedCredentialFingerprint),
-  ]);
 }
 
 /**
@@ -463,11 +439,6 @@ export async function actionUpsertCursorOrganisation(
       return { ok: false, error: added.error.message };
     }
     teamKeySaved = true;
-    const currentViews = await listDbOrganisationViews(session.ctx);
-    await invalidateCredentialSets(
-      [activeFingerprints(currentViews)],
-      [added.value.fingerprint],
-    );
   }
 
   // Drop legacy cookies only after a team key was durably saved.
@@ -547,14 +518,6 @@ export async function actionAddCursorOrganisationApiKey(
     return { ok: false, error: added.error.message };
   }
 
-  const previousFingerprints = activeFingerprints(orgs);
-  await invalidateCredentialSets(
-    [
-      previousFingerprints,
-      [...previousFingerprints, added.value.fingerprint],
-    ],
-    [added.value.fingerprint],
-  );
   await clearCursorOrganisations();
   revalidatePath('/settings/organisations');
   revalidatePath('/monitoring');
@@ -741,7 +704,6 @@ export async function actionUpdateCursorOrganisationApiKey(
   }
 
   const views = await listDbOrganisationViews(session.ctx);
-  const previousFingerprints = activeFingerprints(views);
   const existingKey = views
     .flatMap((org) => org.keys.map((key) => ({ org, key })))
     .find((row) => row.key.id === apiKeyId);
@@ -786,14 +748,6 @@ export async function actionUpdateCursorOrganisationApiKey(
     return { ok: false, error: updated.error.message };
   }
 
-  const nextViews = await listDbOrganisationViews(session.ctx);
-  await invalidateCredentialSets(
-    [previousFingerprints, activeFingerprints(nextViews)],
-    [
-      existingKey.key.fingerprint,
-      updated.value.fingerprint,
-    ].filter(Boolean),
-  );
   revalidatePath('/settings/organisations');
   revalidatePath('/monitoring');
 
@@ -810,24 +764,12 @@ export async function actionRemoveCursorOrganisationApiKey(
   apiKeyId: string,
 ): Promise<OrganisationMutationResult> {
   const session = await requireSession();
-  const views = await listDbOrganisationViews(session.ctx);
-  const previousFingerprints = activeFingerprints(views);
-  const fingerprint =
-    views.flatMap((org) => org.keys).find((key) => key.id === apiKeyId)
-      ?.fingerprint ?? null;
 
   const revoked = await revokeCursorOrganisationApiKey(session.ctx, apiKeyId);
   if (!revoked.ok) {
     return { ok: false, error: revoked.error.message };
   }
 
-  await invalidateCredentialSets(
-    [
-      previousFingerprints,
-      previousFingerprints.filter((value) => value !== fingerprint),
-    ],
-    fingerprint ? [fingerprint] : [],
-  );
   revalidatePath('/settings/organisations');
   revalidatePath('/monitoring');
   return { ok: true };
@@ -837,26 +779,12 @@ export async function actionRemoveCursorOrganisation(
   id: string,
 ): Promise<OrganisationMutationResult> {
   const session = await requireSession();
-  const existing = await listDbOrganisationViews(session.ctx);
-  const previousFingerprints = activeFingerprints(existing);
-  const target = existing.find((row) => row.id === id);
 
   const deleted = await deleteCursorOrganisation(session.ctx, id);
   if (!deleted.ok) {
     return { ok: false, error: deleted.error.message };
   }
 
-  const removedFingerprints =
-    target?.keys.map((key) => key.fingerprint) ?? [];
-  await invalidateCredentialSets(
-    [
-      previousFingerprints,
-      previousFingerprints.filter(
-        (fingerprint) => !removedFingerprints.includes(fingerprint),
-      ),
-    ],
-    removedFingerprints,
-  );
   revalidatePath('/settings/organisations');
   revalidatePath('/monitoring');
   return { ok: true };
@@ -864,27 +792,12 @@ export async function actionRemoveCursorOrganisation(
 
 export async function actionRemoveAllCursorOrganisations(): Promise<OrganisationMutationResult> {
   const session = await requireSession();
-  const existing = await listDbOrganisationViews(session.ctx);
-  const previousFingerprints = activeFingerprints(existing);
-  const owned = existing.filter((org) => org.canRemove);
 
   const deleted = await deleteAllCursorOrganisations(session.ctx);
   if (!deleted.ok) {
     return { ok: false, error: deleted.error.message };
   }
 
-  const removedFingerprints = owned.flatMap((org) =>
-    org.keys.map((key) => key.fingerprint),
-  );
-  await invalidateCredentialSets(
-    [
-      previousFingerprints,
-      previousFingerprints.filter(
-        (fingerprint) => !removedFingerprints.includes(fingerprint),
-      ),
-    ],
-    removedFingerprints,
-  );
   // Legacy cookie only — DB rows owned by other members must remain.
   await clearCursorOrganisations();
   revalidatePath('/settings/organisations');

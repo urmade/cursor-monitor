@@ -6,7 +6,7 @@ import {
   actionRemoveCursorOrganisation,
 } from './cursor-organisations';
 import { readCursorOrganisations } from './cursor-org-store';
-import { credentialFingerprint } from './monitoring-cache';
+import { credentialFingerprint } from './cursor';
 
 export type ConnectCursorKeyResult =
   | { ok: true; identity: string; keyCount: number }

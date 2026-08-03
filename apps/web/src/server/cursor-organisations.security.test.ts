@@ -12,7 +12,6 @@ const {
   revokeCursorOrganisationApiKey,
   listCursorOrganisations,
   listDbOrganisationViews,
-  invalidateMonitoringCache,
   cookiesDelete,
   cookiesSet,
   cookiesGet,
@@ -31,7 +30,6 @@ const {
   revokeCursorOrganisationApiKey: vi.fn(),
   listCursorOrganisations: vi.fn(),
   listDbOrganisationViews: vi.fn(),
-  invalidateMonitoringCache: vi.fn(),
   cookiesDelete: vi.fn(),
   cookiesSet: vi.fn(),
   cookiesGet: vi.fn(),
@@ -60,19 +58,7 @@ vi.mock('./identity', () => ({
   currentUser: (...args: unknown[]) => currentUser(...args),
 }));
 
-vi.mock('./monitoring-cache', () => ({
-  invalidateMonitoringCache: (...args: unknown[]) =>
-    invalidateMonitoringCache(...args),
-  credentialFingerprint: (key: string) => `fp:${key.slice(0, 8)}`,
-}));
-
 vi.mock('./cursor', () => ({
-  combinedCredentialFingerprint: (fingerprints: string[]) => {
-    const sorted = [...fingerprints].filter(Boolean).sort();
-    if (sorted.length === 0) return '';
-    if (sorted.length === 1) return sorted[0];
-    return `combined:${sorted.join('|')}`;
-  },
   formatApiKeyIdentity: () => 'test-identity',
 }));
 
@@ -170,7 +156,6 @@ describe('organisation server-boundary security', () => {
     currentUser.mockResolvedValue({ externalSub: 'sub', rawClaims: {} });
     listCursorOrganisations.mockResolvedValue([]);
     listDbOrganisationViews.mockResolvedValue([]);
-    invalidateMonitoringCache.mockResolvedValue(undefined);
     cookiesGet.mockReturnValue(undefined);
   });
 
@@ -369,12 +354,11 @@ describe('organisation server-boundary security', () => {
       ok: false,
       error: 'Only signed-in users can manage Cursor credentials',
     });
-    expect(invalidateMonitoringCache).not.toHaveBeenCalled();
     expect(cookiesDelete).not.toHaveBeenCalled();
     expectNoKvApis();
   });
 
-  it('invalidates old and new combined caches when a key is revoked', async () => {
+  it('revokes an API key without requiring monitoring cache invalidation', async () => {
     listDbOrganisationViews.mockResolvedValue([
       {
         id: 'org-1',
@@ -413,11 +397,7 @@ describe('organisation server-boundary security', () => {
     });
 
     expect((await actionRemoveCursorOrganisationApiKey('key-b')).ok).toBe(true);
-    expect(invalidateMonitoringCache).toHaveBeenCalledWith('fp-b');
-    expect(invalidateMonitoringCache).toHaveBeenCalledWith(
-      'combined:fp-a|fp-b',
-    );
-    expect(invalidateMonitoringCache).toHaveBeenCalledWith('fp-a');
+    expect(revokeCursorOrganisationApiKey).toHaveBeenCalled();
   });
 
   it('fail-closes list views when a current user exists and DB listing throws', async () => {
@@ -551,7 +531,6 @@ describe('organisation server-boundary security', () => {
         apiKey: 'cursor_replacement_key_xxxxx',
       }),
     );
-    expect(invalidateMonitoringCache).toHaveBeenCalled();
   });
 
   it('deprecated connect action returns a safe error and never writes cookies', async () => {

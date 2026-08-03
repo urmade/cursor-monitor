@@ -831,8 +831,7 @@ export type SyncedCloudAgentRun = {
 
 /**
  * Recent Cloud Agent / automation runs persisted by the cadence sync job.
- * Used by Monitoring's separate "synced" section — does not replace the
- * live user-key catalogue.
+ * Available for Admin-backed tooling; Monitoring itself is hook-only.
  */
 export async function listSyncedCloudAgentRuns(
   ctx: ServiceContext,

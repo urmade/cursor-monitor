@@ -8,12 +8,9 @@ import {
   PanelHeader,
   type BadgeTone,
 } from '@nexus/ui';
-import Link from 'next/link';
 import { useMemo, useState, useTransition } from 'react';
 import { RunStatusBadge } from './RunStatusBadge';
 import {
-  automationDisplayName,
-  automationMetaFromRun,
   formatCentsUsd,
   formatRelativeTime,
   groupMonitoringRunsByBranch,
@@ -28,32 +25,13 @@ import type {
   HookSignalEvent,
 } from '../server/hook-signals';
 
-export type ProjectConversationRow = {
-  id: string;
-  name: string;
-  status?: string;
-  chargedCents: number | null;
-  createdAt?: string;
-  source?: string;
-  /** Branch the run targets (from its git snapshot), when known. */
-  branch?: string | null;
-  automationId?: string;
-  automationName?: string | null;
-  prUrl?: string | null;
-  prLabel?: string | null;
-  prName?: string | null;
-  prNumber?: string | null;
-};
-
-const KIND_TONES: Record<MonitoringRunKind, BadgeTone> = {
+const KIND_TONES: Record<'local', BadgeTone> = {
   local: 'neutral',
-  cloud: 'info',
-  automation: 'success',
 };
 
-/** One row in the unified request list, whatever ran it. */
+/** One row in the unified request list (stop-hook local requests). */
 type UnifiedRun = {
-  kind: MonitoringRunKind;
+  kind: Extract<MonitoringRunKind, 'local'>;
   id: string;
   name: string;
   branch: string | null;
@@ -61,8 +39,7 @@ type UnifiedRun = {
   createdAt?: string;
   /** Run-status token for RunStatusBadge (ERROR / FINISHED / …). */
   statusToken?: string;
-  cloud?: ProjectConversationRow;
-  local?: HookConversationBucket;
+  local: HookConversationBucket;
 };
 
 function SortControl({
@@ -102,38 +79,6 @@ function SortControl({
         ))}
       </div>
     </div>
-  );
-}
-
-function ImpactedPr({
-  run,
-}: {
-  run: Pick<
-    ProjectConversationRow,
-    'prUrl' | 'prName' | 'prNumber' | 'prLabel'
-  >;
-}) {
-  if (!run.prUrl && !run.prLabel) return null;
-  const label =
-    run.prName && run.prNumber
-      ? `${run.prName} (${run.prNumber})`
-      : run.prName || run.prNumber || run.prLabel;
-  if (!label) return null;
-  if (run.prUrl) {
-    return (
-      <a
-        href={run.prUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="max-w-[14rem] truncate text-xs text-accent hover:underline"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {label}
-      </a>
-    );
-  }
-  return (
-    <span className="max-w-[14rem] truncate text-xs text-fg-subtle">{label}</span>
   );
 }
 
@@ -207,46 +152,7 @@ function fullEntryJson(event: HookSignalEvent): string {
   );
 }
 
-/** Type-specific extra facts for Cloud Agent / Automation runs. */
-function CloudRunDetails({
-  run,
-  projectHref,
-}: {
-  run: ProjectConversationRow;
-  projectHref: string;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <DetailLine label="Pull request">
-        {run.prUrl || run.prLabel ? (
-          <ImpactedPr run={run} />
-        ) : (
-          <span className="text-fg-subtle">No pull request yet</span>
-        )}
-      </DetailLine>
-      {run.automationId ? (
-        <DetailLine label="Automation">
-          {automationDisplayName(run.automationId, run.automationName)}
-        </DetailLine>
-      ) : null}
-      {run.source ? <DetailLine label="Source">{run.source}</DetailLine> : null}
-      <DetailLine label="Created">{formatWhen(run.createdAt ?? '')}</DetailLine>
-      <DetailLine label="Conversation">
-        <span className="font-mono text-fg-subtle">{run.id}</span>
-      </DetailLine>
-      <div className="pt-1">
-        <Link
-          href={`${projectHref}/conversations/${encodeURIComponent(run.id)}`}
-          className="text-xs text-accent hover:underline"
-        >
-          Open conversation →
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-/** Type-specific extra facts for local (stop-hook) requests. */
+/** Extra facts for local (stop-hook) requests. */
 function LocalRunDetails({ conv }: { conv: HookConversationBucket }) {
   const model = conv.events.map((e) => e.model).find(Boolean) ?? null;
   return (
@@ -330,18 +236,10 @@ function LocalRunDetails({ conv }: { conv: HookConversationBucket }) {
 }
 
 /**
- * One request row — identical layout for local, Cloud Agent and Automation
- * runs. The summary shows kind, name, status, cost and age; expanding the row
- * reveals a details section with whatever the run type can offer.
+ * One local request row. The summary shows kind, name, status, cost and age;
+ * expanding reveals per-turn stop-hook details.
  */
-function RunRow({
-  run,
-  projectHref,
-}: {
-  run: UnifiedRun;
-  projectHref: string;
-}) {
-  const conversationHref = `${projectHref}/conversations/${encodeURIComponent(run.id)}`;
+function RunRow({ run }: { run: UnifiedRun }) {
   return (
     <li>
       <details className="group">
@@ -359,19 +257,9 @@ function RunRow({
           <Badge tone={KIND_TONES[run.kind]} className="shrink-0">
             {MONITORING_RUN_KIND_LABELS[run.kind]}
           </Badge>
-          {run.cloud ? (
-            <Link
-              href={conversationHref}
-              className="min-w-0 flex-1 truncate text-sm text-fg hover:underline"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {run.name}
-            </Link>
-          ) : (
-            <span className="min-w-0 flex-1 truncate text-sm text-fg">
-              {run.name}
-            </span>
-          )}
+          <span className="min-w-0 flex-1 truncate text-sm text-fg">
+            {run.name}
+          </span>
           <RunStatusBadge status={run.statusToken} />
           <span className="w-20 shrink-0 text-right text-sm font-medium tabular-nums text-fg">
             {formatCentsUsd(run.chargedCents)}
@@ -381,10 +269,7 @@ function RunRow({
           </span>
         </summary>
         <div className="border-t border-border px-3 py-2.5">
-          {run.cloud ? (
-            <CloudRunDetails run={run.cloud} projectHref={projectHref} />
-          ) : null}
-          {run.local ? <LocalRunDetails conv={run.local} /> : null}
+          <LocalRunDetails conv={run.local} />
         </div>
       </details>
     </li>
@@ -413,55 +298,36 @@ function BranchIcon() {
 }
 
 /**
- * Project detail: every request against this repository — local requests,
- * Cloud Agent runs and Automation runs — in one identical row format, grouped
+ * Project detail: local stop-hook requests against this repository, grouped
  * by the branch they target. Sorting is pure in-memory within branch groups.
  */
 export function ProjectConversationsClient({
   projectHref,
   initialSort,
-  runs,
   localRequests,
 }: {
   projectHref: string;
   initialSort: ConversationGroupSort;
-  /** Cloud Agent + Automation runs (flat; kind derived per row). */
-  runs: ProjectConversationRow[];
   localRequests?: HookRepoBucket | null;
 }) {
   const [sort, setSort] = useState<ConversationGroupSort>(initialSort);
   const [pending, startTransition] = useTransition();
 
   const groups = useMemo(() => {
-    const unified: UnifiedRun[] = [
-      ...runs.map((row): UnifiedRun => {
-        const automation = automationMetaFromRun(row);
-        return {
-          kind: automation ? 'automation' : 'cloud',
-          id: row.id,
-          name: row.name,
-          branch: row.branch?.trim() || null,
-          chargedCents: row.chargedCents,
-          createdAt: row.createdAt,
-          statusToken: row.status,
-          cloud: row,
-        };
+    const unified: UnifiedRun[] = (localRequests?.conversations ?? []).map(
+      (conv): UnifiedRun => ({
+        kind: 'local',
+        id: conv.conversationId,
+        name: conv.userEmail ?? shortConversationId(conv.conversationId),
+        branch: conv.gitBranch,
+        chargedCents: conv.chargedCentsTotal,
+        createdAt: conv.latestAt || undefined,
+        statusToken: summarizeLocalStatuses(conv.statuses),
+        local: conv,
       }),
-      ...(localRequests?.conversations ?? []).map(
-        (conv): UnifiedRun => ({
-          kind: 'local',
-          id: conv.conversationId,
-          name: conv.userEmail ?? shortConversationId(conv.conversationId),
-          branch: conv.gitBranch,
-          chargedCents: conv.chargedCentsTotal,
-          createdAt: conv.latestAt || undefined,
-          statusToken: summarizeLocalStatuses(conv.statuses),
-          local: conv,
-        }),
-      ),
-    ];
+    );
     return groupMonitoringRunsByBranch(unified, sort);
-  }, [runs, localRequests, sort]);
+  }, [localRequests, sort]);
 
   const runCount = groups.reduce((n, g) => n + g.runs.length, 0);
 
@@ -469,8 +335,8 @@ export function ProjectConversationsClient({
     return (
       <Panel>
         <EmptyState
-          title="No conversations in this project"
-          description="Cloud Agents, Automations, and local requests against this repository will appear here."
+          title="No local requests in this project"
+          description="Stop-hook turns against this repository will appear here."
         />
       </Panel>
     );
@@ -516,11 +382,7 @@ export function ProjectConversationsClient({
           <PanelBody className="p-0">
             <ul className="divide-y divide-border">
               {group.runs.map((run) => (
-                <RunRow
-                  key={`${run.kind}-${run.id}`}
-                  run={run}
-                  projectHref={projectHref}
-                />
+                <RunRow key={`${run.kind}-${run.id}`} run={run} />
               ))}
             </ul>
           </PanelBody>

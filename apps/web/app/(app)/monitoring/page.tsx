@@ -1,90 +1,47 @@
 import { EmptyState, PageHeader, Panel } from '@nexus/ui';
 import Link from 'next/link';
-import { CursorCredentialsStatus } from '../../../src/components/CursorCredentialsStatus';
-import { SyncedCloudAgentRunsSection } from '../../../src/components/SyncedCloudAgentRunsSection';
 import {
-  formatApiKeyIdentity,
-  formatCentsUsd,
+  formatHookCostUsd,
   formatRelativeTime,
-  NO_REPO_GROUP,
-  resolveCursorAuth,
-} from '../../../src/server/cursor';
+} from '../../../src/lib/monitoring-format';
 import {
+  HOOK_NO_REPO_GROUP,
   loadHookSignalsTree,
-  mergeProjectsWithHookSummaries,
+  projectsFromHookSummaries,
   summarizeHookRepos,
 } from '../../../src/server/hook-signals';
-import { getCachedProjectsPage } from '../../../src/server/monitoring-cache';
-import { loadSyncedMonitoringSection } from '../../../src/server/synced-cloud-agent-monitoring';
 
 export const dynamic = 'force-dynamic';
 
 export default async function MonitoringPage() {
-  const auth = await resolveCursorAuth();
-
-  let error: string | null = auth.error;
-  let projects: Awaited<ReturnType<typeof getCachedProjectsPage>>['projects'] =
-    [];
-  let agentCount = 0;
-  let truncated = false;
-  let truncatedEnrichment = false;
-
-  if (auth.credentials.length > 0 && auth.combinedFingerprint) {
-    try {
-      const page = await getCachedProjectsPage(
-        auth.credentials.map((c) => ({
-          client: c.client,
-          fingerprint: c.fingerprint,
-        })),
-      );
-      projects = page.projects;
-      agentCount = page.agentCount;
-      truncated = page.truncated;
-      truncatedEnrichment = page.truncatedEnrichment;
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  let hookError: string | null = null;
+  let error: string | null = null;
+  let projects: ReturnType<typeof projectsFromHookSummaries> = [];
   let hookEventCount = 0;
+  let truncated = false;
+
   try {
     const hookTree = await loadHookSignalsTree();
     hookEventCount = hookTree.totalEvents;
-    projects = mergeProjectsWithHookSummaries(
-      projects,
-      summarizeHookRepos(hookTree),
-    );
+    truncated = hookTree.truncated;
+    projects = projectsFromHookSummaries(summarizeHookRepos(hookTree));
   } catch (err) {
-    hookError = err instanceof Error ? err.message : String(err);
+    error = err instanceof Error ? err.message : String(err);
   }
-
-  const synced = await loadSyncedMonitoringSection({
-    clients: auth.credentials.map((c) => c.client),
-  });
 
   const totalCharged = projects.reduce(
     (sum, p) => (p.totalChargedCents != null ? sum + p.totalChargedCents : sum),
     0,
   );
   const anyCost = projects.some((p) => p.totalChargedCents != null);
-  const orgCount =
-    auth.source === 'db' || auth.source === 'user_cookie'
-      ? new Set(
-          auth.credentials
-            .map((c) => c.organisationConnectionId)
-            .filter((id): id is string => Boolean(id)),
-        ).size || auth.credentials.length
-      : 0;
 
   return (
     <div className="space-y-4 p-4">
       <PageHeader
         title="Monitoring"
-        subtitle="Every repository is a project. Open one to inspect Automations, Cloud Agent runs, and local requests — with cost. Cadence-synced Admin usage appears in a separate section below."
+        subtitle="Every repository is a project. Open one to inspect local requests captured by the Cursor stop hook — with cost when Admin usage lookup succeeds."
         meta={
           projects.length > 0
-            ? `${projects.length} project${projects.length === 1 ? '' : 's'}${agentCount > 0 ? ` · ${agentCount} Cloud Agent conversation${agentCount === 1 ? '' : 's'}` : ''}${hookEventCount > 0 ? ` · ${hookEventCount} local request${hookEventCount === 1 ? '' : 's'}` : ''}${orgCount > 1 ? ` · ${orgCount} orgs` : ''}${auth.credentials.length > 1 ? ` · ${auth.credentials.length} keys` : ''}${anyCost ? ` · ${formatCentsUsd(totalCharged)} charged` : ''}`
+            ? `${projects.length} project${projects.length === 1 ? '' : 's'}${hookEventCount > 0 ? ` · ${hookEventCount} local request${hookEventCount === 1 ? '' : 's'}` : ''}${anyCost ? ` · ${formatHookCostUsd(totalCharged)} charged` : ''}`
             : undefined
         }
         actions={
@@ -97,35 +54,17 @@ export default async function MonitoringPage() {
         }
       />
 
-      <CursorCredentialsStatus
-        connectedCount={orgCount}
-        source={auth.source}
-        identityLabel={
-          (auth.source === 'db' || auth.source === 'user_cookie') &&
-          auth.credentials.length > 1
-            ? `${auth.credentials.length} API keys`
-            : auth.me
-              ? formatApiKeyIdentity(auth.me)
-              : null
-        }
-      />
-
       {error ? (
         <p className="text-sm text-danger-fg" role="alert">
           {error}
-        </p>
-      ) : null}
-      {hookError ? (
-        <p className="text-sm text-warning-fg" role="alert">
-          Local requests unavailable: {hookError}
         </p>
       ) : null}
 
       {projects.length === 0 && !error ? (
         <Panel>
           <EmptyState
-            title="No conversations yet"
-            description="Cloud Agents, Automations, and local requests (stop hooks) show up here grouped by the repository they work on."
+            title="No local requests yet"
+            description="Install the Cursor stop hook to record turn metadata here, grouped by the repository each request worked on."
           />
         </Panel>
       ) : null}
@@ -140,7 +79,7 @@ export default async function MonitoringPage() {
             >
               <div className="flex items-baseline justify-between gap-2">
                 <span className="truncate font-mono text-sm font-medium text-fg group-hover:underline">
-                  {project.repo === NO_REPO_GROUP
+                  {project.repo === HOOK_NO_REPO_GROUP
                     ? 'No repository'
                     : project.repo}
                 </span>
@@ -152,7 +91,7 @@ export default async function MonitoringPage() {
               </div>
               <div className="mt-2 flex items-baseline gap-1.5">
                 <span className="text-xl font-medium tabular-nums text-fg">
-                  {formatCentsUsd(project.totalChargedCents)}
+                  {formatHookCostUsd(project.totalChargedCents)}
                 </span>
                 <span className="text-xs text-fg-subtle">charged</span>
               </div>
@@ -160,30 +99,19 @@ export default async function MonitoringPage() {
                 {project.conversationCount} conversation
                 {project.conversationCount === 1 ? '' : 's'}
                 {' · '}
-                {project.prCount} pull request
-                {project.prCount === 1 ? '' : 's'}
+                {project.eventCount} turn
+                {project.eventCount === 1 ? '' : 's'}
               </div>
             </Link>
           ))}
         </div>
       ) : null}
 
-      {auth.credentials.length > 0 && (truncated || truncatedEnrichment) ? (
+      {truncated ? (
         <p className="text-xs text-fg-subtle">
-          {truncated
-            ? 'Conversation list truncated — hit the API page cap. '
-            : ''}
-          {truncatedEnrichment
-            ? 'Cost/PR enrichment capped — project totals may be partial.'
-            : ''}
+          Local request list truncated — showing the most recent hook events.
         </p>
       ) : null}
-
-      <SyncedCloudAgentRunsSection
-        runs={synced.runs}
-        lastSyncAt={synced.lastSyncAt}
-        error={synced.error}
-      />
     </div>
   );
 }

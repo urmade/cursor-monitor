@@ -145,7 +145,7 @@ export function summarizeHookRepos(tree: HookSignalsTree): HookRepoSummary[] {
 
 /**
  * Aggregate stop-hook events by repository → conversation.
- * Repos are lowercased so they merge with Monitoring Cloud Agent projects.
+ * Repos are lowercased so Monitoring project keys stay stable.
  */
 export function buildHookSignalsTree(
   events: HookSignalEvent[],
@@ -253,60 +253,31 @@ export function buildHookSignalsTree(
   };
 }
 
+export type HookProjectSummary = {
+  repo: string;
+  conversationCount: number;
+  eventCount: number;
+  totalChargedCents: number | null;
+  latestCreatedAt: string | null;
+};
+
 /**
- * Merge Cloud Agent project summaries with local-request (hook) repo totals.
- * Hook-only repos appear as projects; shared repos sum charged cents and
- * take the newer latestAt.
+ * Build Monitoring project cards from stop-hook repo summaries.
+ * Monitoring is hook-only — no live Cloud Agents API catalogue.
  */
-export function mergeProjectsWithHookSummaries<
-  T extends {
-    repo: string;
-    conversationCount: number;
-    prCount: number;
-    totalChargedCents: number | null;
-    totalRawCents: number | null;
-    latestCreatedAt: string | null;
-  },
->(cloudProjects: T[], hookRepos: HookRepoSummary[]): T[] {
-  const byRepo = new Map<string, T>();
+export function projectsFromHookSummaries(
+  hookRepos: HookRepoSummary[],
+): HookProjectSummary[] {
+  const projects: HookProjectSummary[] = hookRepos.map((hook) => ({
+    repo: hook.repo,
+    conversationCount: hook.conversationCount,
+    eventCount: hook.eventCount,
+    totalChargedCents: hook.totalChargedCents,
+    latestCreatedAt: hook.latestAt,
+  }));
 
-  for (const project of cloudProjects) {
-    byRepo.set(project.repo, { ...project });
-  }
-
-  for (const hook of hookRepos) {
-    const existing = byRepo.get(hook.repo);
-    if (!existing) {
-      byRepo.set(hook.repo, {
-        repo: hook.repo,
-        conversationCount: hook.conversationCount,
-        prCount: 0,
-        totalChargedCents: hook.totalChargedCents,
-        totalRawCents: null,
-        latestCreatedAt: hook.latestAt,
-      } as T);
-      continue;
-    }
-
-    const charged =
-      existing.totalChargedCents != null || hook.totalChargedCents != null
-        ? (existing.totalChargedCents ?? 0) + (hook.totalChargedCents ?? 0)
-        : null;
-    const existingMs = existing.latestCreatedAt
-      ? Date.parse(existing.latestCreatedAt)
-      : 0;
-    const hookMs = hook.latestAt ? Date.parse(hook.latestAt) : 0;
-    byRepo.set(hook.repo, {
-      ...existing,
-      conversationCount: existing.conversationCount + hook.conversationCount,
-      totalChargedCents: charged,
-      latestCreatedAt:
-        hookMs > existingMs ? hook.latestAt : existing.latestCreatedAt,
-    });
-  }
-
-  const noRepo = [...byRepo.values()].filter((p) => p.repo === HOOK_NO_REPO_GROUP);
-  const rest = [...byRepo.values()].filter((p) => p.repo !== HOOK_NO_REPO_GROUP);
+  const noRepo = projects.filter((p) => p.repo === HOOK_NO_REPO_GROUP);
+  const rest = projects.filter((p) => p.repo !== HOOK_NO_REPO_GROUP);
   rest.sort((a, b) => {
     const at = a.latestCreatedAt ? Date.parse(a.latestCreatedAt) : 0;
     const bt = b.latestCreatedAt ? Date.parse(b.latestCreatedAt) : 0;

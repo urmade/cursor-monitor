@@ -39,8 +39,13 @@ export {
   type GithubPrRef,
 } from '../lib/monitoring-format';
 
-function fingerprintApiKey(apiKey: string): string {
+/** Stable short fingerprint for an API key (never store the key itself). */
+export function credentialFingerprint(apiKey: string): string {
   return createHash('sha256').update(apiKey).digest('hex').slice(0, 24);
+}
+
+function fingerprintApiKey(apiKey: string): string {
+  return credentialFingerprint(apiKey);
 }
 
 /** Combined fingerprint for a set of credentials (stable cache key). */
