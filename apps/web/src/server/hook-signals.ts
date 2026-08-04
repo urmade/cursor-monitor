@@ -1,4 +1,4 @@
-import { count, desc, sql } from 'drizzle-orm';
+import { and, count, desc, eq, isNull, or, sql } from 'drizzle-orm';
 import { cursorStopHookEvents, getDb } from '@nexus/db';
 
 /** Aligns with Monitoring's {@link NO_REPO_GROUP} in `cursor.ts`. */
@@ -342,4 +342,96 @@ export function projectsFromHookSummaries(
     return a.repo.localeCompare(b.repo);
   });
   return [...rest, ...noRepo];
+}
+
+/** Distinct repository keys already present in Monitoring (excludes no-repo bucket). */
+export async function loadKnownHookMonitoringRepos(): Promise<string[]> {
+  const rows = await getDb()
+    .select({
+      repo: sql<string>`lower(btrim(${cursorStopHookEvents.repo}))`.as('repo'),
+    })
+    .from(cursorStopHookEvents)
+    .where(
+      sql`${cursorStopHookEvents.repo} is not null and btrim(${cursorStopHookEvents.repo}) <> ''`,
+    )
+    .groupBy(sql`lower(btrim(${cursorStopHookEvents.repo}))`);
+
+  return rows
+    .map((r) => r.repo?.trim())
+    .filter((r): r is string => Boolean(r))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+export class AssignHookConversationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AssignHookConversationError';
+  }
+}
+
+/**
+ * Resolve and validate a Monitoring repo target for manual assignment.
+ * Target must already appear as a project (from prior hook events).
+ */
+export function resolveHookConversationAssignTarget(
+  targetRepo: string,
+  knownRepos: readonly string[],
+): string {
+  const canonical = normalizeRepoKey(targetRepo);
+  if (!canonical || canonical === HOOK_NO_REPO_GROUP) {
+    throw new AssignHookConversationError('Choose a repository.');
+  }
+  const known = new Set(knownRepos.map(normalizeRepoKey));
+  if (!known.has(canonical)) {
+    throw new AssignHookConversationError(
+      'That repository is not known in Monitoring yet.',
+    );
+  }
+  return canonical;
+}
+
+function hookConversationIdFilter(conversationId: string) {
+  const trimmed = conversationId.trim();
+  if (trimmed === UNKNOWN_CONVERSATION) {
+    return or(
+      isNull(cursorStopHookEvents.conversationId),
+      sql`btrim(${cursorStopHookEvents.conversationId}) = ''`,
+    );
+  }
+  return eq(cursorStopHookEvents.conversationId, trimmed);
+}
+
+const hookEventHasNoRepo = or(
+  isNull(cursorStopHookEvents.repo),
+  sql`btrim(${cursorStopHookEvents.repo}) = ''`,
+);
+
+/**
+ * Move all no-repo stop-hook events for one conversation into a known repository.
+ */
+export async function assignHookConversationToRepo(
+  conversationId: string,
+  targetRepo: string,
+): Promise<{ repo: string; updatedCount: number }> {
+  const trimmedConv = conversationId.trim();
+  if (!trimmedConv) {
+    throw new AssignHookConversationError('Missing conversation.');
+  }
+
+  const knownRepos = await loadKnownHookMonitoringRepos();
+  const repo = resolveHookConversationAssignTarget(targetRepo, knownRepos);
+
+  const updated = await getDb()
+    .update(cursorStopHookEvents)
+    .set({ repo })
+    .where(and(hookConversationIdFilter(trimmedConv), hookEventHasNoRepo))
+    .returning({ id: cursorStopHookEvents.id });
+
+  if (updated.length === 0) {
+    throw new AssignHookConversationError(
+      'No unassigned local requests found for that conversation.',
+    );
+  }
+
+  return { repo, updatedCount: updated.length };
 }

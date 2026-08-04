@@ -8,6 +8,7 @@ import {
 import {
   HOOK_NO_REPO_GROUP,
   loadHookSignalsForRepo,
+  loadKnownHookMonitoringRepos,
 } from '../../../../src/server/hook-signals';
 import { normalizeRepoLabel } from '../../../../src/server/cursor';
 
@@ -36,8 +37,12 @@ export default async function ProjectMonitoringPage({
 
   let localRequests = null;
   let hookError: string | null = null;
+  let knownRepos: string[] = [];
   try {
     localRequests = await loadHookSignalsForRepo(project);
+    if (project === HOOK_NO_REPO_GROUP) {
+      knownRepos = await loadKnownHookMonitoringRepos();
+    }
   } catch (err) {
     hookError = err instanceof Error ? err.message : String(err);
   }
@@ -125,6 +130,8 @@ export default async function ProjectMonitoringPage({
         projectHref={href}
         initialSort={sort}
         localRequests={localRequests}
+        allowAssignRepo={project === HOOK_NO_REPO_GROUP}
+        knownRepos={knownRepos}
       />
     </div>
   );

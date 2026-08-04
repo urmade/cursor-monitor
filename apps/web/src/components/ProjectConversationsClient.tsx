@@ -24,6 +24,7 @@ import type {
   HookRepoBucket,
   HookSignalEvent,
 } from '../server/hook-signals';
+import { AssignHookConversationRepoForm } from './AssignHookConversationRepoForm';
 
 const KIND_TONES: Record<'local', BadgeTone> = {
   local: 'neutral',
@@ -153,10 +154,24 @@ function fullEntryJson(event: HookSignalEvent): string {
 }
 
 /** Extra facts for local (stop-hook) requests. */
-function LocalRunDetails({ conv }: { conv: HookConversationBucket }) {
+function LocalRunDetails({
+  conv,
+  allowAssignRepo,
+  knownRepos,
+}: {
+  conv: HookConversationBucket;
+  allowAssignRepo?: boolean;
+  knownRepos?: string[];
+}) {
   const model = conv.events.map((e) => e.model).find(Boolean) ?? null;
   return (
     <div className="space-y-2">
+      {allowAssignRepo ? (
+        <AssignHookConversationRepoForm
+          conversationId={conv.conversationId}
+          knownRepos={knownRepos ?? []}
+        />
+      ) : null}
       <div className="space-y-1.5">
         {conv.userEmail ? (
           <DetailLine label="User">{conv.userEmail}</DetailLine>
@@ -239,7 +254,15 @@ function LocalRunDetails({ conv }: { conv: HookConversationBucket }) {
  * One local request row. The summary shows kind, name, status, cost and age;
  * expanding reveals per-turn stop-hook details.
  */
-function RunRow({ run }: { run: UnifiedRun }) {
+function RunRow({
+  run,
+  allowAssignRepo,
+  knownRepos,
+}: {
+  run: UnifiedRun;
+  allowAssignRepo?: boolean;
+  knownRepos?: string[];
+}) {
   return (
     <li>
       <details className="group">
@@ -269,7 +292,11 @@ function RunRow({ run }: { run: UnifiedRun }) {
           </span>
         </summary>
         <div className="border-t border-border px-3 py-2.5">
-          <LocalRunDetails conv={run.local} />
+          <LocalRunDetails
+            conv={run.local}
+            allowAssignRepo={allowAssignRepo}
+            knownRepos={knownRepos}
+          />
         </div>
       </details>
     </li>
@@ -305,10 +332,15 @@ export function ProjectConversationsClient({
   projectHref,
   initialSort,
   localRequests,
+  allowAssignRepo = false,
+  knownRepos = [],
 }: {
   projectHref: string;
   initialSort: ConversationGroupSort;
   localRequests?: HookRepoBucket | null;
+  /** When true, show controls to assign no-repo conversations to a known repo. */
+  allowAssignRepo?: boolean;
+  knownRepos?: string[];
 }) {
   const [sort, setSort] = useState<ConversationGroupSort>(initialSort);
   const [pending, startTransition] = useTransition();
@@ -382,7 +414,12 @@ export function ProjectConversationsClient({
           <PanelBody className="p-0">
             <ul className="divide-y divide-border">
               {group.runs.map((run) => (
-                <RunRow key={`${run.kind}-${run.id}`} run={run} />
+                <RunRow
+                  key={`${run.kind}-${run.id}`}
+                  run={run}
+                  allowAssignRepo={allowAssignRepo}
+                  knownRepos={knownRepos}
+                />
               ))}
             </ul>
           </PanelBody>

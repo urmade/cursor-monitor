@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  AssignHookConversationError,
   buildHookSignalsTree,
   projectsFromHookSummaries,
+  resolveHookConversationAssignTarget,
   summarizeHookRepos,
   type HookSignalEvent,
 } from './hook-signals';
@@ -418,5 +420,24 @@ describe('hook signals tree', () => {
     });
     expect(projects[1]!.conversationCount).toBe(2);
     expect(summarizeHookRepos(buildHookSignalsTree([])).length).toBe(0);
+  });
+
+  it('validates assign-repo targets against known Monitoring repos', () => {
+    const known = ['acme/one', 'acme/two'];
+    expect(resolveHookConversationAssignTarget('acme/one', known)).toBe(
+      'acme/one',
+    );
+    expect(resolveHookConversationAssignTarget('  ACME/Two  ', known)).toBe(
+      'acme/two',
+    );
+    expect(() =>
+      resolveHookConversationAssignTarget('acme/unknown', known),
+    ).toThrow(AssignHookConversationError);
+    expect(() =>
+      resolveHookConversationAssignTarget('', known),
+    ).toThrow(AssignHookConversationError);
+    expect(() =>
+      resolveHookConversationAssignTarget('No repository', known),
+    ).toThrow(AssignHookConversationError);
   });
 });

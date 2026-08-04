@@ -942,3 +942,17 @@ export async function actionReEnableWebhookEndpoint(formData: FormData) {
   if (!result.ok) throw new Error(result.error.message);
   revalidatePath(`/projects/${projectKey}/settings`);
 }
+
+export async function actionAssignHookConversationToRepo(formData: FormData) {
+  await requireSession();
+  const { assignHookConversationToRepo, HOOK_NO_REPO_GROUP } = await import(
+    './hook-signals'
+  );
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const targetRepo = String(formData.get('targetRepo') ?? '');
+  const result = await assignHookConversationToRepo(conversationId, targetRepo);
+  revalidatePath('/monitoring');
+  revalidatePath(`/monitoring/${encodeURIComponent(HOOK_NO_REPO_GROUP)}`);
+  revalidatePath(`/monitoring/${encodeURIComponent(result.repo)}`);
+  redirect(`/monitoring/${encodeURIComponent(result.repo)}`);
+}
