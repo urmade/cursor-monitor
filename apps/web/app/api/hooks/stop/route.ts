@@ -3,9 +3,11 @@ import { cursorStopHookEvents, getDb, newId } from '@nexus/db';
 import { lookupStopHookUsageCost } from '../../../../src/server/hook-usage-cost';
 import {
   authorizeStopHookRequest,
+  calculateHookDurationMs,
   extractBranchFromPayload,
   extractRepoFromPayload,
   extractWorkspaceRoot,
+  parseHookTimestamp,
 } from '../../../../src/server/stop-hook';
 
 export const dynamic = 'force-dynamic';
@@ -33,6 +35,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
+  const receivedAt = new Date();
   const rawText = await req.text();
   if (rawText.length > MAX_BYTES) {
     return NextResponse.json({ error: 'payload_too_large' }, { status: 413 });
@@ -55,6 +58,9 @@ export async function POST(req: Request) {
 
   const userEmail = asString(payload.user_email);
   const model = asString(payload.model) ?? asString(payload.model_id);
+  const startedAt = parseHookTimestamp(payload.started_at);
+  const finishedAt = parseHookTimestamp(payload.finished_at) ?? receivedAt;
+  const durationMs = calculateHookDurationMs(startedAt, finishedAt);
 
   const cost = await lookupStopHookUsageCost({
     userEmail,
@@ -86,6 +92,10 @@ export async function POST(req: Request) {
       costLookupError: cost.costLookupError,
       usageEvent: cost.usageEvent,
       payload,
+      startedAt,
+      finishedAt,
+      durationMs,
+      receivedAt,
     });
 
   return NextResponse.json({
@@ -94,5 +104,8 @@ export async function POST(req: Request) {
     chargedCents: cost.chargedCents,
     costSource: cost.costSource,
     costLookupError: cost.costLookupError,
+    startedAt: startedAt?.toISOString() ?? null,
+    finishedAt: finishedAt.toISOString(),
+    durationMs,
   });
 }

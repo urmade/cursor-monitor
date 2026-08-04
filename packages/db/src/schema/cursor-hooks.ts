@@ -40,6 +40,9 @@ export const cursorStopHookEvents = pgTable(
     costLookupError: text('cost_lookup_error'),
     usageEvent: jsonb('usage_event').$type<Record<string, unknown> | null>(),
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    durationMs: integer('duration_ms'),
     receivedAt: timestamp('received_at', { withTimezone: true })
       .notNull()
       .defaultNow(),

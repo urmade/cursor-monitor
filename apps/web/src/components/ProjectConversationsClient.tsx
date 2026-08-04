@@ -12,6 +12,7 @@ import { useMemo, useState, useTransition } from 'react';
 import { RunStatusBadge } from './RunStatusBadge';
 import {
   formatCentsUsd,
+  formatDurationMs,
   formatRelativeTime,
   groupMonitoringRunsByBranch,
   MONITORING_RUN_KIND_LABELS,
@@ -146,6 +147,9 @@ function fullEntryJson(event: HookSignalEvent): string {
       cost_source: event.costSource,
       cost_lookup_error: event.costLookupError,
       usage_event: event.usageEvent,
+      started_at: event.startedAt,
+      finished_at: event.finishedAt,
+      duration_ms: event.durationMs,
       payload: event.payload,
     },
     null,
@@ -209,6 +213,11 @@ function LocalRunDetails({
                       ) : (
                         <Badge tone="neutral">cost n/a</Badge>
                       )}
+                      {event.durationMs != null ? (
+                        <Badge tone="info">
+                          {formatDurationMs(event.durationMs)}
+                        </Badge>
+                      ) : null}
                       {event.gitBranch ? (
                         <span className="font-mono text-fg-muted">
                           @{event.gitBranch}

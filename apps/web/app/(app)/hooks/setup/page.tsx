@@ -39,8 +39,8 @@ export default async function HooksSetupPage() {
   return (
     <div className="space-y-4 p-4 max-w-3xl">
       <PageHeader
-        title="Install stop hook"
-        subtitle="Team Hooks for the local IDE; project .cursor/hooks for Cloud Agents (cloud VMs do not sync ~/.cursor/managed/team_*)."
+        title="Install request timing hooks"
+        subtitle="A beforeSubmitPrompt hook records the start timestamp and the stop hook records the finish and duration."
         meta="Hooks / Setup"
         actions={
           <Button asChild size="sm" variant="ghost">
@@ -51,6 +51,8 @@ export default async function HooksSetupPage() {
       <StopHookCopyPanel
         hooksJson={artifact.hooksJson}
         projectHooksJson={artifact.projectHooksJson}
+        startScript={artifact.startScript}
+        startScriptFilename={artifact.startScriptFilename}
         script={artifact.script}
         scriptFilename={artifact.scriptFilename}
         endpoint={artifact.endpoint}

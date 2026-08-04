@@ -26,6 +26,9 @@ export type HookSignalEvent = {
   costLookupError: string | null;
   usageEvent: Record<string, unknown> | null;
   payload: Record<string, unknown>;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationMs: number | null;
   receivedAt: string;
 };
 
@@ -97,6 +100,19 @@ function mapRowToEvent(r: typeof cursorStopHookEvents.$inferSelect): HookSignalE
     costLookupError: r.costLookupError,
     usageEvent: r.usageEvent ?? null,
     payload: r.payload ?? {},
+    startedAt:
+      r.startedAt instanceof Date
+        ? r.startedAt.toISOString()
+        : r.startedAt
+          ? String(r.startedAt)
+          : null,
+    finishedAt:
+      r.finishedAt instanceof Date
+        ? r.finishedAt.toISOString()
+        : r.finishedAt
+          ? String(r.finishedAt)
+          : null,
+    durationMs: r.durationMs ?? null,
     receivedAt:
       r.receivedAt instanceof Date
         ? r.receivedAt.toISOString()

@@ -106,6 +106,8 @@ function CopyBlock({
 export function StopHookCopyPanel({
   hooksJson,
   projectHooksJson,
+  startScript,
+  startScriptFilename,
   script,
   scriptFilename,
   endpoint,
@@ -119,6 +121,8 @@ export function StopHookCopyPanel({
 }: {
   hooksJson: string;
   projectHooksJson: string;
+  startScript: string;
+  startScriptFilename: string;
   script: string;
   scriptFilename: string;
   endpoint: string;
@@ -135,6 +139,9 @@ export function StopHookCopyPanel({
     `# Save script as .cursor/hooks/${scriptFilename}`,
     `# Save project hooks.json as .cursor/hooks.json`,
     `# Cloud VMs do not get ~/.cursor/managed/team_* team-hook sync.`,
+    '',
+    `# Save start script as .cursor/hooks/${startScriptFilename}`,
+    startScript.trimEnd(),
     '',
     script.trimEnd(),
     '',
@@ -153,8 +160,10 @@ export function StopHookCopyPanel({
         Cloud Agents: commit{' '}
         <code className="font-mono text-xs">.cursor/hooks.json</code> and{' '}
         <code className="font-mono text-xs">
-          .cursor/hooks/{scriptFilename}
+          .cursor/hooks/{startScriptFilename}
         </code>{' '}
+        and{' '}
+        <code className="font-mono text-xs">.cursor/hooks/{scriptFilename}</code>{' '}
         to the repo. Team Hooks sync to{' '}
         <code className="font-mono text-xs">
           ~/.cursor/managed/team_*/hooks/
@@ -245,6 +254,12 @@ export function StopHookCopyPanel({
         filename={`.cursor/hooks/${scriptFilename}`}
         downloadName={scriptFilename}
         value={script}
+      />
+      <CopyBlock
+        title="Start timestamp hook script"
+        filename={`.cursor/hooks/${startScriptFilename}`}
+        downloadName={startScriptFilename}
+        value={startScript}
       />
     </div>
   );

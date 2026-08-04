@@ -204,6 +204,25 @@ export function extractWorkspaceRoot(
   return null;
 }
 
+/** Parse a hook-provided ISO timestamp without allowing invalid dates through. */
+export function parseHookTimestamp(value: unknown): Date | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+/** Derive a database-safe duration from the paired hook timestamps. */
+export function calculateHookDurationMs(
+  startedAt: Date | null,
+  finishedAt: Date | null,
+): number | null {
+  if (!startedAt || !finishedAt) return null;
+  const duration = finishedAt.getTime() - startedAt.getTime();
+  return duration >= 0 && duration <= 2_147_483_647
+    ? Math.trunc(duration)
+    : null;
+}
+
 export type StopHookArtifact = {
   endpoint: string;
   bypassConfigured: boolean;
@@ -214,15 +233,21 @@ export type StopHookArtifact = {
    * Cloud agent VMs do not receive the IDE team-hook managed directory sync.
    */
   projectHooksJson: string;
+  startScriptFilename: string;
+  startScript: string;
   scriptFilename: string;
   script: string;
   /** Local file the script appends every POST outcome to. */
   logFile: string;
+  /** Local file used to pair beforeSubmitPrompt with the next stop event. */
+  startFile: string;
   installSteps: string[];
 };
 
 /** Default local log path written by the generated script. */
 export const STOP_HOOK_LOG_FILE = '~/.cursor/nexus-stop-hook.log';
+/** Default local state path written by beforeSubmitPrompt and consumed by stop. */
+export const STOP_HOOK_START_FILE = '~/.cursor/nexus-stop-hook-started-at';
 
 /**
  * Build a ready-to-paste Cursor stop hook that POSTs stdin metadata to Nexus.
@@ -238,6 +263,7 @@ export function buildStopHookArtifact(opts: {
   const endpoint = `${opts.baseUrl.replace(/\/$/, '')}/api/hooks/stop`;
   const bypass = opts.bypass ?? '';
   const bypassConfigured = bypass.length > 0;
+  const startScriptFilename = 'nexus-start-timestamp.sh';
   const scriptFilename = 'nexus-stop-to-supabase.sh';
 
   // Team hooks sync into ~/.cursor/managed/team_<id>/hooks/ on the local IDE.
@@ -246,6 +272,12 @@ export function buildStopHookArtifact(opts: {
     {
       version: 1,
       hooks: {
+        beforeSubmitPrompt: [
+          {
+            command: `./${startScriptFilename}`,
+            timeout: 5,
+          },
+        ],
         stop: [
           {
             command: `./${scriptFilename}`,
@@ -263,6 +295,12 @@ export function buildStopHookArtifact(opts: {
     {
       version: 1,
       hooks: {
+        beforeSubmitPrompt: [
+          {
+            command: `.cursor/hooks/${startScriptFilename}`,
+            timeout: 5,
+          },
+        ],
         stop: [
           {
             command: `.cursor/hooks/${scriptFilename}`,
@@ -274,6 +312,35 @@ export function buildStopHookArtifact(opts: {
     null,
     2,
   );
+
+  const startScript = [
+    '#!/bin/sh',
+    '# Cursor beforeSubmitPrompt hook — record the start of an agent request.',
+    '# Native Linux + macOS: POSIX sh only. No bash/Python/Node/jq.',
+    '#',
+    '# Cursor does not include a conversation ID in beforeSubmitPrompt input, so',
+    '# this state file represents the most recent request for this hook install.',
+    `# Filename: ${startScriptFilename}`,
+    '',
+    'set +e',
+    'START_FILE="${NEXUS_STOP_HOOK_START_FILE:-${HOME:-${TMPDIR:-/tmp}}/.cursor/nexus-stop-hook-started-at}"',
+    'if ! mkdir -p "$(dirname "$START_FILE")" 2>/dev/null; then',
+    '  START_FILE="${TMPDIR:-/tmp}/nexus-stop-hook-started-at"',
+    '  mkdir -p "$(dirname "$START_FILE")" 2>/dev/null',
+    'fi',
+    'STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)',
+    'TMP_FILE="${START_FILE}.$$"',
+    'if [ -n "$STAMP" ] && printf \'%s\\n\' "$STAMP" >"$TMP_FILE" 2>/dev/null; then',
+    '  mv "$TMP_FILE" "$START_FILE" 2>/dev/null',
+    'else',
+    '  rm -f "$TMP_FILE" 2>/dev/null',
+    'fi',
+    '',
+    '# Always allow the prompt through, even if timing telemetry cannot be written.',
+    'printf \'{"continue":true}\\n\'',
+    'exit 0',
+    '',
+  ].join('\n');
 
   const script = [
     '#!/bin/sh',
@@ -397,6 +464,21 @@ export function buildStopHookArtifact(opts: {
     '  EXTRA="${EXTRA},\\"workspace_root\\":\\"$(json_escape "$WORKSPACE_ROOT")\\""',
     'fi',
     '',
+    'START_FILE="${NEXUS_STOP_HOOK_START_FILE:-${HOME:-${TMPDIR:-/tmp}}/.cursor/nexus-stop-hook-started-at}"',
+    'if ! mkdir -p "$(dirname "$START_FILE")" 2>/dev/null; then',
+    '  START_FILE="${TMPDIR:-/tmp}/nexus-stop-hook-started-at"',
+    '  mkdir -p "$(dirname "$START_FILE")" 2>/dev/null',
+    'fi',
+    'STARTED_AT=$(cat "$START_FILE" 2>/dev/null | tr -d \'\\r\\n\')',
+    'rm -f "$START_FILE" 2>/dev/null',
+    'STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)',
+    'if [ -n "$STARTED_AT" ]; then',
+    '  EXTRA="${EXTRA},\\"started_at\\":\\"$(json_escape "$STARTED_AT")\\""',
+    'fi',
+    'if [ -n "$STAMP" ]; then',
+    '  EXTRA="${EXTRA},\\"finished_at\\":\\"$(json_escape "$STAMP")\\""',
+    'fi',
+    '',
     'if [ "$CORE" = "{" ] || [ -z "$CORE" ]; then',
     '  BODY="{${EXTRA#,}}"',
     'else',
@@ -410,7 +492,6 @@ export function buildStopHookArtifact(opts: {
     'if ! mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null; then',
     '  LOG_FILE="${TMPDIR:-/tmp}/nexus-stop-hook.log"',
     'fi',
-    'STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)',
     'BODY_FILE="${TMPDIR:-/tmp}/nexus-stop-hook-$$.out"',
     '',
     '# Never block the agent on telemetry failure — but do record the outcome, so a',
@@ -420,14 +501,14 @@ export function buildStopHookArtifact(opts: {
     "  STATUS=$(curl -sS --connect-timeout 5 --max-time 12 -X POST \"$ENDPOINT\" \\",
     '    -H "Content-Type: application/json" \\',
     '    -H "Accept: application/json" \\',
-    '    -H "User-Agent: nexus-cursor-stop-hook/1.4" \\',
+    '    -H "User-Agent: nexus-cursor-stop-hook/1.5" \\',
     '    -H "x-vercel-protection-bypass: $BYPASS" \\',
     "    --data-binary \"$BODY\" -o \"$BODY_FILE\" -w '%{http_code}' 2>/dev/null)",
     'else',
     "  STATUS=$(curl -sS --connect-timeout 5 --max-time 12 -X POST \"$ENDPOINT\" \\",
     '    -H "Content-Type: application/json" \\',
     '    -H "Accept: application/json" \\',
-    '    -H "User-Agent: nexus-cursor-stop-hook/1.4" \\',
+    '    -H "User-Agent: nexus-cursor-stop-hook/1.5" \\',
     "    --data-binary \"$BODY\" -o \"$BODY_FILE\" -w '%{http_code}' 2>/dev/null)",
     'fi',
     'if [ -z "$STATUS" ]; then STATUS="000"; fi',
@@ -454,14 +535,18 @@ export function buildStopHookArtifact(opts: {
     bypassConfigured,
     hooksJson,
     projectHooksJson,
+    startScriptFilename,
+    startScript,
     scriptFilename,
     script,
     logFile: STOP_HOOK_LOG_FILE,
+    startFile: STOP_HOOK_START_FILE,
     installSteps: [
-      `Cloud Agents (required for cloud turns): commit \`.cursor/hooks.json\` (project snippet below) and \`.cursor/hooks/${scriptFilename}\` into each repo. Cloud VMs do not receive ~/.cursor/managed/team_*/ IDE team-hook sync — without project hooks, stop never runs in the cloud.`,
-      `Local IDE (Team Hooks): script name exactly \`${scriptFilename}\` (not a title like "Cost"), event stop, OS targeting include Linux + macOS. Confirm \`ls ~/.cursor/managed/team_*/hooks/${scriptFilename}\`.`,
+      `Cloud Agents (required for cloud turns): commit \`.cursor/hooks.json\` (project hooks below), \`.cursor/hooks/${startScriptFilename}\`, and \`.cursor/hooks/${scriptFilename}\` into each repo. Cloud VMs do not receive ~/.cursor/managed/team_*/ IDE team-hook sync.`,
+      `Local IDE (Team Hooks): install both scripts with their exact filenames, map \`${startScriptFilename}\` to beforeSubmitPrompt and \`${scriptFilename}\` to stop, and target Linux + macOS.`,
       `Optional: set cloud-agent secrets \`NEXUS_VERCEL_BYPASS\` and/or \`NEXUS_STOP_HOOK_ENDPOINT\` — the script prefers those over the baked-in values.`,
       `Requires POSIX sh, curl, and git. Uses CURSOR_PROJECT_DIR when cwd is not the repo root.`,
+      `The start hook writes ${STOP_HOOK_START_FILE}; the stop hook consumes it and sends started_at plus finished_at.`,
       `POST outcomes append to ${STOP_HOOK_LOG_FILE} (or /tmp if $HOME is unusable).`,
     ],
   };

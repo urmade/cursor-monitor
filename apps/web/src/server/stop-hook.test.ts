@@ -10,13 +10,16 @@ import {
 import {
   authorizeStopHookRequest,
   buildStopHookArtifact,
+  calculateHookDurationMs,
   extractBranchFromPayload,
   extractRepoFromPayload,
   normalizeRepoLabel,
+  parseHookTimestamp,
   readProtectionBypass,
   resolvePublicBaseUrl,
   resolvePublicBaseUrlDetailed,
   STOP_HOOK_LOG_FILE,
+  STOP_HOOK_START_FILE,
 } from './stop-hook';
 
 describe('stop-hook helpers', () => {
@@ -123,6 +126,10 @@ describe('stop-hook helpers', () => {
     expect(artifact.script).toContain(
       'LOG_FILE="${NEXUS_STOP_HOOK_LOG:-$HOME/.cursor/nexus-stop-hook.log}"',
     );
+    expect(artifact.startFile).toBe(STOP_HOOK_START_FILE);
+    expect(artifact.startScript).toContain('nexus-stop-hook-started-at');
+    expect(artifact.script).toContain('started_at');
+    expect(artifact.script).toContain('finished_at');
     // stdout must stay a bare hook response, whatever the POST did.
     expect(artifact.script).toContain("printf '%s\\n' '{}'");
     expect(artifact.script.trimEnd().endsWith('exit 0')).toBe(true);
@@ -144,9 +151,12 @@ describe('stop-hook helpers', () => {
     expect(artifact.script).toContain('x-vercel-protection-bypass');
     expect(artifact.script).toContain('curl ');
     expect(artifact.script).toContain('detect_git');
-    expect(artifact.script).toContain('nexus-cursor-stop-hook/1.4');
+    expect(artifact.script).toContain('nexus-cursor-stop-hook/1.5');
     expect(artifact.script).toContain('NEXUS_VERCEL_BYPASS');
     expect(artifact.script).toContain('NEXUS_STOP_HOOK_ENDPOINT');
+    expect(artifact.startScriptFilename).toBe('nexus-start-timestamp.sh');
+    expect(artifact.startScript.startsWith('#!/bin/sh')).toBe(true);
+    expect(artifact.startScript).toContain('printf \'{"continue":true}\\n\'');
     expect(artifact.script.trimEnd().endsWith('exit 0')).toBe(true);
     // No bash-only arrays / locals — must parse under Linux /bin/sh (dash).
     expect(artifact.script).not.toMatch(/CURL_ARGS=|\$\{CURL_ARGS\[@\]\}|local /);
@@ -160,6 +170,12 @@ describe('stop-hook helpers', () => {
     expect(JSON.parse(artifact.hooksJson)).toMatchObject({
       version: 1,
       hooks: {
+        beforeSubmitPrompt: [
+          {
+            command: `./${artifact.startScriptFilename}`,
+            timeout: 5,
+          },
+        ],
         stop: [
           {
             command: `./${artifact.scriptFilename}`,
@@ -171,6 +187,12 @@ describe('stop-hook helpers', () => {
     expect(JSON.parse(artifact.projectHooksJson)).toMatchObject({
       version: 1,
       hooks: {
+        beforeSubmitPrompt: [
+          {
+            command: `.cursor/hooks/${artifact.startScriptFilename}`,
+            timeout: 5,
+          },
+        ],
         stop: [
           {
             command: `.cursor/hooks/${artifact.scriptFilename}`,
@@ -182,8 +204,15 @@ describe('stop-hook helpers', () => {
   });
 
   it('generated script runs under dash and bash without syntax errors', async () => {
-    const { writeFileSync, chmodSync, mkdtempSync, rmSync, readFileSync } =
-      await import('node:fs');
+    const {
+      writeFileSync,
+      chmodSync,
+      mkdirSync,
+      mkdtempSync,
+      rmSync,
+      readFileSync,
+      existsSync,
+    } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
     const { spawnSync } = await import('node:child_process');
@@ -194,10 +223,31 @@ describe('stop-hook helpers', () => {
     });
     const dir = mkdtempSync(join(tmpdir(), 'nexus-stop-hook-'));
     const scriptPath = join(dir, artifact.scriptFilename);
+    const startScriptPath = join(dir, artifact.startScriptFilename);
     const logPath = join(dir, 'hook.log');
+    const curlDir = join(dir, 'bin');
+    const curlBodyPath = join(dir, 'curl-body.json');
+    mkdirSync(curlDir);
     const fakeProject = mkdtempSync(join(tmpdir(), 'nexus-project-'));
+    writeFileSync(
+      join(curlDir, 'curl'),
+      [
+        '#!/bin/sh',
+        'while [ "$#" -gt 0 ]; do',
+        '  case "$1" in',
+        '    --data-binary) shift; printf "%s" "$1" >"$CURL_BODY_PATH" ;;',
+        '    -o) shift; printf "ok" >"$1" ;;',
+        '    -w) shift; printf "200" ;;',
+        '  esac',
+        '  shift',
+        'done',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
     writeFileSync(scriptPath, artifact.script, { mode: 0o755 });
+    writeFileSync(startScriptPath, artifact.startScript, { mode: 0o755 });
     chmodSync(scriptPath, 0o755);
+    chmodSync(startScriptPath, 0o755);
 
     const payload = JSON.stringify({
       conversation_id: 'c1',
@@ -206,16 +256,51 @@ describe('stop-hook helpers', () => {
     });
 
     for (const shell of ['sh', 'bash'] as const) {
+      const statePath = join(dir, `${shell}.started-at`);
+      const start = spawnSync(shell, [startScriptPath], {
+        input: JSON.stringify({ prompt: 'start the request' }),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          NEXUS_STOP_HOOK_START_FILE: statePath,
+        },
+        cwd: dir,
+      });
+      expect(start.status, `${shell} start exit`).toBe(0);
+      expect(start.stdout.trim(), `${shell} start stdout`).toBe(
+        '{"continue":true}',
+      );
+      expect(readFileSync(statePath, 'utf8')).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\n$/,
+      );
+
       const result = spawnSync(shell, [scriptPath], {
         input: payload,
         encoding: 'utf8',
-        env: { ...process.env, NEXUS_STOP_HOOK_LOG: logPath },
+        env: {
+          ...process.env,
+          PATH: `${curlDir}:${process.env.PATH ?? ''}`,
+          CURL_BODY_PATH: curlBodyPath,
+          NEXUS_STOP_HOOK_LOG: logPath,
+          NEXUS_STOP_HOOK_START_FILE: statePath,
+        },
         // Team hooks: cwd is the managed hooks directory, not the project.
         cwd: dir,
       });
       expect(result.status, `${shell} exit`).toBe(0);
       expect(result.stdout.trim(), `${shell} stdout`).toBe('{}');
       expect(result.stderr ?? '', `${shell} stderr`).toBe('');
+      const sent = JSON.parse(readFileSync(curlBodyPath, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      expect(sent.started_at).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
+      );
+      expect(sent.finished_at).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
+      );
+      expect(existsSync(statePath)).toBe(false);
     }
 
     // Simulate team/cloud cwd outside the repo; CURSOR_PROJECT_DIR must win.
@@ -240,11 +325,20 @@ describe('stop-hook helpers', () => {
     expect(teamBody).toMatch(/FAILED status=/);
 
     const log = readFileSync(logPath, 'utf8');
-    expect(log).toMatch(/FAILED status=/);
+    expect(log).toMatch(/ok https:\/\/example\.test\/api\/hooks\/stop/);
     expect(log).toContain('https://example.test/api/hooks/stop');
 
     rmSync(dir, { recursive: true, force: true });
     rmSync(fakeProject, { recursive: true, force: true });
+  });
+
+  it('calculates durations only from valid, ordered timestamps', () => {
+    const start = parseHookTimestamp('2026-08-04T14:00:00.000Z');
+    const finish = parseHookTimestamp('2026-08-04T14:00:02.500Z');
+    expect(calculateHookDurationMs(start, finish)).toBe(2500);
+    expect(calculateHookDurationMs(null, finish)).toBeNull();
+    expect(calculateHookDurationMs(finish, start)).toBeNull();
+    expect(parseHookTimestamp('not-a-date')).toBeNull();
   });
 
   it('normalizes git remotes into owner/repo', () => {
@@ -286,6 +380,9 @@ describe('hook signals tree', () => {
         costLookupError: null,
         usageEvent: { chargedCents: 1.5 },
         payload: { status: 'completed' },
+        startedAt: '2026-07-31T11:59:00.000Z',
+        finishedAt: '2026-07-31T12:00:00.000Z',
+        durationMs: 60000,
         receivedAt: '2026-07-31T12:00:00.000Z',
       },
       {
@@ -310,6 +407,9 @@ describe('hook signals tree', () => {
         costLookupError: 'no match',
         usageEvent: null,
         payload: { status: 'error' },
+        startedAt: null,
+        finishedAt: '2026-07-31T11:00:00.000Z',
+        durationMs: null,
         receivedAt: '2026-07-31T11:00:00.000Z',
       },
       {
@@ -334,6 +434,9 @@ describe('hook signals tree', () => {
         costLookupError: null,
         usageEvent: null,
         payload: {},
+        startedAt: null,
+        finishedAt: null,
+        durationMs: null,
         receivedAt: '2026-07-31T10:00:00.000Z',
       },
       {
@@ -358,6 +461,9 @@ describe('hook signals tree', () => {
         costLookupError: null,
         usageEvent: null,
         payload: {},
+        startedAt: '2026-07-31T12:59:00.000Z',
+        finishedAt: '2026-07-31T13:00:00.000Z',
+        durationMs: 60000,
         receivedAt: '2026-07-31T13:00:00.000Z',
       },
     ];
