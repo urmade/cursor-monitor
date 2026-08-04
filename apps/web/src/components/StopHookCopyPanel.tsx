@@ -105,6 +105,7 @@ function CopyBlock({
 
 export function StopHookCopyPanel({
   hooksJson,
+  projectHooksJson,
   script,
   scriptFilename,
   endpoint,
@@ -117,6 +118,7 @@ export function StopHookCopyPanel({
   ingestError,
 }: {
   hooksJson: string;
+  projectHooksJson: string;
   script: string;
   scriptFilename: string;
   endpoint: string;
@@ -129,16 +131,46 @@ export function StopHookCopyPanel({
   ingestError: string | null;
 }) {
   const combined = [
-    `# 1) Save as .cursor/hooks/${scriptFilename}`,
+    `# === Cloud Agents (commit into the repo) ===`,
+    `# Save script as .cursor/hooks/${scriptFilename}`,
+    `# Save project hooks.json as .cursor/hooks.json`,
+    `# Cloud VMs do not get ~/.cursor/managed/team_* team-hook sync.`,
+    '',
     script.trimEnd(),
     '',
-    '# 2) Merge into .cursor/hooks.json',
+    projectHooksJson.trimEnd(),
+    '',
+    `# === Local IDE Team Hooks (dashboard) ===`,
+    `# Script name MUST be exactly: ${scriptFilename}`,
+    `# (not a title like "Cost" — that becomes …/hooks/Cost → zsh ENOENT)`,
     hooksJson.trimEnd(),
     '',
   ].join('\n');
 
   return (
     <div className="space-y-4">
+      <p className="rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning-fg">
+        Cloud Agents: commit{' '}
+        <code className="font-mono text-xs">.cursor/hooks.json</code> and{' '}
+        <code className="font-mono text-xs">
+          .cursor/hooks/{scriptFilename}
+        </code>{' '}
+        to the repo. Team Hooks sync to{' '}
+        <code className="font-mono text-xs">
+          ~/.cursor/managed/team_*/hooks/
+        </code>{' '}
+        on the local IDE only — cloud VMs do not receive that directory, so a
+        team-only install never fires on Cloud Agents.
+      </p>
+
+      <p className="rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning-fg">
+        Team Hooks (local): dashboard <strong>script name</strong> must be
+        exactly{' '}
+        <code className="font-mono text-xs text-fg">{scriptFilename}</code> —
+        not a display title like &quot;Cost&quot;. Include <strong>Linux</strong>{' '}
+        in OS targeting if you also expect team hooks on Linux hosts.
+      </p>
+
       {!bypassConfigured ? (
         <p className="rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning-fg">
           Protection bypass is not configured in this environment (
@@ -151,8 +183,9 @@ export function StopHookCopyPanel({
         <p className="text-sm text-fg-muted">
           Endpoint{' '}
           <code className="font-mono text-xs text-fg">{endpoint}</code> — bypass
-          token is hardcoded in the script so projects outside Vercel can write
-          through deployment protection into Supabase.
+          is baked into the script (and overridden by{' '}
+          <code className="font-mono text-xs">NEXUS_VERCEL_BYPASS</code> when
+          present, e.g. cloud-agent secrets).
         </p>
       )}
 
@@ -196,9 +229,15 @@ export function StopHookCopyPanel({
         value={combined}
       />
       <CopyBlock
-        title="hooks.json"
+        title="Project hooks.json (Cloud Agents)"
         filename=".cursor/hooks.json"
         downloadName="hooks.json"
+        value={projectHooksJson}
+      />
+      <CopyBlock
+        title="Team hooks.json (local IDE reference)"
+        filename="hooks.json"
+        downloadName="team-hooks.json"
         value={hooksJson}
       />
       <CopyBlock

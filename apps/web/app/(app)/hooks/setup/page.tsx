@@ -40,7 +40,7 @@ export default async function HooksSetupPage() {
     <div className="space-y-4 p-4 max-w-3xl">
       <PageHeader
         title="Install stop hook"
-        subtitle="POSIX sh + curl + git (native on Linux and macOS, no language runtimes). The Vercel protection bypass from this deployment is embedded so any project can POST."
+        subtitle="Team Hooks for the local IDE; project .cursor/hooks for Cloud Agents (cloud VMs do not sync ~/.cursor/managed/team_*)."
         meta="Hooks / Setup"
         actions={
           <Button asChild size="sm" variant="ghost">
@@ -50,6 +50,7 @@ export default async function HooksSetupPage() {
       />
       <StopHookCopyPanel
         hooksJson={artifact.hooksJson}
+        projectHooksJson={artifact.projectHooksJson}
         script={artifact.script}
         scriptFilename={artifact.scriptFilename}
         endpoint={artifact.endpoint}

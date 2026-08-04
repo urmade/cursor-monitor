@@ -207,7 +207,13 @@ export function extractWorkspaceRoot(
 export type StopHookArtifact = {
   endpoint: string;
   bypassConfigured: boolean;
+  /** Team Hooks dashboard / managed-dir command (cwd = managed hooks dir). */
   hooksJson: string;
+  /**
+   * Project hooks for Cloud Agents: committed at `.cursor/hooks.json`.
+   * Cloud agent VMs do not receive the IDE team-hook managed directory sync.
+   */
+  projectHooksJson: string;
   scriptFilename: string;
   script: string;
   /** Local file the script appends every POST outcome to. */
@@ -222,7 +228,8 @@ export const STOP_HOOK_LOG_FILE = '~/.cursor/nexus-stop-hook.log';
  * Build a ready-to-paste Cursor stop hook that POSTs stdin metadata to Nexus.
  * POSIX `/bin/sh` + curl (+ git for repo/branch enrichment) — no bashisms,
  * language runtimes, or jq. Runs natively on Linux and macOS.
- * Bypass is hardcoded so non-Vercel projects can clear deployment protection.
+ * Bypass is hardcoded so non-Vercel projects can clear deployment protection;
+ * cloud agents may also supply `NEXUS_VERCEL_BYPASS` / `VERCEL_PROTECTION_BYPASS`.
  */
 export function buildStopHookArtifact(opts: {
   baseUrl: string;
@@ -233,7 +240,26 @@ export function buildStopHookArtifact(opts: {
   const bypassConfigured = bypass.length > 0;
   const scriptFilename = 'nexus-stop-to-supabase.sh';
 
+  // Team hooks sync into ~/.cursor/managed/team_<id>/hooks/ on the local IDE.
+  // Cloud agent VMs typically do NOT get that directory — use projectHooksJson.
   const hooksJson = JSON.stringify(
+    {
+      version: 1,
+      hooks: {
+        stop: [
+          {
+            command: `./${scriptFilename}`,
+            timeout: 15,
+          },
+        ],
+      },
+    },
+    null,
+    2,
+  );
+
+  // Project hooks: relative to the repository root (Cloud Agents load these).
+  const projectHooksJson = JSON.stringify(
     {
       version: 1,
       hooks: {
@@ -253,11 +279,23 @@ export function buildStopHookArtifact(opts: {
     '#!/bin/sh',
     '# Cursor stop hook — store turn metadata in Nexus (Supabase-backed Postgres).',
     '# Native Linux + macOS: POSIX sh + curl + git only. No bash/Python/Node/jq.',
-    `# Save as .cursor/hooks/${scriptFilename} and chmod +x.`,
+    '#',
+    '# Install:',
+    '#   • Local IDE (Team Hooks): script name MUST be this filename under',
+    '#     ~/.cursor/managed/team_<id>/hooks/ — not a title like "Cost".',
+    '#   • Cloud Agents: commit .cursor/hooks.json + .cursor/hooks/<this file>',
+    '#     (team managed hooks are not synced into cloud VMs).',
+    '#',
+    '# Workspace root: stdin / CURSOR_PROJECT_DIR (team cwd is the managed dir).',
+    `# Filename: ${scriptFilename}`,
     '',
     'set +e',
-    `ENDPOINT=${shellDoubleQuote(endpoint)}`,
-    `BYPASS=${shellDoubleQuote(bypass)}`,
+    `ENDPOINT_DEFAULT=${shellDoubleQuote(endpoint)}`,
+    'ENDPOINT="${NEXUS_STOP_HOOK_ENDPOINT:-}"',
+    'if [ -z "$ENDPOINT" ]; then ENDPOINT="$ENDPOINT_DEFAULT"; fi',
+    '# Prefer cloud-agent / environment secrets when present; else baked-in bypass.',
+    'BYPASS="${NEXUS_VERCEL_BYPASS:-${VERCEL_PROTECTION_BYPASS:-}}"',
+    `if [ -z "$BYPASS" ]; then BYPASS=${shellDoubleQuote(bypass)}; fi`,
     '',
     'json_escape() {',
     "  printf '%s' \"$1\" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/\"/\\\\\"/g' -e 's/	/\\\\t/g'",
@@ -298,6 +336,7 @@ export function buildStopHookArtifact(opts: {
     '  _root="$1"',
     '  REPO_OUT=""',
     '  BRANCH_OUT=""',
+    '  [ -n "$_root" ] && [ -d "$_root" ] || return 0',
     '  command -v git >/dev/null 2>&1 || return 0',
     '  git -C "$_root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0',
     '  BRANCH_OUT=$(git -C "$_root" rev-parse --abbrev-ref HEAD 2>/dev/null)',
@@ -322,20 +361,28 @@ export function buildStopHookArtifact(opts: {
     'if [ -z "$BRANCH" ]; then BRANCH=$(json_get_string branch "$RAW"); fi',
     'WORKSPACE_ROOT=$(json_get_string workspace_root "$RAW")',
     '',
-    'ROOT="$PWD"',
     'if [ -z "$WORKSPACE_ROOT" ]; then',
     '  WORKSPACE_ROOT=$(printf \'%s\' "$RAW" | tr \'\\n\' \' \' | sed -n \'s/.*"workspace_roots"[[:space:]]*:[[:space:]]*\\[[[:space:]]*"\\([^"]*\\)".*/\\1/p\' | head -n 1)',
     'fi',
+    '# Team hooks / cloud agents: cwd may be the managed hooks dir, not the repo.',
+    '# Prefer payload roots, then Cursor/Claude project env, then $PWD (project hooks).',
+    'ROOT=""',
     'if [ -n "$WORKSPACE_ROOT" ] && [ -d "$WORKSPACE_ROOT" ]; then',
     '  ROOT="$WORKSPACE_ROOT"',
+    'elif [ -n "${CURSOR_PROJECT_DIR:-}" ] && [ -d "$CURSOR_PROJECT_DIR" ]; then',
+    '  ROOT="$CURSOR_PROJECT_DIR"',
+    'elif [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "$CLAUDE_PROJECT_DIR" ]; then',
+    '  ROOT="$CLAUDE_PROJECT_DIR"',
+    'else',
+    '  ROOT="$PWD"',
     'fi',
+    'if [ -z "$WORKSPACE_ROOT" ]; then WORKSPACE_ROOT="$ROOT"; fi',
     '',
     'REPO_OUT=""',
     'BRANCH_OUT=""',
     'detect_git "$ROOT"',
     'if [ -z "$REPO" ] && [ -n "$REPO_OUT" ]; then REPO="$REPO_OUT"; fi',
     'if [ -z "$BRANCH" ] && [ -n "$BRANCH_OUT" ]; then BRANCH="$BRANCH_OUT"; fi',
-    'if [ -z "$WORKSPACE_ROOT" ]; then WORKSPACE_ROOT="$ROOT"; fi',
     '',
     'TRIMMED=$(printf \'%s\' "$RAW" | tr -d \'\\r\' | sed \'s/[[:space:]]*$//\')',
     'CORE=$(printf \'%s\' "$TRIMMED" | sed \'s/}[[:space:]]*$//\')',
@@ -359,7 +406,10 @@ export function buildStopHookArtifact(opts: {
     'LOG_FILE="${NEXUS_STOP_HOOK_LOG:-' +
       STOP_HOOK_LOG_FILE.replace('~', '$HOME') +
       '}"',
-    'mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null',
+    '# Cloud agent homes are ephemeral; fall back to /tmp when $HOME is unset/unusable.',
+    'if ! mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null; then',
+    '  LOG_FILE="${TMPDIR:-/tmp}/nexus-stop-hook.log"',
+    'fi',
     'STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)',
     'BODY_FILE="${TMPDIR:-/tmp}/nexus-stop-hook-$$.out"',
     '',
@@ -370,14 +420,14 @@ export function buildStopHookArtifact(opts: {
     "  STATUS=$(curl -sS --connect-timeout 5 --max-time 12 -X POST \"$ENDPOINT\" \\",
     '    -H "Content-Type: application/json" \\',
     '    -H "Accept: application/json" \\',
-    '    -H "User-Agent: nexus-cursor-stop-hook/1.3" \\',
+    '    -H "User-Agent: nexus-cursor-stop-hook/1.4" \\',
     '    -H "x-vercel-protection-bypass: $BYPASS" \\',
     "    --data-binary \"$BODY\" -o \"$BODY_FILE\" -w '%{http_code}' 2>/dev/null)",
     'else',
     "  STATUS=$(curl -sS --connect-timeout 5 --max-time 12 -X POST \"$ENDPOINT\" \\",
     '    -H "Content-Type: application/json" \\',
     '    -H "Accept: application/json" \\',
-    '    -H "User-Agent: nexus-cursor-stop-hook/1.3" \\',
+    '    -H "User-Agent: nexus-cursor-stop-hook/1.4" \\',
     "    --data-binary \"$BODY\" -o \"$BODY_FILE\" -w '%{http_code}' 2>/dev/null)",
     'fi',
     'if [ -z "$STATUS" ]; then STATUS="000"; fi',
@@ -393,7 +443,9 @@ export function buildStopHookArtifact(opts: {
     '  tail -n 200 "$LOG_FILE" >"$LOG_FILE.tmp" 2>/dev/null && mv "$LOG_FILE.tmp" "$LOG_FILE" 2>/dev/null',
     'fi',
     '',
+    '# Always succeed so a stop hook never blocks IDE or cloud agent completion.',
     "printf '%s\\n' '{}'",
+    'exit 0',
     '',
   ].join('\n');
 
@@ -401,15 +453,16 @@ export function buildStopHookArtifact(opts: {
     endpoint,
     bypassConfigured,
     hooksJson,
+    projectHooksJson,
     scriptFilename,
     script,
     logFile: STOP_HOOK_LOG_FILE,
     installSteps: [
-      `Create directory .cursor/hooks/ in your project (if missing).`,
-      `Save the shell script as .cursor/hooks/${scriptFilename} and run: chmod +x .cursor/hooks/${scriptFilename}`,
-      `Merge the hooks.json snippet into .cursor/hooks.json (project) or ~/.cursor/hooks.json (user).`,
-      `Requires only POSIX sh, curl, and git (native on Linux and macOS). On stop, metadata plus detected repo/branch are POSTed to Nexus.`,
-      `Every POST appends its HTTP status to ${STOP_HOOK_LOG_FILE} — check it (tail -n 5 ${STOP_HOOK_LOG_FILE}) when turns stop appearing in Monitoring.`,
+      `Cloud Agents (required for cloud turns): commit \`.cursor/hooks.json\` (project snippet below) and \`.cursor/hooks/${scriptFilename}\` into each repo. Cloud VMs do not receive ~/.cursor/managed/team_*/ IDE team-hook sync — without project hooks, stop never runs in the cloud.`,
+      `Local IDE (Team Hooks): script name exactly \`${scriptFilename}\` (not a title like "Cost"), event stop, OS targeting include Linux + macOS. Confirm \`ls ~/.cursor/managed/team_*/hooks/${scriptFilename}\`.`,
+      `Optional: set cloud-agent secrets \`NEXUS_VERCEL_BYPASS\` and/or \`NEXUS_STOP_HOOK_ENDPOINT\` — the script prefers those over the baked-in values.`,
+      `Requires POSIX sh, curl, and git. Uses CURSOR_PROJECT_DIR when cwd is not the repo root.`,
+      `POST outcomes append to ${STOP_HOOK_LOG_FILE} (or /tmp if $HOME is unusable).`,
     ],
   };
 }

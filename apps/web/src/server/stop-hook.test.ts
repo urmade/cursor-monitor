@@ -122,7 +122,8 @@ describe('stop-hook helpers', () => {
       'LOG_FILE="${NEXUS_STOP_HOOK_LOG:-$HOME/.cursor/nexus-stop-hook.log}"',
     );
     // stdout must stay a bare hook response, whatever the POST did.
-    expect(artifact.script.trimEnd().endsWith("printf '%s\\n' '{}'")).toBe(true);
+    expect(artifact.script).toContain("printf '%s\\n' '{}'");
+    expect(artifact.script.trimEnd().endsWith('exit 0')).toBe(true);
   });
 
   it('embeds endpoint and bypass into a POSIX sh script for Linux and macOS', () => {
@@ -135,30 +136,52 @@ describe('stop-hook helpers', () => {
     expect(artifact.scriptFilename).toBe('nexus-stop-to-supabase.sh');
     expect(artifact.script.startsWith('#!/bin/sh')).toBe(true);
     expect(artifact.script).toContain('Native Linux + macOS');
+    expect(artifact.script).toContain('CURSOR_PROJECT_DIR');
     expect(artifact.script).toContain('hardcoded-bypass-token');
     expect(artifact.script).toContain('https://nexus.example/api/hooks/stop');
     expect(artifact.script).toContain('x-vercel-protection-bypass');
     expect(artifact.script).toContain('curl ');
     expect(artifact.script).toContain('detect_git');
-    expect(artifact.script).toContain('nexus-cursor-stop-hook/1.3');
+    expect(artifact.script).toContain('nexus-cursor-stop-hook/1.4');
+    expect(artifact.script).toContain('NEXUS_VERCEL_BYPASS');
+    expect(artifact.script).toContain('NEXUS_STOP_HOOK_ENDPOINT');
+    expect(artifact.script.trimEnd().endsWith('exit 0')).toBe(true);
     // No bash-only arrays / locals — must parse under Linux /bin/sh (dash).
     expect(artifact.script).not.toMatch(/CURL_ARGS=|\$\{CURL_ARGS\[@\]\}|local /);
     expect(artifact.script).not.toMatch(/python3|urllib|#!\/usr\/bin\/env python|#!\/bin\/bash/i);
-    expect(artifact.installSteps.some((s) => /Linux and macOS/i.test(s))).toBe(
+    expect(artifact.installSteps.some((s) => /Cloud Agents/i.test(s))).toBe(
+      true,
+    );
+    expect(artifact.installSteps.some((s) => /project hooks/i.test(s))).toBe(
       true,
     );
     expect(JSON.parse(artifact.hooksJson)).toMatchObject({
       version: 1,
       hooks: {
-        stop: [{ command: `.cursor/hooks/${artifact.scriptFilename}` }],
+        stop: [
+          {
+            command: `./${artifact.scriptFilename}`,
+            timeout: 15,
+          },
+        ],
+      },
+    });
+    expect(JSON.parse(artifact.projectHooksJson)).toMatchObject({
+      version: 1,
+      hooks: {
+        stop: [
+          {
+            command: `.cursor/hooks/${artifact.scriptFilename}`,
+            timeout: 15,
+          },
+        ],
       },
     });
   });
 
   it('generated script runs under dash and bash without syntax errors', async () => {
-    const { writeFileSync, chmodSync, mkdtempSync, rmSync } = await import(
-      'node:fs'
-    );
+    const { writeFileSync, chmodSync, mkdtempSync, rmSync, readFileSync } =
+      await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
     const { spawnSync } = await import('node:child_process');
@@ -170,6 +193,7 @@ describe('stop-hook helpers', () => {
     const dir = mkdtempSync(join(tmpdir(), 'nexus-stop-hook-'));
     const scriptPath = join(dir, artifact.scriptFilename);
     const logPath = join(dir, 'hook.log');
+    const fakeProject = mkdtempSync(join(tmpdir(), 'nexus-project-'));
     writeFileSync(scriptPath, artifact.script, { mode: 0o755 });
     chmodSync(scriptPath, 0o755);
 
@@ -184,18 +208,41 @@ describe('stop-hook helpers', () => {
         input: payload,
         encoding: 'utf8',
         env: { ...process.env, NEXUS_STOP_HOOK_LOG: logPath },
+        // Team hooks: cwd is the managed hooks directory, not the project.
+        cwd: dir,
       });
       expect(result.status, `${shell} exit`).toBe(0);
       expect(result.stdout.trim(), `${shell} stdout`).toBe('{}');
       expect(result.stderr ?? '', `${shell} stderr`).toBe('');
     }
 
-    const { readFileSync } = await import('node:fs');
+    // Simulate team/cloud cwd outside the repo; CURSOR_PROJECT_DIR must win.
+    const teamLog = join(dir, 'team.log');
+    const teamRun = spawnSync('sh', [scriptPath], {
+      input: JSON.stringify({
+        conversation_id: 'c2',
+        status: 'completed',
+      }),
+      encoding: 'utf8',
+      cwd: dir,
+      env: {
+        ...process.env,
+        NEXUS_STOP_HOOK_LOG: teamLog,
+        CURSOR_PROJECT_DIR: process.cwd(),
+        HOME: fakeProject,
+      },
+    });
+    expect(teamRun.status).toBe(0);
+    expect(teamRun.stdout.trim()).toBe('{}');
+    const teamBody = readFileSync(teamLog, 'utf8');
+    expect(teamBody).toMatch(/FAILED status=/);
+
     const log = readFileSync(logPath, 'utf8');
     expect(log).toMatch(/FAILED status=/);
     expect(log).toContain('https://example.test/api/hooks/stop');
 
     rmSync(dir, { recursive: true, force: true });
+    rmSync(fakeProject, { recursive: true, force: true });
   });
 
   it('normalizes git remotes into owner/repo', () => {
