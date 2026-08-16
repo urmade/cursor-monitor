@@ -15,4 +15,9 @@ describe('job handlers registry', () => {
     const kinds = listRegisteredKinds();
     expect(kinds).toContain('sync_automation_usage_events');
   });
+
+  it('registers delayed stop-hook team usage cost reconcile', () => {
+    const kinds = listRegisteredKinds();
+    expect(kinds).toContain('reconcile_stop_hook_costs');
+  });
 });

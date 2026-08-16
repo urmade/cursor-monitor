@@ -146,6 +146,7 @@ function fullEntryJson(event: HookSignalEvent): string {
       charged_cents: event.chargedCents,
       cost_source: event.costSource,
       cost_lookup_error: event.costLookupError,
+      cost_looked_up_at: event.costLookedUpAt,
       usage_event: event.usageEvent,
       started_at: event.startedAt,
       finished_at: event.finishedAt,
@@ -210,8 +211,10 @@ function LocalRunDetails({
                         <Badge tone="info">
                           {formatCentsUsd(event.chargedCents)}
                         </Badge>
+                      ) : event.costLookupError ? (
+                        <Badge tone="warning">cost unavailable</Badge>
                       ) : (
-                        <Badge tone="neutral">cost n/a</Badge>
+                        <Badge tone="neutral">cost pending</Badge>
                       )}
                       {event.durationMs != null ? (
                         <Badge tone="info">

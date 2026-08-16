@@ -25,7 +25,7 @@ export default async function OrganisationsSettingsPage() {
     <div className="space-y-4 p-4 max-w-3xl">
       <PageHeader
         title="Cursor organisations"
-        subtitle="Connect Cursor organisations with Organisation Admin keys and multiple named User / Team API keys (encrypted in the database)."
+        subtitle="Connect Cursor organisations. Team API keys are tested against the Team usage API and power Monitoring cost."
         meta="Settings"
       />
       <CursorOrganisationsSettings

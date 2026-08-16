@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
+import { HOOK_COST_PENDING_SOURCE } from '@nexus/core';
 import { cursorStopHookEvents, getDb, newId } from '@nexus/db';
-import { lookupStopHookUsageCost } from '../../../../src/server/hook-usage-cost';
 import {
   authorizeStopHookRequest,
   calculateHookDurationMs,
@@ -57,15 +57,9 @@ export async function POST(req: Request) {
     : null;
 
   const userEmail = asString(payload.user_email);
-  const model = asString(payload.model) ?? asString(payload.model_id);
   const startedAt = parseHookTimestamp(payload.started_at);
   const finishedAt = parseHookTimestamp(payload.finished_at) ?? receivedAt;
   const durationMs = calculateHookDurationMs(startedAt, finishedAt);
-
-  const cost = await lookupStopHookUsageCost({
-    userEmail,
-    model,
-  });
 
   const id = newId();
   await getDb()
@@ -87,10 +81,11 @@ export async function POST(req: Request) {
       repo: extractRepoFromPayload(payload),
       gitBranch: extractBranchFromPayload(payload),
       modelParams,
-      chargedCents: cost.chargedCents,
-      costSource: cost.costSource,
-      costLookupError: cost.costLookupError,
-      usageEvent: cost.usageEvent,
+      chargedCents: null,
+      costSource: HOOK_COST_PENDING_SOURCE,
+      costLookupError: null,
+      usageEvent: null,
+      costLookedUpAt: null,
       payload,
       startedAt,
       finishedAt,
@@ -101,9 +96,9 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     id,
-    chargedCents: cost.chargedCents,
-    costSource: cost.costSource,
-    costLookupError: cost.costLookupError,
+    chargedCents: null,
+    costSource: HOOK_COST_PENDING_SOURCE,
+    costLookupError: null,
     startedAt: startedAt?.toISOString() ?? null,
     finishedAt: finishedAt.toISOString(),
     durationMs,

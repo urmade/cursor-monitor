@@ -13,6 +13,7 @@ import {
   ensureAttentionJobs,
   ensurePendingEvalJobs,
   ensureAutomationUsageSyncJob,
+  ensureStopHookCostReconcileJob,
 } from './handlers';
 
 export type TickResult = {
@@ -79,6 +80,7 @@ export async function runCronTick(): Promise<TickResult> {
   await ensureAttentionJobs().catch(() => undefined);
   await ensurePendingEvalJobs().catch(() => undefined);
   await ensureAutomationUsageSyncJob().catch(() => undefined);
+  await ensureStopHookCostReconcileJob().catch(() => undefined);
 
   const hour = new Date().getUTCHours();
   if (hour === 3) {

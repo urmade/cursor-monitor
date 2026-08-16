@@ -18,6 +18,8 @@ const {
   kvSet,
   kvGet,
   kvDel,
+  getMe,
+  filteredUsageEvents,
 } = vi.hoisted(() => ({
   requireSession: vi.fn(),
   currentUser: vi.fn(),
@@ -36,6 +38,17 @@ const {
   kvSet: vi.fn(),
   kvGet: vi.fn(),
   kvDel: vi.fn(),
+  getMe: vi.fn(async () => ({
+    apiKeyName: 'test',
+    userEmail: 'dev@example.com',
+  })),
+  filteredUsageEvents: vi.fn(async (): Promise<{
+    totalUsageEventsCount: number;
+    usageEvents: Array<{ timestamp: string; chargedCents?: number }>;
+  }> => ({
+    totalUsageEventsCount: 0,
+    usageEvents: [],
+  })),
 }));
 
 vi.mock('next/cache', () => ({
@@ -69,7 +82,7 @@ vi.mock('@nexus/cursor-client', async (importOriginal) => {
     discoverOrganizationId: (...args: unknown[]) =>
       discoverOrganizationId(...args),
     createCursorClient: () => ({
-      getMe: vi.fn(async () => ({ apiKeyName: 'test' })),
+      getMe,
     }),
     createCursorOrgClient: () => ({
       pooledUsage: vi.fn(async () => ({ pool: { usedCents: 1 } })),
@@ -81,6 +94,7 @@ vi.mock('@nexus/cursor-client', async (importOriginal) => {
         totalUsageEventsCount: 0,
         usageEvents: [],
       })),
+      filteredUsageEvents,
     }),
   };
 });
@@ -157,6 +171,14 @@ describe('organisation server-boundary security', () => {
     listCursorOrganisations.mockResolvedValue([]);
     listDbOrganisationViews.mockResolvedValue([]);
     cookiesGet.mockReturnValue(undefined);
+    getMe.mockResolvedValue({
+      apiKeyName: 'test',
+      userEmail: 'dev@example.com',
+    });
+    filteredUsageEvents.mockResolvedValue({
+      totalUsageEventsCount: 0,
+      usageEvents: [],
+    });
   });
 
   it('requires a session before organisation-id discovery (no outbound)', async () => {
@@ -443,18 +465,54 @@ describe('organisation server-boundary security', () => {
     expect(views[0]?.keys.every((k) => k.canEdit === false)).toBe(true);
   });
 
-  it('validates User / Team API keys via GET /v1/me without persisting', async () => {
+  it('validates User API keys via GET /v1/me without persisting', async () => {
     const fd = new FormData();
     fd.set('apiKey', 'cursor_user_key_long_enough_xx');
     fd.set('baseUrl', 'https://api.cursor.com');
+    fd.set('keyKind', 'user');
 
     const result = await actionValidateUserTeamApiKey(fd);
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error(result.error);
     expect(result.kind).toBe('user_team');
-    expect(result.note).toMatch(/Valid User \/ Team API key/);
+    expect(result.note).toMatch(/Valid User API key/);
     expect(addCursorOrganisationApiKey).not.toHaveBeenCalled();
     expect(cookiesSet).not.toHaveBeenCalled();
+    expectNoKvApis();
+  });
+
+  it('rejects a User API key when saving as a Team key', async () => {
+    const fd = new FormData();
+    fd.set('apiKey', 'cursor_user_key_long_enough_xx');
+    fd.set('baseUrl', 'https://api.cursor.com');
+    fd.set('keyKind', 'service_account');
+
+    const result = await actionValidateUserTeamApiKey(fd);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected failure');
+    expect(result.error).toMatch(/User API key/);
+    expect(filteredUsageEvents).not.toHaveBeenCalled();
+    expect(addCursorOrganisationApiKey).not.toHaveBeenCalled();
+  });
+
+  it('validates Team API keys via the Team usage API without persisting', async () => {
+    getMe.mockRejectedValue(new Error('401 Invalid API key'));
+    filteredUsageEvents.mockResolvedValue({
+      totalUsageEventsCount: 3,
+      usageEvents: [{ timestamp: '1', chargedCents: 1 }],
+    });
+    const fd = new FormData();
+    fd.set('apiKey', 'cursor_team_admin_key_xxxxxx');
+    fd.set('baseUrl', 'https://api.cursor.com');
+    fd.set('keyKind', 'team');
+
+    const result = await actionValidateUserTeamApiKey(fd);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.kind).toBe('team');
+    expect(result.note).toMatch(/Valid Team API key/);
+    expect(filteredUsageEvents).toHaveBeenCalled();
+    expect(addCursorOrganisationApiKey).not.toHaveBeenCalled();
     expectNoKvApis();
   });
 

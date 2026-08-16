@@ -28,3 +28,11 @@ export {
   type DecryptedCursorOrganisation,
   type DecryptedCursorApiKey,
 } from './manage';
+export {
+  probeUserApiKey,
+  probeTeamApiKey,
+  isUserScopedApiKey,
+  formatCursorApiKeyIdentity,
+  type CursorApiKeyProbe,
+  type CursorApiKeyProbeKind,
+} from './probe-api-key';

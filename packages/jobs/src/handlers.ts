@@ -22,6 +22,7 @@ import {
   resumeAfterQuestion,
   syncAutomationUsageEvents,
   validateFdeAdmAutomationUsageSync,
+  reconcileStopHookUsageCosts,
   DEFAULT_VALIDATION_LABELS,
 } from '@nexus/core';
 import { CursorClient } from '@nexus/cursor-client';
@@ -146,6 +147,14 @@ registerJobHandler('sync_automation_usage_events', async (db, job) => {
       });
     }
   }
+});
+
+/**
+ * Delayed Team usage-API cost for stop-hook turns. Incoming hooks wait ~5
+ * minutes so Cursor usage events can land, then this cadence fills chargedCents.
+ */
+registerJobHandler('reconcile_stop_hook_costs', async () => {
+  await reconcileStopHookUsageCosts();
 });
 
 registerJobHandler('dispatch_attention_events', async (db) => {
@@ -453,6 +462,18 @@ export async function ensureAutomationUsageSyncJob(): Promise<void> {
     kind: 'sync_automation_usage_events',
     payload: {},
     dedupeKey: `sync_automation_usage_events:${fiveMinBucket}`,
+    priority: 6,
+  }).catch(() => undefined);
+}
+
+/** Enqueue stop-hook Team usage cost lookup on a 5-minute cadence. */
+export async function ensureStopHookCostReconcileJob(): Promise<void> {
+  const db = getDb();
+  const fiveMinBucket = Math.floor(Date.now() / (5 * 60 * 1000));
+  await enqueueJob(db, {
+    kind: 'reconcile_stop_hook_costs',
+    payload: {},
+    dedupeKey: `reconcile_stop_hook_costs:${fiveMinBucket}`,
     priority: 6,
   }).catch(() => undefined);
 }

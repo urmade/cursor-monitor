@@ -34,11 +34,13 @@ export const cursorStopHookEvents = pgTable(
     modelParams: jsonb('model_params').$type<
       Array<{ id: string; value: string }> | null
     >(),
-    /** chargedCents from Cursor Admin filtered-usage-events */
+    /** chargedCents from Cursor Team Admin filtered-usage-events */
     chargedCents: doublePrecision('charged_cents'),
     costSource: text('cost_source'),
     costLookupError: text('cost_lookup_error'),
     usageEvent: jsonb('usage_event').$type<Record<string, unknown> | null>(),
+    /** Last attempt to resolve cost from the Team usage API (delayed cadence). */
+    costLookedUpAt: timestamp('cost_looked_up_at', { withTimezone: true }),
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),

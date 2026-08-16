@@ -221,11 +221,13 @@ export function CursorOrganisationsSettings({
   function checkUserTeamApiKey(opts: {
     apiKey: string;
     baseUrl: string;
+    keyKind: KeyKind;
     onResult: (state: KeyCheckState) => void;
   }) {
     const fd = new FormData();
     fd.set('baseUrl', opts.baseUrl);
     fd.set('apiKey', opts.apiKey);
+    fd.set('keyKind', opts.keyKind);
     opts.onResult({ status: 'checking' });
     startTransition(async () => {
       const result = await actionValidateUserTeamApiKey(fd);
@@ -242,10 +244,11 @@ export function CursorOrganisationsSettings({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="max-w-2xl">
           <p className="text-sm text-fg-muted">
-            Connect Cursor organisations and attach multiple named User and Team
-            API keys. Organisation Admin keys unlock cost; User / Team keys list
-            agents for each identity. Keys are encrypted at rest and never sent
-            back to the browser.
+            Connect Cursor organisations and attach named User and Team API
+            keys. Team API keys are tested against the Team usage API and
+            power Monitoring cost. User keys remain available for Cloud Agents
+            identity. Keys are encrypted at rest and never sent back to the
+            browser.
           </p>
         </div>
         <Button type="button" onClick={openCreate}>
@@ -303,16 +306,15 @@ export function CursorOrganisationsSettings({
                   </p>
                   <p className="text-xs text-fg-muted">
                     {org.hasOrgApiKey ? (
-                      <span className="text-success-fg">
+                      <span>
                         Organisation API key saved
                         {org.orgApiKeyHint ? ` (${org.orgApiKeyHint})` : ''}
                       </span>
                     ) : (
-                      <span className="text-warning-fg">
-                        No Organisation API key — usage verification unavailable
-                      </span>
+                      <span>No Organisation API key</span>
                     )}
-                    {` · ${org.keys.length} User/Team key${org.keys.length === 1 ? '' : 's'}`}
+                    {` · ${org.keys.filter((k) => k.keyKind === 'service_account').length} Team key${org.keys.filter((k) => k.keyKind === 'service_account').length === 1 ? '' : 's'} for cost`}
+                    {` · ${org.keys.length} User/Team key${org.keys.length === 1 ? '' : 's'} total`}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -372,8 +374,8 @@ export function CursorOrganisationsSettings({
 
               {org.keys.length === 0 ? (
                 <p className="mt-3 text-xs text-warning-fg">
-                  No User or Team API keys yet — agents cannot be listed until at
-                  least one key is attached.
+                  No User or Team API keys yet. Attach a Team API key to price
+                  Monitoring requests from the usage API.
                 </p>
               ) : (
                 <ul className="mt-3 divide-y divide-border rounded-md border border-border">
@@ -561,7 +563,7 @@ export function CursorOrganisationsSettings({
                 label={
                   editor.hasExistingOrgApiKey
                     ? 'Organisation API key (leave blank to keep current)'
-                    : 'Organisation API key (required for cost)'
+                    : 'Organisation API key (optional)'
                 }
               >
                 <Input
@@ -690,6 +692,31 @@ export function CursorOrganisationsSettings({
                 <p className="text-xs font-medium text-fg">
                   First User / Team API key (optional)
                 </p>
+                <Field label="Key type">
+                  <select
+                    className="h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-fg"
+                    value={editor.keyKind}
+                    disabled={pending}
+                    onChange={(e) =>
+                      setEditor((prev) => ({
+                        ...prev,
+                        keyKind:
+                          e.target.value === 'service_account'
+                            ? 'service_account'
+                            : 'user',
+                        teamKeyCheck: { status: 'idle' },
+                      }))
+                    }
+                  >
+                    <option value="user">User</option>
+                    <option value="service_account">Team (usage / cost)</option>
+                  </select>
+                </Field>
+                <p className="text-xs text-fg-subtle">
+                  {editor.keyKind === 'service_account'
+                    ? 'Team keys are proven against the Team usage API before save.'
+                    : 'User keys are proven against GET /v1/me.'}
+                </p>
                 <Field label="API key">
                   <Input
                     type="password"
@@ -708,11 +735,16 @@ export function CursorOrganisationsSettings({
                       checkUserTeamApiKey({
                         apiKey: e.target.value,
                         baseUrl: editor.baseUrl,
+                        keyKind: editor.keyKind,
                         onResult: (teamKeyCheck) =>
                           setEditor((prev) => ({ ...prev, teamKeyCheck })),
                       });
                     }}
-                    placeholder="cursor_… User or Team API key"
+                    placeholder={
+                      editor.keyKind === 'service_account'
+                        ? 'Team API key from Cursor Dashboard'
+                        : 'User API key'
+                    }
                     disabled={pending}
                     className="font-mono text-sm"
                   />
@@ -727,6 +759,7 @@ export function CursorOrganisationsSettings({
                       checkUserTeamApiKey({
                         apiKey: editor.apiKey,
                         baseUrl: editor.baseUrl,
+                        keyKind: editor.keyKind,
                         onResult: (teamKeyCheck) =>
                           setEditor((prev) => ({ ...prev, teamKeyCheck })),
                       })
@@ -745,28 +778,13 @@ export function CursorOrganisationsSettings({
                         keyLabel: e.target.value,
                       }))
                     }
-                    placeholder="Alice · personal"
+                    placeholder={
+                      editor.keyKind === 'service_account'
+                        ? 'Team usage key'
+                        : 'Alice · personal'
+                    }
                     disabled={pending}
                   />
-                </Field>
-                <Field label="Key type">
-                  <select
-                    className="h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-fg"
-                    value={editor.keyKind}
-                    disabled={pending}
-                    onChange={(e) =>
-                      setEditor((prev) => ({
-                        ...prev,
-                        keyKind:
-                          e.target.value === 'service_account'
-                            ? 'service_account'
-                            : 'user',
-                      }))
-                    }
-                  >
-                    <option value="user">User</option>
-                    <option value="service_account">Team</option>
-                  </select>
                 </Field>
               </div>
             ) : null}
@@ -878,7 +896,7 @@ export function CursorOrganisationsSettings({
                 }
               >
                 <option value="user">User</option>
-                <option value="service_account">Team</option>
+                <option value="service_account">Team (usage / cost)</option>
               </select>
             </Field>
             <Field
@@ -906,6 +924,7 @@ export function CursorOrganisationsSettings({
                   checkUserTeamApiKey({
                     apiKey: e.target.value,
                     baseUrl: keyEditor.organisationBaseUrl,
+                    keyKind: keyEditor.keyKind,
                     onResult: (keyCheck) =>
                       setKeyEditor((prev) => ({ ...prev, keyCheck })),
                   });
@@ -925,6 +944,7 @@ export function CursorOrganisationsSettings({
                   checkUserTeamApiKey({
                     apiKey: keyEditor.apiKey,
                     baseUrl: keyEditor.organisationBaseUrl,
+                    keyKind: keyEditor.keyKind,
                     onResult: (keyCheck) =>
                       setKeyEditor((prev) => ({ ...prev, keyCheck })),
                   })

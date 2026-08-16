@@ -4,12 +4,14 @@ import {
   formatHookCostUsd,
   formatRelativeTime,
 } from '../../../src/lib/monitoring-format';
+import { TeamApiKeysPanel } from '../../../src/components/TeamApiKeysPanel';
 import {
   HOOK_NO_REPO_GROUP,
   loadHookSignalsTree,
   projectsFromHookSummaries,
   summarizeHookRepos,
 } from '../../../src/server/hook-signals';
+import { listCursorOrganisationViews } from '../../../src/server/cursor-organisations';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +20,8 @@ export default async function MonitoringPage() {
   let projects: ReturnType<typeof projectsFromHookSummaries> = [];
   let hookEventCount = 0;
   let truncated = false;
+  let organisations: Awaited<ReturnType<typeof listCursorOrganisationViews>> =
+    [];
 
   try {
     const hookTree = await loadHookSignalsTree();
@@ -26,6 +30,12 @@ export default async function MonitoringPage() {
     projects = projectsFromHookSummaries(summarizeHookRepos(hookTree));
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
+  }
+
+  try {
+    organisations = await listCursorOrganisationViews();
+  } catch {
+    // Team key management is optional on this page; hook data still renders.
   }
 
   const totalCharged = projects.reduce(
@@ -38,19 +48,27 @@ export default async function MonitoringPage() {
     <div className="space-y-4 p-4">
       <PageHeader
         title="Monitoring"
-        subtitle="Every repository is a project. Open one to inspect local requests captured by the Cursor stop hook — with cost when Admin usage lookup succeeds."
+        subtitle="Every repository is a project. Local stop-hook turns land immediately; charged cost is filled from the Team usage API about five minutes later."
         meta={
           projects.length > 0
             ? `${projects.length} project${projects.length === 1 ? '' : 's'}${hookEventCount > 0 ? ` · ${hookEventCount} local request${hookEventCount === 1 ? '' : 's'}` : ''}${anyCost ? ` · ${formatHookCostUsd(totalCharged)} charged` : ''}`
             : undefined
         }
         actions={
-          <Link
-            href="/hooks/setup"
-            className="text-xs text-accent hover:underline"
-          >
-            Copy stop hook
-          </Link>
+          <div className="flex items-center gap-3">
+            <a
+              href="#team-api-keys"
+              className="text-xs text-accent hover:underline"
+            >
+              Team API keys
+            </a>
+            <Link
+              href="/hooks/setup"
+              className="text-xs text-accent hover:underline"
+            >
+              Copy stop hook
+            </Link>
+          </div>
         }
       />
 
@@ -59,6 +77,8 @@ export default async function MonitoringPage() {
           {error}
         </p>
       ) : null}
+
+      <TeamApiKeysPanel organisations={organisations} />
 
       {projects.length === 0 && !error ? (
         <Panel>

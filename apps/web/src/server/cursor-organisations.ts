@@ -3,11 +3,9 @@
 import { revalidatePath } from 'next/cache';
 import {
   createCursorAdminClient,
-  createCursorClient,
   createCursorOrgClient,
   discoverOrganizationId,
   normalizeOrganizationId,
-  type ApiKeyInfo,
 } from '@nexus/cursor-client';
 import {
   addCursorOrganisationApiKey,
@@ -15,13 +13,14 @@ import {
   deleteAllCursorOrganisations,
   deleteCursorOrganisation,
   listCursorOrganisationViews as listDbOrganisationViews,
+  probeTeamApiKey,
+  probeUserApiKey,
   revokeCursorOrganisationApiKey,
   updateCursorOrganisationApiKey,
   upsertCursorOrganisation,
   type CursorApiKeyKind,
   type CursorOrganisationView as DbOrganisationView,
 } from '@nexus/core';
-import { formatApiKeyIdentity } from './cursor';
 import {
   clearCursorOrganisations,
   maskApiKey,
@@ -86,7 +85,7 @@ export type OrganisationMutationResult =
 export type ValidateApiKeyResult =
   | {
       ok: true;
-      kind: 'user_team' | 'organisation';
+      kind: 'user_team' | 'team' | 'organisation';
       identity: string | null;
       note: string;
     }
@@ -97,6 +96,30 @@ function parseKeyKind(raw: string): CursorApiKeyKind {
   return raw === 'service_account' || raw === 'team'
     ? 'service_account'
     : 'user';
+}
+
+async function inspectAttachedApiKey(opts: {
+  apiKey: string;
+  baseUrl: string;
+  keyKind: CursorApiKeyKind;
+}): Promise<
+  | { ok: true; identity: string | null; note: string }
+  | { ok: false; error: string }
+> {
+  if (opts.keyKind === 'service_account') {
+    const probe = await probeTeamApiKey({
+      apiKey: opts.apiKey,
+      baseUrl: opts.baseUrl,
+    });
+    if (!probe.ok) return { ok: false, error: probe.error };
+    return { ok: true, identity: probe.identity, note: probe.note };
+  }
+  const probe = await probeUserApiKey({
+    apiKey: opts.apiKey,
+    baseUrl: opts.baseUrl,
+  });
+  if (!probe.ok) return { ok: false, error: probe.error };
+  return { ok: true, identity: probe.identity, note: probe.note };
 }
 
 /**
@@ -375,24 +398,17 @@ export async function actionUpsertCursorOrganisation(
     }
   }
 
-  let me: ApiKeyInfo | null = null;
+  let attachedIdentity: string | null = null;
   if (apiKeyRaw.length >= 20) {
-    try {
-      const client = createCursorClient({
-        apiKey: apiKeyRaw,
-        baseUrl,
-        maxRetries: 1,
-      });
-      me = await client.getMe();
-    } catch (err) {
-      return {
-        ok: false,
-        error:
-          err instanceof Error
-            ? `API key rejected by Cursor (/v1/me): ${err.message}`
-            : 'API key rejected by Cursor (/v1/me).',
-      };
+    const inspected = await inspectAttachedApiKey({
+      apiKey: apiKeyRaw,
+      baseUrl,
+      keyKind,
+    });
+    if (!inspected.ok) {
+      return { ok: false, error: inspected.error };
     }
+    attachedIdentity = inspected.identity;
   }
 
   const creatingNew = !idRaw;
@@ -413,14 +429,11 @@ export async function actionUpsertCursorOrganisation(
       cursorOrganisationId: saved.value.id,
       label:
         keyLabel ||
-        (me
-          ? formatApiKeyIdentity(me)
-          : keyKind === 'service_account'
-            ? 'Team API key'
-            : 'User API key'),
+        attachedIdentity ||
+        (keyKind === 'service_account' ? 'Team API key' : 'User API key'),
       keyKind,
       apiKey: apiKeyRaw,
-      identityLabel: me ? formatApiKeyIdentity(me) : null,
+      identityLabel: attachedIdentity,
     });
     if (!added.ok) {
       if (creatingNew) {
@@ -453,7 +466,7 @@ export async function actionUpsertCursorOrganisation(
     id: saved.value.id,
     organizationId: saved.value.organizationId,
     discoveryNote,
-    identity: me ? formatApiKeyIdentity(me) : null,
+    identity: attachedIdentity,
     cost,
   };
 }
@@ -483,36 +496,24 @@ export async function actionAddCursorOrganisationApiKey(
     return { ok: false, error: 'Organisation not found.' };
   }
 
-  let me: ApiKeyInfo | null = null;
-  try {
-    const client = createCursorClient({
-      apiKey,
-      baseUrl: org.baseUrl,
-      maxRetries: 1,
-    });
-    me = await client.getMe();
-  } catch (err) {
-    return {
-      ok: false,
-      error:
-        err instanceof Error
-          ? `API key rejected by Cursor (/v1/me): ${err.message}`
-          : 'API key rejected by Cursor (/v1/me).',
-    };
+  const inspected = await inspectAttachedApiKey({
+    apiKey,
+    baseUrl: org.baseUrl,
+    keyKind,
+  });
+  if (!inspected.ok) {
+    return { ok: false, error: inspected.error };
   }
 
   const added = await addCursorOrganisationApiKey(session.ctx, {
     cursorOrganisationId: organisationId,
     label:
       label ||
-      (me
-        ? formatApiKeyIdentity(me)
-        : keyKind === 'service_account'
-          ? 'Team API key'
-          : 'User API key'),
+      inspected.identity ||
+      (keyKind === 'service_account' ? 'Team API key' : 'User API key'),
     keyKind,
     apiKey,
-    identityLabel: me ? formatApiKeyIdentity(me) : null,
+    identityLabel: inspected.identity,
   });
   if (!added.ok) {
     return { ok: false, error: added.error.message };
@@ -525,13 +526,14 @@ export async function actionAddCursorOrganisationApiKey(
   return {
     ok: true,
     id: added.value.id,
-    identity: me ? formatApiKeyIdentity(me) : null,
+    identity: inspected.identity,
     keyKind,
   };
 }
 
 /**
- * Immediate, non-mutating check for a User / Team API key via GET /v1/me.
+ * Immediate, non-mutating check for a User or Team API key.
+ * Team keys are proven against POST /teams/filtered-usage-events.
  */
 export async function actionValidateUserTeamApiKey(
   formData: FormData,
@@ -549,6 +551,7 @@ export async function actionValidateUserTeamApiKey(
   }
 
   const apiKey = String(formData.get('apiKey') ?? '').trim();
+  const keyKind = parseKeyKind(String(formData.get('keyKind') ?? 'user'));
   const baseUrlResult = normalizeBaseUrl(String(formData.get('baseUrl') ?? ''));
   if (!baseUrlResult.ok) {
     return { ok: false, error: baseUrlResult.error.message };
@@ -556,33 +559,27 @@ export async function actionValidateUserTeamApiKey(
   if (apiKey.length < 20) {
     return {
       ok: false,
-      error: 'Paste a Cursor User or Team API key (at least 20 characters).',
+      error:
+        keyKind === 'service_account'
+          ? 'Paste a Cursor Team API key (at least 20 characters).'
+          : 'Paste a Cursor User API key (at least 20 characters).',
     };
   }
 
-  try {
-    const client = createCursorClient({
-      apiKey,
-      baseUrl: baseUrlResult.value,
-      maxRetries: 0,
-    });
-    const me = await client.getMe();
-    const identity = formatApiKeyIdentity(me);
-    return {
-      ok: true,
-      kind: 'user_team',
-      identity,
-      note: `Valid User / Team API key · ${identity}`,
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      error:
-        err instanceof Error
-          ? `Key rejected by Cursor (/v1/me): ${err.message}`
-          : 'Key rejected by Cursor (/v1/me).',
-    };
+  const inspected = await inspectAttachedApiKey({
+    apiKey,
+    baseUrl: baseUrlResult.value,
+    keyKind,
+  });
+  if (!inspected.ok) {
+    return { ok: false, error: inspected.error };
   }
+  return {
+    ok: true,
+    kind: keyKind === 'service_account' ? 'team' : 'user_team',
+    identity: inspected.identity,
+    note: inspected.note,
+  };
 }
 
 /**
@@ -711,28 +708,26 @@ export async function actionUpdateCursorOrganisationApiKey(
     return { ok: false, error: 'API key not found.' };
   }
 
-  let me: ApiKeyInfo | null = null;
+  let identityLabel: string | undefined;
+  let markValidated = false;
   if (apiKeyRaw.length >= 20) {
-    try {
-      const client = createCursorClient({
-        apiKey: apiKeyRaw,
-        baseUrl: existingKey.org.baseUrl,
-        maxRetries: 1,
-      });
-      me = await client.getMe();
-    } catch (err) {
-      return {
-        ok: false,
-        error:
-          err instanceof Error
-            ? `API key rejected by Cursor (/v1/me): ${err.message}`
-            : 'API key rejected by Cursor (/v1/me).',
-      };
+    const inspected = await inspectAttachedApiKey({
+      apiKey: apiKeyRaw,
+      baseUrl: existingKey.org.baseUrl,
+      keyKind,
+    });
+    if (!inspected.ok) {
+      return { ok: false, error: inspected.error };
     }
+    identityLabel = inspected.identity ?? undefined;
+    markValidated = true;
   } else if (apiKeyRaw.length > 0) {
     return {
       ok: false,
-      error: 'Paste a Cursor User or Team API key (at least 20 characters).',
+      error:
+        keyKind === 'service_account'
+          ? 'Paste a Cursor Team API key (at least 20 characters).'
+          : 'Paste a Cursor User API key (at least 20 characters).',
     };
   }
 
@@ -741,8 +736,8 @@ export async function actionUpdateCursorOrganisationApiKey(
     label,
     keyKind,
     apiKey: apiKeyRaw.length >= 20 ? apiKeyRaw : undefined,
-    identityLabel: me ? formatApiKeyIdentity(me) : undefined,
-    markValidated: Boolean(me),
+    identityLabel,
+    markValidated,
   });
   if (!updated.ok) {
     return { ok: false, error: updated.error.message };
