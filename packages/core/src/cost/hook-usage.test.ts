@@ -3,10 +3,12 @@ import type { FilteredUsageEvent } from '@nexus/cursor-client';
 import {
   HOOK_COST_PENDING_SOURCE,
   HOOK_COST_TEAM_SOURCE,
+  fetchAllTeamUsageEvents,
   lookupFromUsageEvents,
   lookupStopHookUsageCost,
   matchPendingHooksToUsageEvents,
   reconcileStopHookUsageCosts,
+  reconcileStopHookUsageCostsFromFirstHook,
   selectUsageEventForStopHook,
   usageEventFingerprint,
   type PendingHookCostRow,
@@ -72,6 +74,37 @@ describe('selectUsageEventForStopHook', () => {
       excludeFingerprints: new Set([usageEventFingerprint(first!)]),
     });
     expect(second?.chargedCents).toBe(1);
+  });
+
+  it('picks the event closest to the hook time when anchored', () => {
+    const now = Date.parse('2026-08-16T12:00:00.000Z');
+    const windowed: FilteredUsageEvent[] = [
+      {
+        timestamp: String(now - 60 * 60 * 1000),
+        userEmail: 'a@example.com',
+        model: 'gpt-5',
+        chargedCents: 1,
+      },
+      {
+        timestamp: String(now - 2 * 60 * 1000),
+        userEmail: 'a@example.com',
+        model: 'gpt-5',
+        chargedCents: 9,
+      },
+      {
+        timestamp: String(now + 30 * 60 * 1000),
+        userEmail: 'a@example.com',
+        model: 'gpt-5',
+        chargedCents: 99,
+      },
+    ];
+    const hit = selectUsageEventForStopHook(windowed, {
+      userEmail: 'a@example.com',
+      model: 'gpt-5',
+      anchorMs: now,
+      maxDistanceMs: 6 * 60 * 60 * 1000,
+    });
+    expect(hit?.chargedCents).toBe(9);
   });
 });
 
@@ -193,6 +226,30 @@ describe('matchPendingHooksToUsageEvents', () => {
     expect(matched[0]?.expired).toBe(true);
     expect(matched[0]?.lookup.costLookupError).toMatch(/6 hours/);
   });
+
+  it('does not expire unmatched hooks when expireUnmatched is false', () => {
+    const pending: PendingHookCostRow[] = [
+      {
+        id: 'h1',
+        userEmail: 'nobody@example.com',
+        model: 'gpt-5',
+        receivedAt: new Date(now.getTime() - 7 * 60 * 60 * 1000),
+        finishedAt: null,
+      },
+    ];
+    const matched = matchPendingHooksToUsageEvents({
+      pending,
+      events,
+      source: HOOK_COST_TEAM_SOURCE,
+      now,
+      delayMs: 0,
+      maxAgeMs: 6 * 60 * 60 * 1000,
+      expireUnmatched: false,
+    });
+    expect(matched[0]?.expired).toBe(false);
+    expect(matched[0]?.lookup.costSource).toBe(HOOK_COST_PENDING_SOURCE);
+    expect(matched[0]?.lookup.costLookupError).toBeNull();
+  });
 });
 
 describe('reconcileStopHookUsageCosts', () => {
@@ -273,6 +330,177 @@ describe('reconcileStopHookUsageCosts', () => {
     });
     expect(summary.failed).toBe(1);
     expect(applied[0]?.error).toMatch(/No Cursor Team API key/i);
+  });
+});
+
+describe('fetchAllTeamUsageEvents', () => {
+  it('pages through listAllFilteredUsageEvents', async () => {
+    const listAllFilteredUsageEvents = vi.fn(async () => ({
+      items: events,
+      truncated: true,
+    }));
+    const result = await fetchAllTeamUsageEvents({
+      client: { listAllFilteredUsageEvents } as never,
+      email: null,
+      startDate: 1,
+      endDate: 2,
+    });
+    expect(result.events).toEqual(events);
+    expect(result.truncated).toBe(true);
+    expect(listAllFilteredUsageEvents).toHaveBeenCalledWith(
+      { startDate: 1, endDate: 2 },
+      { pageSize: 1000, maxPages: 50 },
+    );
+  });
+});
+
+describe('reconcileStopHookUsageCostsFromFirstHook', () => {
+  const cred: TeamCostCredential = {
+    apiKey: 'team-key-abcdefghijklmnopqrst',
+    baseUrl: 'https://api.cursor.com',
+    source: 'db',
+    label: 'Acme',
+  };
+
+  it('fetches from the first hook through now and prices matching turns', async () => {
+    const now = new Date('2026-08-16T12:00:00.000Z');
+    const first = new Date('2026-01-01T00:00:00.000Z');
+    const window = { startDate: 0, endDate: 0 };
+    const applied: Array<{ id: string; cents: number | null }> = [];
+    const summary = await reconcileStopHookUsageCostsFromFirstHook({
+      now,
+      loadEarliest: async () => first,
+      loadUnpriced: async () => [
+        {
+          id: 'old',
+          userEmail: 'a@example.com',
+          model: 'gpt-5',
+          receivedAt: first,
+          finishedAt: null,
+        },
+        {
+          id: 'miss',
+          userEmail: 'nobody@example.com',
+          model: 'gpt-5',
+          receivedAt: first,
+          finishedAt: null,
+        },
+      ],
+      loadPricedFingerprints: async () => new Set(),
+      loadCredentials: async () => [cred],
+      fetchEvents: async (opts) => {
+        window.startDate = opts.startDate;
+        window.endDate = opts.endDate;
+        return [
+          {
+            timestamp: String(first.getTime()),
+            userEmail: 'a@example.com',
+            model: 'gpt-5',
+            chargedCents: 4,
+          },
+        ];
+      },
+      apply: async (id, lookup) => {
+        applied.push({ id, cents: lookup.chargedCents });
+      },
+    });
+    expect(window.startDate).toBeLessThanOrEqual(first.getTime());
+    expect(window.endDate).toBe(now.getTime());
+    expect(summary.upgraded).toBe(1);
+    expect(summary.unmatched).toBe(1);
+    expect(summary.skippedNoTeamKey).toBe(false);
+    expect(applied).toEqual([{ id: 'old', cents: 4 }]);
+  });
+
+  it('does not reuse usage events already attached to priced hooks', async () => {
+    const now = new Date('2026-08-16T12:00:00.000Z');
+    const first = new Date(now.getTime() - 60 * 60 * 1000);
+    const event: FilteredUsageEvent = {
+      timestamp: String(first.getTime()),
+      userEmail: 'a@example.com',
+      model: 'gpt-5',
+      chargedCents: 9.5,
+    };
+    const applied: string[] = [];
+    const summary = await reconcileStopHookUsageCostsFromFirstHook({
+      now,
+      loadEarliest: async () => first,
+      loadUnpriced: async () => [
+        {
+          id: 'pending',
+          userEmail: 'a@example.com',
+          model: 'gpt-5',
+          receivedAt: first,
+          finishedAt: null,
+        },
+      ],
+      loadPricedFingerprints: async () =>
+        new Set([usageEventFingerprint(event)]),
+      loadCredentials: async () => [cred],
+      fetchEvents: async () => [event],
+      apply: async (id) => {
+        applied.push(id);
+      },
+    });
+    expect(summary.upgraded).toBe(0);
+    expect(summary.unmatched).toBe(1);
+    expect(applied).toEqual([]);
+  });
+
+  it('does not write expired errors onto unmatched historical hooks', async () => {
+    const now = new Date('2026-08-16T12:00:00.000Z');
+    const first = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const applied: Array<{ error: string | null; source: string | null }> = [];
+    const summary = await reconcileStopHookUsageCostsFromFirstHook({
+      now,
+      loadEarliest: async () => first,
+      loadUnpriced: async () => [
+        {
+          id: 'old',
+          userEmail: 'nobody@example.com',
+          model: 'gpt-5',
+          receivedAt: first,
+          finishedAt: null,
+        },
+      ],
+      loadPricedFingerprints: async () => new Set(),
+      loadCredentials: async () => [cred],
+      fetchEvents: async () => events,
+      apply: async (_id, lookup) => {
+        applied.push({
+          error: lookup.costLookupError,
+          source: lookup.costSource,
+        });
+      },
+    });
+    expect(summary.upgraded).toBe(0);
+    expect(summary.unmatched).toBe(1);
+    expect(applied).toEqual([]);
+  });
+
+  it('returns skippedNoTeamKey without writing rows', async () => {
+    const applied = vi.fn();
+    const summary = await reconcileStopHookUsageCostsFromFirstHook({
+      now: new Date('2026-08-16T12:00:00.000Z'),
+      loadEarliest: async () => new Date('2026-01-01T00:00:00.000Z'),
+      loadUnpriced: async () => [
+        {
+          id: 'old',
+          userEmail: 'a@example.com',
+          model: 'gpt-5',
+          receivedAt: new Date('2026-01-01T00:00:00.000Z'),
+          finishedAt: null,
+        },
+      ],
+      loadPricedFingerprints: async () => new Set(),
+      loadCredentials: async () => [],
+      fetchEvents: async () => {
+        throw new Error('must not fetch');
+      },
+      apply: applied,
+    });
+    expect(summary.skippedNoTeamKey).toBe(true);
+    expect(applied).not.toHaveBeenCalled();
   });
 });
 

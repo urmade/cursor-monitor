@@ -21,7 +21,36 @@ import {
   actionUpsertCursorOrganisation,
   actionValidateUserTeamApiKey,
 } from '../server/cursor-organisations';
+import {
+  actionBackfillStopHookCosts,
+  type BackfillHookCostsResult,
+} from '../server/hook-cost-backfill';
 import type { CursorOrganisationView } from '../server/cursor-org-store';
+
+function formatBackfillSummary(
+  summary: Extract<BackfillHookCostsResult, { ok: true }>['summary'],
+): string {
+  if (summary.skippedNoHooks) return 'No stop hooks recorded yet.';
+  const from = summary.fromReceivedAt
+    ? new Date(summary.fromReceivedAt).toISOString().slice(0, 10)
+    : 'the first hook';
+  const parts = [
+    `Matched ${summary.upgraded} of ${summary.pending} pending turn${summary.pending === 1 ? '' : 's'}`,
+    `from ${summary.usageEvents} usage event${summary.usageEvents === 1 ? '' : 's'} (since ${from}).`,
+  ];
+  if (summary.unmatched > 0) {
+    parts.push(
+      `${summary.unmatched} still unmatched.`,
+    );
+  }
+  if (summary.usageTruncated) {
+    parts.push('Usage list was truncated; run again after matching.');
+  }
+  if (summary.pendingTruncated) {
+    parts.push('Pending list was truncated; run again to continue.');
+  }
+  return parts.join(' ');
+}
 
 type KeyCheckState =
   | { status: 'idle' }
@@ -90,7 +119,10 @@ export function TeamApiKeysPanel({
   const [keyCheck, setKeyCheck] = useState<KeyCheckState>({ status: 'idle' });
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [backfillNote, setBackfillNote] = useState<string | null>(null);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [backfilling, startBackfill] = useTransition();
 
   const teamKeys = collectTeamKeys(organisations);
   const dbOrgs = organisations.filter((org) => org.source === 'db');
@@ -135,7 +167,8 @@ export function TeamApiKeysPanel({
             Monitoring prices local requests from the Cursor Team usage API.
             Keys are tested against POST /teams/filtered-usage-events before
             they are saved. Cost is filled in about five minutes after each
-            stop hook.
+            stop hook. Match historical cost pages every usage event from the
+            first recorded hook through now.
           </p>
         </div>
       </PanelHeader>
@@ -193,6 +226,26 @@ export function TeamApiKeysPanel({
           <Button type="button" onClick={() => setOpen(true)}>
             Add Team API key
           </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={pending || backfilling}
+            onClick={() => {
+              setBackfillError(null);
+              setBackfillNote(null);
+              startBackfill(async () => {
+                const result = await actionBackfillStopHookCosts();
+                if (!result.ok) {
+                  setBackfillError(result.error);
+                  return;
+                }
+                setBackfillNote(formatBackfillSummary(result.summary));
+                router.refresh();
+              });
+            }}
+          >
+            {backfilling ? 'Matching historical cost…' : 'Match historical cost'}
+          </Button>
           {message ? (
             <p className="text-xs text-success-fg">{message}</p>
           ) : null}
@@ -202,6 +255,16 @@ export function TeamApiKeysPanel({
             </p>
           ) : null}
         </div>
+        {backfillNote ? (
+          <p className="text-xs text-success-fg" role="status">
+            {backfillNote}
+          </p>
+        ) : null}
+        {backfillError ? (
+          <p className="text-xs text-danger-fg" role="alert">
+            {backfillError}
+          </p>
+        ) : null}
       </PanelBody>
 
       <Dialog

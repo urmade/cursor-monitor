@@ -3,7 +3,7 @@ import {
   type CursorAdminClient,
   type FilteredUsageEvent,
 } from '@nexus/cursor-client';
-import { and, eq, gte, isNull, lte, or } from 'drizzle-orm';
+import { and, asc, eq, gte, isNotNull, isNull, lte, or } from 'drizzle-orm';
 import { cursorStopHookEvents, getDb, type Db } from '@nexus/db';
 import { createContext, silentLogger, type ServiceContext } from '../context';
 import { createFlagReader } from '../flags';
@@ -19,6 +19,9 @@ export const HOOK_COST_CADENCE_MS = 5 * 60 * 1000;
 export const HOOK_COST_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 export const HOOK_COST_PENDING_SOURCE = 'pending';
 export const HOOK_COST_TEAM_SOURCE = 'teams.filtered-usage-events';
+export const HOOK_COST_BACKFILL_LIMIT = 5000;
+export const HOOK_COST_BACKFILL_PAGE_SIZE = 1000;
+export const HOOK_COST_BACKFILL_MAX_PAGES = 50;
 
 export type HookUsageCostLookup = {
   chargedCents: number | null;
@@ -52,6 +55,28 @@ export type HookCostReconcileSummary = {
   credentials: number;
   message?: string;
 };
+
+export type HookCostBackfillSummary = {
+  fromReceivedAt: string | null;
+  pending: number;
+  upgraded: number;
+  unmatched: number;
+  failed: number;
+  usageEvents: number;
+  usageTruncated: boolean;
+  pendingTruncated: boolean;
+  credentials: number;
+  skippedNoHooks: boolean;
+  skippedNoTeamKey: boolean;
+  message?: string;
+};
+
+export type FetchTeamUsageEvents = (opts: {
+  client: CursorAdminClient;
+  email: string | null;
+  startDate: number;
+  endDate: number;
+}) => Promise<FilteredUsageEvent[]>;
 
 const DEFAULT_LOOKBACK_MS = 20 * 60 * 1000;
 
@@ -108,6 +133,10 @@ export function selectUsageEventForStopHook(
     userEmail: string | null;
     model: string | null;
     excludeFingerprints?: ReadonlySet<string>;
+    /** When set, pick the event closest to this time instead of the newest. */
+    anchorMs?: number;
+    /** Ignore events farther than this from `anchorMs` (requires anchor). */
+    maxDistanceMs?: number;
   },
 ): FilteredUsageEvent | null {
   if (events.length === 0) return null;
@@ -132,10 +161,23 @@ export function selectUsageEventForStopHook(
   );
   const pool = withModel.length > 0 ? withModel : candidates;
 
+  const anchorMs = opts.anchorMs;
+  const maxDistanceMs = opts.maxDistanceMs;
   let best: FilteredUsageEvent | null = null;
   let bestTs = -1;
+  let bestDist = Number.POSITIVE_INFINITY;
   for (const event of pool) {
     const ts = parseEventTimestampMs(event.timestamp);
+    if (anchorMs != null) {
+      const dist = Math.abs(ts - anchorMs);
+      if (maxDistanceMs != null && dist > maxDistanceMs) continue;
+      if (dist < bestDist || (dist === bestDist && ts > bestTs)) {
+        best = event;
+        bestDist = dist;
+        bestTs = ts;
+      }
+      continue;
+    }
     if (ts >= bestTs) {
       best = event;
       bestTs = ts;
@@ -161,6 +203,29 @@ export async function fetchTeamUsageEvents(opts: {
   return res.usageEvents ?? res.events ?? [];
 }
 
+/** Page every Team usage event in the window (manual historical backfill). */
+export async function fetchAllTeamUsageEvents(opts: {
+  client: CursorAdminClient;
+  email: string | null;
+  startDate: number;
+  endDate: number;
+  pageSize?: number;
+  maxPages?: number;
+}): Promise<{ events: FilteredUsageEvent[]; truncated: boolean }> {
+  const listed = await opts.client.listAllFilteredUsageEvents(
+    {
+      startDate: opts.startDate,
+      endDate: opts.endDate,
+      ...(opts.email ? { email: opts.email } : {}),
+    },
+    {
+      pageSize: opts.pageSize ?? HOOK_COST_BACKFILL_PAGE_SIZE,
+      maxPages: opts.maxPages ?? HOOK_COST_BACKFILL_MAX_PAGES,
+    },
+  );
+  return { events: listed.items, truncated: listed.truncated };
+}
+
 export function lookupFromUsageEvents(
   events: FilteredUsageEvent[],
   opts: {
@@ -169,6 +234,8 @@ export function lookupFromUsageEvents(
     source: string;
     lookbackMs?: number;
     excludeFingerprints?: ReadonlySet<string>;
+    anchorMs?: number;
+    maxDistanceMs?: number;
   },
 ): HookUsageCostLookup {
   const matched = selectUsageEventForStopHook(events, opts);
@@ -402,6 +469,72 @@ export async function loadPendingHookCostRows(opts: {
   }));
 }
 
+export async function loadEarliestStopHookReceivedAt(): Promise<Date | null> {
+  const rows = await getDb()
+    .select({ receivedAt: cursorStopHookEvents.receivedAt })
+    .from(cursorStopHookEvents)
+    .orderBy(asc(cursorStopHookEvents.receivedAt))
+    .limit(1);
+  return asDate(rows[0]?.receivedAt ?? null);
+}
+
+/** Every unpriced stop hook, oldest first — no cadence delay or max-age window. */
+export async function loadUnpricedHookCostRows(opts?: {
+  fromReceivedAt?: Date;
+  limit?: number;
+}): Promise<PendingHookCostRow[]> {
+  const now = new Date();
+  const limit = opts?.limit ?? HOOK_COST_BACKFILL_LIMIT;
+  const filters = [isNull(cursorStopHookEvents.chargedCents)];
+  if (opts?.fromReceivedAt) {
+    filters.push(gte(cursorStopHookEvents.receivedAt, opts.fromReceivedAt));
+  }
+  const rows = await getDb()
+    .select({
+      id: cursorStopHookEvents.id,
+      userEmail: cursorStopHookEvents.userEmail,
+      model: cursorStopHookEvents.model,
+      receivedAt: cursorStopHookEvents.receivedAt,
+      finishedAt: cursorStopHookEvents.finishedAt,
+    })
+    .from(cursorStopHookEvents)
+    .where(and(...filters))
+    .orderBy(asc(cursorStopHookEvents.receivedAt))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    id: row.id,
+    userEmail: row.userEmail,
+    model: row.model,
+    receivedAt: asDate(row.receivedAt) ?? now,
+    finishedAt: asDate(row.finishedAt),
+  }));
+}
+
+/** Fingerprints of usage events already attached to priced hooks in the window. */
+export async function loadPricedUsageEventFingerprints(opts: {
+  fromReceivedAt: Date;
+  limit?: number;
+}): Promise<Set<string>> {
+  const rows = await getDb()
+    .select({ usageEvent: cursorStopHookEvents.usageEvent })
+    .from(cursorStopHookEvents)
+    .where(
+      and(
+        isNotNull(cursorStopHookEvents.chargedCents),
+        gte(cursorStopHookEvents.receivedAt, opts.fromReceivedAt),
+      ),
+    )
+    .limit(opts.limit ?? 20_000);
+
+  const used = new Set<string>();
+  for (const row of rows) {
+    if (!row.usageEvent || typeof row.usageEvent !== 'object') continue;
+    used.add(usageEventFingerprint(row.usageEvent as FilteredUsageEvent));
+  }
+  return used;
+}
+
 export async function applyHookCostLookup(
   id: string,
   result: HookUsageCostLookup,
@@ -428,7 +561,7 @@ export async function fetchUsageEventsForWindow(opts: {
   credentials: TeamCostCredential[];
   startDate: number;
   endDate: number;
-  fetchEvents?: typeof fetchTeamUsageEvents;
+  fetchEvents?: FetchTeamUsageEvents;
 }): Promise<{
   events: FilteredUsageEvent[];
   source: string;
@@ -477,13 +610,20 @@ export function matchPendingHooksToUsageEvents(opts: {
   delayMs: number;
   maxAgeMs: number;
   lookbackMs?: number;
+  excludeFingerprints?: ReadonlySet<string>;
+  /** When false, unmatched old rows stay pending instead of expiring. */
+  expireUnmatched?: boolean;
+  /** Match the usage event closest to the hook time (historical backfill). */
+  anchorToHook?: boolean;
+  maxDistanceMs?: number;
 }): Array<{
   row: PendingHookCostRow;
   lookup: HookUsageCostLookup;
   expired: boolean;
 }> {
-  const used = new Set<string>();
+  const used = new Set<string>(opts.excludeFingerprints ?? []);
   const lookbackMs = opts.lookbackMs ?? DEFAULT_LOOKBACK_MS;
+  const expireUnmatched = opts.expireUnmatched !== false;
   return opts.pending.map((row) => {
     const ageMs = opts.now.getTime() - row.receivedAt.getTime();
     const lookup = lookupFromUsageEvents(opts.events, {
@@ -492,12 +632,19 @@ export function matchPendingHooksToUsageEvents(opts: {
       source: opts.source,
       lookbackMs,
       excludeFingerprints: used,
+      ...(opts.anchorToHook
+        ? {
+            anchorMs: (row.finishedAt ?? row.receivedAt).getTime(),
+            maxDistanceMs: opts.maxDistanceMs,
+          }
+        : {}),
     });
     if (lookup.usageEvent) {
       const matched = lookup.usageEvent as FilteredUsageEvent;
       used.add(usageEventFingerprint(matched));
     }
-    const expired = lookup.chargedCents == null && ageMs >= opts.maxAgeMs;
+    const expired =
+      expireUnmatched && lookup.chargedCents == null && ageMs >= opts.maxAgeMs;
     if (expired) {
       return {
         row,
@@ -533,7 +680,7 @@ export async function reconcileStopHookUsageCosts(opts?: {
   lookbackPaddingMs?: number;
   loadPending?: typeof loadPendingHookCostRows;
   loadCredentials?: () => Promise<TeamCostCredential[]>;
-  fetchEvents?: typeof fetchTeamUsageEvents;
+  fetchEvents?: FetchTeamUsageEvents;
   apply?: typeof applyHookCostLookup;
 }): Promise<HookCostReconcileSummary> {
   const now = opts?.now ?? new Date();
@@ -654,4 +801,175 @@ export async function reconcileStopHookUsageCosts(opts?: {
     skippedYoung: 0,
     credentials: credentials.length,
   };
+}
+
+function emptyBackfillSummary(
+  extras: Partial<HookCostBackfillSummary> = {},
+): HookCostBackfillSummary {
+  return {
+    fromReceivedAt: null,
+    pending: 0,
+    upgraded: 0,
+    unmatched: 0,
+    failed: 0,
+    usageEvents: 0,
+    usageTruncated: false,
+    pendingTruncated: false,
+    credentials: 0,
+    skippedNoHooks: false,
+    skippedNoTeamKey: false,
+    ...extras,
+  };
+}
+
+/**
+ * Manual historical backfill: page every Team usage event from the first
+ * recorded stop hook through now, then fill unpriced hooks. Already-priced
+ * rows are left alone. Unmatched rows stay pending (not expired).
+ */
+export async function reconcileStopHookUsageCostsFromFirstHook(opts?: {
+  now?: Date;
+  lookbackPaddingMs?: number;
+  maxDistanceMs?: number;
+  unpricedLimit?: number;
+  loadEarliest?: typeof loadEarliestStopHookReceivedAt;
+  loadUnpriced?: typeof loadUnpricedHookCostRows;
+  loadPricedFingerprints?: typeof loadPricedUsageEventFingerprints;
+  loadCredentials?: () => Promise<TeamCostCredential[]>;
+  fetchEvents?: FetchTeamUsageEvents;
+  apply?: typeof applyHookCostLookup;
+}): Promise<HookCostBackfillSummary> {
+  const now = opts?.now ?? new Date();
+  const lookbackPaddingMs = opts?.lookbackPaddingMs ?? DEFAULT_LOOKBACK_MS;
+  const maxDistanceMs = opts?.maxDistanceMs ?? HOOK_COST_MAX_AGE_MS;
+  const unpricedLimit = opts?.unpricedLimit ?? HOOK_COST_BACKFILL_LIMIT;
+  const loadEarliest = opts?.loadEarliest ?? loadEarliestStopHookReceivedAt;
+  const loadUnpriced = opts?.loadUnpriced ?? loadUnpricedHookCostRows;
+  const loadPricedFingerprints =
+    opts?.loadPricedFingerprints ?? loadPricedUsageEventFingerprints;
+  const apply = opts?.apply ?? applyHookCostLookup;
+
+  const earliest = await loadEarliest();
+  const credentials = opts?.loadCredentials
+    ? await opts.loadCredentials()
+    : await resolveTeamCostCredentialsForAllOrgs();
+
+  if (!earliest) {
+    return emptyBackfillSummary({
+      credentials: credentials.length,
+      skippedNoHooks: true,
+    });
+  }
+
+  const pending = await loadUnpriced({
+    fromReceivedAt: earliest,
+    limit: unpricedLimit,
+  });
+  const pendingTruncated = pending.length >= unpricedLimit;
+
+  if (credentials.length === 0) {
+    return emptyBackfillSummary({
+      fromReceivedAt: earliest.toISOString(),
+      pending: pending.length,
+      unmatched: pending.length,
+      pendingTruncated,
+      credentials: 0,
+      skippedNoTeamKey: true,
+      message:
+        'No Cursor Team API key configured for usage-events lookup. Add a Team API key in Monitoring or Settings → Organisations (or set CURSOR_TEAM_API_KEY).',
+    });
+  }
+
+  if (pending.length === 0) {
+    return emptyBackfillSummary({
+      fromReceivedAt: earliest.toISOString(),
+      pendingTruncated,
+      credentials: credentials.length,
+    });
+  }
+
+  let usageTruncated = false;
+  const fetchEvents: FetchTeamUsageEvents =
+    opts?.fetchEvents ??
+    (async (args) => {
+      const listed = await fetchAllTeamUsageEvents({
+        ...args,
+        pageSize: HOOK_COST_BACKFILL_PAGE_SIZE,
+        maxPages: HOOK_COST_BACKFILL_MAX_PAGES,
+      });
+      usageTruncated = usageTruncated || listed.truncated;
+      return listed.events;
+    });
+
+  const startDate = earliest.getTime() - lookbackPaddingMs;
+  const endDate = now.getTime();
+  const fetched = await fetchUsageEventsForWindow({
+    credentials,
+    startDate,
+    endDate,
+    fetchEvents,
+  });
+
+  if (
+    fetched.events.length === 0 &&
+    fetched.errors.length === credentials.length
+  ) {
+    return emptyBackfillSummary({
+      fromReceivedAt: earliest.toISOString(),
+      pending: pending.length,
+      unmatched: pending.length,
+      failed: pending.length,
+      pendingTruncated,
+      credentials: credentials.length,
+      message: fetched.errors[0] ?? 'Team usage API failed',
+    });
+  }
+
+  const pricedFingerprints = await loadPricedFingerprints({
+    fromReceivedAt: earliest,
+  });
+
+  const matched = matchPendingHooksToUsageEvents({
+    pending,
+    events: fetched.events,
+    source: fetched.source,
+    now,
+    delayMs: 0,
+    maxAgeMs: HOOK_COST_MAX_AGE_MS,
+    excludeFingerprints: pricedFingerprints,
+    expireUnmatched: false,
+    anchorToHook: true,
+    maxDistanceMs,
+  });
+
+  let upgraded = 0;
+  let unmatched = 0;
+  let failed = 0;
+  for (const item of matched) {
+    if (item.lookup.chargedCents != null) {
+      await apply(item.row.id, item.lookup, now);
+      upgraded += 1;
+      continue;
+    }
+    if (item.lookup.costLookupError && item.lookup.costSource !== HOOK_COST_PENDING_SOURCE) {
+      failed += 1;
+      continue;
+    }
+    unmatched += 1;
+  }
+
+  return emptyBackfillSummary({
+    fromReceivedAt: earliest.toISOString(),
+    pending: pending.length,
+    upgraded,
+    unmatched,
+    failed,
+    usageEvents: fetched.events.length,
+    usageTruncated,
+    pendingTruncated,
+    credentials: credentials.length,
+    message: usageTruncated
+      ? `Usage event list truncated after ${HOOK_COST_BACKFILL_MAX_PAGES} pages — matched what was fetched.`
+      : undefined,
+  });
 }
