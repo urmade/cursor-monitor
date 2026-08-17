@@ -15,3 +15,4 @@ export * from './estimates';
 export * from './cursor-hooks';
 export * from './cursor-organisations';
 export * from './automation-usage';
+export * from './monitoring-repo-preferences';

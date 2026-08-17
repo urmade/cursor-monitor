@@ -153,6 +153,34 @@ export const MONITORING_RUN_KIND_LABELS: Record<MonitoringRunKind, string> = {
 /** Group key for requests that do not target a known branch. */
 export const NO_BRANCH_GROUP = 'none';
 
+/** Short name used as a branch prefix (`owner/repo` → `repo`). */
+export function shortRepoName(repo: string): string {
+  const trimmed = repo.trim();
+  if (!trimmed || trimmed === 'No repository') return trimmed;
+  const slash = trimmed.lastIndexOf('/');
+  return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
+}
+
+/**
+ * Prefix a git branch with the originating repo short name when the project
+ * combines multiple repositories (e.g. `repo-a/main`, `repo-b/main`).
+ */
+export function formatMergedBranchLabel(
+  branch: string | null | undefined,
+  originatingRepo: string | null | undefined,
+  prefixBranches: boolean,
+): string | null {
+  const b = branch?.trim() || null;
+  if (!b) return null;
+  if (!prefixBranches) return b;
+  const origin = originatingRepo?.trim();
+  if (!origin || origin === 'No repository') return b;
+  const prefix = shortRepoName(origin);
+  if (!prefix) return b;
+  if (b === prefix || b.startsWith(`${prefix}/`)) return b;
+  return `${prefix}/${b}`;
+}
+
 /**
  * Collapse a local request's per-turn status counts into a single run-status
  * token understood by `RunStatusBadge`: any error → ERROR, else any abort →

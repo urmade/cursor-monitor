@@ -956,3 +956,63 @@ export async function actionAssignHookConversationToRepo(formData: FormData) {
   revalidatePath(`/monitoring/${encodeURIComponent(result.repo)}`);
   redirect(`/monitoring/${encodeURIComponent(result.repo)}`);
 }
+
+export async function actionRenameMonitoringRepo(formData: FormData) {
+  const { orgId } = await requireSession();
+  const { renameMonitoringRepo } = await import('./monitoring-repo-prefs');
+  const repo = String(formData.get('repo') ?? '');
+  const displayNameRaw = String(formData.get('displayName') ?? '');
+  const displayName = displayNameRaw.trim() ? displayNameRaw : null;
+  await renameMonitoringRepo(orgId, repo, displayName);
+  revalidatePath('/monitoring');
+  revalidatePath(`/monitoring/${encodeURIComponent(repo)}`);
+}
+
+export async function actionHideMonitoringRepo(formData: FormData) {
+  const { orgId } = await requireSession();
+  const { setMonitoringRepoHidden } = await import('./monitoring-repo-prefs');
+  const repo = String(formData.get('repo') ?? '');
+  const hidden = String(formData.get('hidden') ?? 'true') !== 'false';
+  await setMonitoringRepoHidden(orgId, repo, hidden);
+  revalidatePath('/monitoring');
+  revalidatePath(`/monitoring/${encodeURIComponent(repo)}`);
+}
+
+export async function actionMergeMonitoringRepo(formData: FormData) {
+  const { orgId } = await requireSession();
+  const { mergeMonitoringRepo } = await import('./monitoring-repo-prefs');
+  const sourceRepo = String(formData.get('sourceRepo') ?? '');
+  const targetRepo = String(formData.get('targetRepo') ?? '');
+  const result = await mergeMonitoringRepo(orgId, sourceRepo, targetRepo);
+  revalidatePath('/monitoring');
+  revalidatePath(`/monitoring/${encodeURIComponent(sourceRepo)}`);
+  if (result.mergedIntoRepo) {
+    revalidatePath(`/monitoring/${encodeURIComponent(result.mergedIntoRepo)}`);
+  }
+}
+
+export async function actionUnmergeMonitoringRepo(formData: FormData) {
+  const { orgId } = await requireSession();
+  const { unmergeMonitoringRepo } = await import('./monitoring-repo-prefs');
+  const sourceRepo = String(formData.get('sourceRepo') ?? '');
+  const result = await unmergeMonitoringRepo(orgId, sourceRepo);
+  revalidatePath('/monitoring');
+  revalidatePath(`/monitoring/${encodeURIComponent(sourceRepo)}`);
+  // Parent may still be the URL the user is on — caller passes parentRepo.
+  const parentRepo = String(formData.get('parentRepo') ?? '');
+  if (parentRepo) {
+    revalidatePath(`/monitoring/${encodeURIComponent(parentRepo)}`);
+  }
+  return result;
+}
+
+export async function actionRenameMonitoringBranch(formData: FormData) {
+  const { orgId } = await requireSession();
+  const { renameMonitoringBranch } = await import('./monitoring-repo-prefs');
+  const projectRepo = String(formData.get('projectRepo') ?? '');
+  const branchKey = String(formData.get('branchKey') ?? '');
+  const displayNameRaw = String(formData.get('displayName') ?? '');
+  const displayName = displayNameRaw.trim() ? displayNameRaw : null;
+  await renameMonitoringBranch(orgId, projectRepo, branchKey, displayName);
+  revalidatePath(`/monitoring/${encodeURIComponent(projectRepo)}`);
+}

@@ -1,10 +1,9 @@
 import { EmptyState, PageHeader, Panel } from '@nexus/ui';
 import Link from 'next/link';
-import {
-  formatHookCostUsd,
-  formatRelativeTime,
-} from '../../../src/lib/monitoring-format';
+import { MonitoringProjectCard } from '../../../src/components/MonitoringProjectCard';
+import { MonitoringHiddenRepos } from '../../../src/components/MonitoringRepoManage';
 import { TeamApiKeysPanel } from '../../../src/components/TeamApiKeysPanel';
+import { formatHookCostUsd } from '../../../src/lib/monitoring-format';
 import {
   HOOK_NO_REPO_GROUP,
   loadHookSignalsTree,
@@ -12,22 +11,40 @@ import {
   summarizeHookRepos,
 } from '../../../src/server/hook-signals';
 import { listCursorOrganisationViews } from '../../../src/server/cursor-organisations';
+import {
+  applyMonitoringRepoPrefs,
+  loadMonitoringRepoPrefs,
+} from '../../../src/server/monitoring-repo-prefs';
+import { optionalSession } from '../../../src/server/session';
 
 export const dynamic = 'force-dynamic';
 
 export default async function MonitoringPage() {
   let error: string | null = null;
-  let projects: ReturnType<typeof projectsFromHookSummaries> = [];
+  let projects: ReturnType<typeof applyMonitoringRepoPrefs> = [];
+  let hiddenProjects: ReturnType<typeof applyMonitoringRepoPrefs> = [];
   let hookEventCount = 0;
   let truncated = false;
+  let manageEnabled = false;
   let organisations: Awaited<ReturnType<typeof listCursorOrganisationViews>> =
     [];
 
   try {
-    const hookTree = await loadHookSignalsTree();
+    const session = await optionalSession();
+    manageEnabled = Boolean(session);
+    const [hookTree, prefs] = await Promise.all([
+      loadHookSignalsTree(),
+      session
+        ? loadMonitoringRepoPrefs(session.orgId)
+        : Promise.resolve([]),
+    ]);
     hookEventCount = hookTree.totalEvents;
     truncated = hookTree.truncated;
-    projects = projectsFromHookSummaries(summarizeHookRepos(hookTree));
+    const raw = projectsFromHookSummaries(summarizeHookRepos(hookTree));
+    projects = applyMonitoringRepoPrefs(raw, prefs);
+    hiddenProjects = applyMonitoringRepoPrefs(raw, prefs, {
+      includeHidden: true,
+    }).filter((p) => p.hidden);
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
   }
@@ -44,11 +61,16 @@ export default async function MonitoringPage() {
   );
   const anyCost = projects.some((p) => p.totalChargedCents != null);
 
+  const mergeTargetsFor = (repo: string) =>
+    projects
+      .filter((p) => p.repo !== repo && p.repo !== HOOK_NO_REPO_GROUP)
+      .map((p) => ({ repo: p.repo, displayName: p.displayName }));
+
   return (
     <div className="space-y-4 p-4">
       <PageHeader
         title="Monitoring"
-        subtitle="Every repository is a project. Local stop-hook turns land immediately; charged cost is filled from the Team usage API about five minutes later."
+        subtitle="Every repository is a project. Local stop-hook turns land immediately; charged cost is filled from the Team usage API about five minutes later. Rename, hide, or merge related repositories from each card’s menu."
         meta={
           projects.length > 0
             ? `${projects.length} project${projects.length === 1 ? '' : 's'}${hookEventCount > 0 ? ` · ${hookEventCount} local request${hookEventCount === 1 ? '' : 's'}` : ''}${anyCost ? ` · ${formatHookCostUsd(totalCharged)} charged` : ''}`
@@ -92,39 +114,23 @@ export default async function MonitoringPage() {
       {projects.length > 0 ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {projects.map((project) => (
-            <Link
+            <MonitoringProjectCard
               key={project.repo}
-              href={`/monitoring/${encodeURIComponent(project.repo)}`}
-              className="group block rounded-md border border-border bg-surface p-3 transition-colors hover:bg-[var(--nx-hover)]"
-            >
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="truncate font-mono text-sm font-medium text-fg group-hover:underline">
-                  {project.repo === HOOK_NO_REPO_GROUP
-                    ? 'No repository'
-                    : project.repo}
-                </span>
-                <span className="shrink-0 text-xs text-fg-subtle">
-                  {project.latestCreatedAt
-                    ? formatRelativeTime(project.latestCreatedAt)
-                    : '—'}
-                </span>
-              </div>
-              <div className="mt-2 flex items-baseline gap-1.5">
-                <span className="text-xl font-medium tabular-nums text-fg">
-                  {formatHookCostUsd(project.totalChargedCents)}
-                </span>
-                <span className="text-xs text-fg-subtle">charged</span>
-              </div>
-              <div className="mt-1 text-xs text-fg-muted">
-                {project.conversationCount} conversation
-                {project.conversationCount === 1 ? '' : 's'}
-                {' · '}
-                {project.eventCount} turn
-                {project.eventCount === 1 ? '' : 's'}
-              </div>
-            </Link>
+              project={project}
+              mergeTargets={mergeTargetsFor(project.repo)}
+              manageEnabled={manageEnabled}
+            />
           ))}
         </div>
+      ) : null}
+
+      {manageEnabled ? (
+        <MonitoringHiddenRepos
+          projects={hiddenProjects.map((p) => ({
+            repo: p.repo,
+            displayName: p.displayName,
+          }))}
+        />
       ) : null}
 
       {truncated ? (

@@ -42,11 +42,21 @@ export type HookConversationBucket = {
   chargedCentsTotal: number | null;
   /** Branch of the newest event that reported one; null when unknown. */
   gitBranch: string | null;
+  /**
+   * Canonical repo the conversation’s events belong to. Differs from the
+   * project key when repositories are merged in Monitoring.
+   */
+  originatingRepo: string;
 };
 
 export type HookRepoBucket = {
   /** Canonical monitoring repo key (lowercased owner/repo) or no-repo sentinel. */
   repo: string;
+  /**
+   * Canonical repos contributing to this bucket. Length &gt; 1 when Monitoring
+   * merge preferences attach other repositories to this project.
+   */
+  sourceRepos: string[];
   branches: string[];
   conversations: HookConversationBucket[];
   eventCount: number;
@@ -146,7 +156,8 @@ export async function loadHookSignalsTree(limit = 500): Promise<HookSignalsTree>
 }
 
 /**
- * Hook signals for one Monitoring project (repository).
+ * Hook signals for one Monitoring project (repository), optionally combining
+ * several source repos that have been merged into the same project.
  *
  * Scoped in SQL: filtering a global newest-N page would hide a project's whole
  * history as soon as busier repositories fill that page.
@@ -154,9 +165,22 @@ export async function loadHookSignalsTree(limit = 500): Promise<HookSignalsTree>
 export async function loadHookSignalsForRepo(
   repo: string,
   limit = 500,
+  options: { sourceRepos?: readonly string[] } = {},
 ): Promise<HookRepoBucket | null> {
   const canonical =
     repo === HOOK_NO_REPO_GROUP ? HOOK_NO_REPO_GROUP : normalizeRepoKey(repo);
+  const sourceRepos = (
+    options.sourceRepos?.length
+      ? options.sourceRepos.map((r) =>
+          r === HOOK_NO_REPO_GROUP ? HOOK_NO_REPO_GROUP : normalizeRepoKey(r),
+        )
+      : [canonical]
+  ).filter((r, i, arr) => arr.indexOf(r) === i);
+
+  if (sourceRepos.includes(HOOK_NO_REPO_GROUP) && sourceRepos.length > 1) {
+    // No-repo events are never merged into a named project.
+    throw new Error('Cannot combine the no-repository bucket with other repos.');
+  }
 
   const rows = await getDb()
     .select()
@@ -164,13 +188,53 @@ export async function loadHookSignalsForRepo(
     .where(
       canonical === HOOK_NO_REPO_GROUP
         ? sql`${cursorStopHookEvents.repo} is null or btrim(${cursorStopHookEvents.repo}) = ''`
-        : sql`lower(btrim(${cursorStopHookEvents.repo})) = ${canonical}`,
+        : sourceRepos.length === 1
+          ? sql`lower(btrim(${cursorStopHookEvents.repo})) = ${sourceRepos[0]}`
+          : sql`lower(btrim(${cursorStopHookEvents.repo})) in (${sql.join(
+              sourceRepos.map((r) => sql`${r}`),
+              sql`, `,
+            )})`,
     )
     .orderBy(desc(cursorStopHookEvents.receivedAt))
     .limit(limit);
 
   const tree = buildHookSignalsTree(rows.map(mapRowToEvent), rows.length >= limit);
-  return tree.repos.find((r) => r.repo === canonical) ?? null;
+  if (tree.repos.length === 0) return null;
+
+  // Collapse per-source buckets into one project bucket keyed by `canonical`.
+  return mergeHookRepoBuckets(canonical, sourceRepos, tree.repos);
+}
+
+/** Combine per-repo buckets into a single Monitoring project view. */
+export function mergeHookRepoBuckets(
+  projectRepo: string,
+  sourceRepos: readonly string[],
+  buckets: readonly HookRepoBucket[],
+): HookRepoBucket {
+  const conversations = buckets
+    .flatMap((b) => b.conversations)
+    .sort((a, b) => b.latestAt.localeCompare(a.latestAt));
+  const branches = [
+    ...new Set(buckets.flatMap((b) => b.branches)),
+  ].sort();
+  const eventCount = conversations.reduce((n, c) => n + c.events.length, 0);
+  let chargedSum = 0;
+  let chargedAny = false;
+  for (const c of conversations) {
+    if (c.chargedCentsTotal != null) {
+      chargedSum += c.chargedCentsTotal;
+      chargedAny = true;
+    }
+  }
+  return {
+    repo: projectRepo,
+    sourceRepos: [...sourceRepos],
+    branches,
+    conversations,
+    eventCount,
+    latestAt: conversations[0]?.latestAt ?? '',
+    chargedCentsTotal: chargedAny ? chargedSum : null,
+  };
 }
 
 /** Newest stored stop-hook event, for "is ingestion alive?" checks. */
@@ -234,6 +298,7 @@ export function buildHookSignalsTree(
   type ConvAcc = {
     conversationId: string;
     userEmail: string | null;
+    originatingRepo: string;
     events: HookSignalEvent[];
   };
   type RepoAcc = {
@@ -260,6 +325,7 @@ export function buildHookSignalsTree(
       conv = {
         conversationId: convKey,
         userEmail: event.userEmail?.trim() || null,
+        originatingRepo: repoKey,
         events: [],
       };
       repo.conversations.set(convKey, conv);
@@ -296,6 +362,7 @@ export function buildHookSignalsTree(
           conv.events
             .map((e) => e.gitBranch?.trim())
             .find((b): b is string => Boolean(b)) ?? null,
+        originatingRepo: conv.originatingRepo,
       };
     });
     conversations.sort((a, b) => b.latestAt.localeCompare(a.latestAt));
@@ -312,6 +379,7 @@ export function buildHookSignalsTree(
 
     return {
       repo: repo.repo,
+      sourceRepos: [repo.repo],
       branches: [...repo.branches].sort(),
       conversations,
       eventCount,

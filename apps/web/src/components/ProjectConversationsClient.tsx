@@ -13,6 +13,7 @@ import { RunStatusBadge } from './RunStatusBadge';
 import {
   formatCentsUsd,
   formatDurationMs,
+  formatMergedBranchLabel,
   formatRelativeTime,
   groupMonitoringRunsByBranch,
   MONITORING_RUN_KIND_LABELS,
@@ -26,6 +27,7 @@ import type {
   HookSignalEvent,
 } from '../server/hook-signals';
 import { AssignHookConversationRepoForm } from './AssignHookConversationRepoForm';
+import { BranchRenameControl } from './BranchRenameControl';
 
 const KIND_TONES: Record<'local', BadgeTone> = {
   local: 'neutral',
@@ -163,10 +165,12 @@ function LocalRunDetails({
   conv,
   allowAssignRepo,
   knownRepos,
+  prefixBranches,
 }: {
   conv: HookConversationBucket;
   allowAssignRepo?: boolean;
   knownRepos?: string[];
+  prefixBranches?: boolean;
 }) {
   const model = conv.events.map((e) => e.model).find(Boolean) ?? null;
   return (
@@ -180,6 +184,11 @@ function LocalRunDetails({
       <div className="space-y-1.5">
         {conv.userEmail ? (
           <DetailLine label="User">{conv.userEmail}</DetailLine>
+        ) : null}
+        {prefixBranches ? (
+          <DetailLine label="Repository">
+            <span className="font-mono text-fg-muted">{conv.originatingRepo}</span>
+          </DetailLine>
         ) : null}
         <DetailLine label="Conversation">
           <span className="font-mono text-fg-subtle">{conv.conversationId}</span>
@@ -197,7 +206,13 @@ function LocalRunDetails({
         {model ? <DetailLine label="Model">{model}</DetailLine> : null}
       </div>
       <ul className="divide-y divide-border rounded-md border border-border">
-        {conv.events.map((event) => (
+        {conv.events.map((event) => {
+          const branchLabel = formatMergedBranchLabel(
+            event.gitBranch,
+            conv.originatingRepo,
+            Boolean(prefixBranches),
+          );
+          return (
           <li key={event.id} className="px-3 py-2 text-xs">
             <details className="group/event">
               <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
@@ -221,9 +236,9 @@ function LocalRunDetails({
                           {formatDurationMs(event.durationMs)}
                         </Badge>
                       ) : null}
-                      {event.gitBranch ? (
+                      {branchLabel ? (
                         <span className="font-mono text-fg-muted">
-                          @{event.gitBranch}
+                          @{branchLabel}
                         </span>
                       ) : null}
                       {event.model ? (
@@ -256,7 +271,8 @@ function LocalRunDetails({
               </pre>
             </details>
           </li>
-        ))}
+          );
+        })}
       </ul>
     </div>
   );
@@ -270,10 +286,12 @@ function RunRow({
   run,
   allowAssignRepo,
   knownRepos,
+  prefixBranches,
 }: {
   run: UnifiedRun;
   allowAssignRepo?: boolean;
   knownRepos?: string[];
+  prefixBranches?: boolean;
 }) {
   return (
     <li>
@@ -308,6 +326,7 @@ function RunRow({
             conv={run.local}
             allowAssignRepo={allowAssignRepo}
             knownRepos={knownRepos}
+            prefixBranches={prefixBranches}
           />
         </div>
       </details>
@@ -346,6 +365,9 @@ export function ProjectConversationsClient({
   localRequests,
   allowAssignRepo = false,
   knownRepos = [],
+  projectRepo,
+  branchLabels = {},
+  manageEnabled = false,
 }: {
   projectHref: string;
   initialSort: ConversationGroupSort;
@@ -353,9 +375,16 @@ export function ProjectConversationsClient({
   /** When true, show controls to assign no-repo conversations to a known repo. */
   allowAssignRepo?: boolean;
   knownRepos?: string[];
+  /** Canonical project key used when renaming branch groups. */
+  projectRepo?: string;
+  /** branchKey → display label; original branch key stays visible underneath. */
+  branchLabels?: Record<string, string>;
+  manageEnabled?: boolean;
 }) {
   const [sort, setSort] = useState<ConversationGroupSort>(initialSort);
   const [pending, startTransition] = useTransition();
+
+  const prefixBranches = (localRequests?.sourceRepos.length ?? 0) > 1;
 
   const groups = useMemo(() => {
     const unified: UnifiedRun[] = (localRequests?.conversations ?? []).map(
@@ -363,7 +392,11 @@ export function ProjectConversationsClient({
         kind: 'local',
         id: conv.conversationId,
         name: conv.userEmail ?? shortConversationId(conv.conversationId),
-        branch: conv.gitBranch,
+        branch: formatMergedBranchLabel(
+          conv.gitBranch,
+          conv.originatingRepo,
+          prefixBranches,
+        ),
         chargedCents: conv.chargedCentsTotal,
         createdAt: conv.latestAt || undefined,
         statusToken: summarizeLocalStatuses(conv.statuses),
@@ -371,7 +404,7 @@ export function ProjectConversationsClient({
       }),
     );
     return groupMonitoringRunsByBranch(unified, sort);
-  }, [localRequests, sort]);
+  }, [localRequests, sort, prefixBranches]);
 
   const runCount = groups.reduce((n, g) => n + g.runs.length, 0);
 
@@ -393,6 +426,7 @@ export function ProjectConversationsClient({
           Requests{' '}
           <span className="text-xs font-normal text-fg-subtle">
             {runCount} · grouped by branch
+            {prefixBranches ? ' (repo-prefixed)' : ''}
           </span>
         </h2>
         <SortControl
@@ -407,17 +441,38 @@ export function ProjectConversationsClient({
         />
       </div>
 
-      {groups.map((group) => (
+      {groups.map((group) => {
+        const originalBranch = group.branch;
+        const label =
+          originalBranch != null
+            ? branchLabels[originalBranch]?.trim() || null
+            : null;
+        const title = label || originalBranch || 'No branch';
+        return (
         <Panel key={group.key}>
           <PanelHeader>
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <BranchIcon />
-              <span className="truncate font-mono text-sm font-medium text-fg">
-                {group.branch ?? 'No branch'}
-              </span>
+              <div className="min-w-0">
+                <div className="truncate font-mono text-sm font-medium text-fg">
+                  {title}
+                </div>
+                {label && originalBranch ? (
+                  <div className="truncate font-mono text-[11px] text-fg-subtle">
+                    {originalBranch}
+                  </div>
+                ) : null}
+              </div>
               <span className="shrink-0 text-xs text-fg-subtle">
                 {group.runs.length} run{group.runs.length === 1 ? '' : 's'}
               </span>
+              {manageEnabled && projectRepo && originalBranch ? (
+                <BranchRenameControl
+                  projectRepo={projectRepo}
+                  branchKey={originalBranch}
+                  displayName={label}
+                />
+              ) : null}
             </div>
             <span className="text-sm font-medium tabular-nums text-fg">
               {formatCentsUsd(group.totalChargedCents)}
@@ -431,12 +486,14 @@ export function ProjectConversationsClient({
                   run={run}
                   allowAssignRepo={allowAssignRepo}
                   knownRepos={knownRepos}
+                  prefixBranches={prefixBranches}
                 />
               ))}
             </ul>
           </PanelBody>
         </Panel>
-      ))}
+        );
+      })}
     </div>
   );
 }
