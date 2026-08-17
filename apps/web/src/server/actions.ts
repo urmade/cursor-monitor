@@ -15,9 +15,8 @@ import {
   getDb,
   repositoryPreferences,
 } from '@cursor-monitor/db';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
-import { loadRepositoryPreferences } from './data';
 import { requireAdmin } from './identity';
 
 function text(form: FormData, name: string): string {
@@ -72,25 +71,39 @@ export async function renameRepository(form: FormData): Promise<void> {
 
 export async function mergeRepository(form: FormData): Promise<void> {
   await requireAdmin();
-  const preferences = preferenceMap(await loadRepositoryPreferences());
-  const { source, targetRoot } = validateRepositoryMerge(
-    text(form, 'source'),
-    text(form, 'target'),
-    preferences,
-  );
-  const existing = preferences.get(source);
-  await getDb()
-    .insert(repositoryPreferences)
-    .values({
-      repositoryKey: source,
-      displayName: existing?.displayName ?? null,
-      mergedIntoKey: targetRoot,
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: repositoryPreferences.repositoryKey,
-      set: { mergedIntoKey: targetRoot, updatedAt: new Date() },
-    });
+  const sourceValue = text(form, 'source');
+  const targetValue = text(form, 'target');
+  let targetRoot = canonicalRepository(targetValue);
+  await getDb().transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(1987451622)`);
+    const rows = await transaction.select().from(repositoryPreferences);
+    const preferences = preferenceMap(
+      rows.map((row) => ({
+        repositoryKey: row.repositoryKey,
+        displayName: row.displayName,
+        mergedIntoKey: row.mergedIntoKey,
+      })),
+    );
+    const validated = validateRepositoryMerge(
+      sourceValue,
+      targetValue,
+      preferences,
+    );
+    targetRoot = validated.targetRoot;
+    const existing = preferences.get(validated.source);
+    await transaction
+      .insert(repositoryPreferences)
+      .values({
+        repositoryKey: validated.source,
+        displayName: existing?.displayName ?? null,
+        mergedIntoKey: validated.targetRoot,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: repositoryPreferences.repositoryKey,
+        set: { mergedIntoKey: validated.targetRoot, updatedAt: new Date() },
+      });
+  });
   refresh(targetRoot);
 }
 

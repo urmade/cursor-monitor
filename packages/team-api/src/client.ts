@@ -20,6 +20,8 @@ export type TeamApiClientOptions = {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   maxRetries?: number;
+  requestTimeoutMs?: number;
+  totalTimeoutMs?: number;
 };
 
 function basicAuth(apiKey: string): string {
@@ -35,12 +37,16 @@ export class TeamApiClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly maxRetries: number;
+  private readonly requestTimeoutMs: number;
+  private readonly totalTimeoutMs: number;
 
   constructor(options: TeamApiClientOptions) {
     this.credentials = options.credentials;
     this.baseUrl = (options.baseUrl ?? 'https://api.cursor.com').replace(/\/$/, '');
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.maxRetries = options.maxRetries ?? 2;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 8000;
+    this.totalTimeoutMs = options.totalTimeoutMs ?? 45_000;
   }
 
   async listUsageEvents(options: {
@@ -48,18 +54,23 @@ export class TeamApiClient {
     endDate: number;
     pageSize?: number;
     maxPages?: number;
+    deadlineAt?: number;
   }): Promise<ListUsageResult> {
     const pageSize = options.pageSize ?? 1000;
     const maxPages = options.maxPages ?? 20;
     const events: UsageEvent[] = [];
+    const deadline = options.deadlineAt ?? Date.now() + this.totalTimeoutMs;
 
     for (let page = 1; page <= maxPages; page += 1) {
+      if (Date.now() >= deadline) {
+        throw new TeamApiError('Cursor Team API sync exceeded its deadline', 0);
+      }
       const response = await this.requestPage({
         startDate: options.startDate,
         endDate: options.endDate,
         page,
         pageSize,
-      });
+      }, deadline);
       const batch = response.usageEvents ?? response.events ?? [];
       events.push(...batch);
       const hasNext =
@@ -79,7 +90,7 @@ export class TeamApiClient {
     endDate: number;
     page: number;
     pageSize: number;
-  }): Promise<UsageEventsResponse> {
+  }, deadline: number): Promise<UsageEventsResponse> {
     const organization =
       this.credentials.kind === 'organization'
         ? { organizationId: this.credentials.organizationId }
@@ -91,6 +102,10 @@ export class TeamApiClient {
 
     let lastError: unknown;
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new TeamApiError('Cursor Team API sync exceeded its deadline', 0);
+      }
       try {
         const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
           method: 'POST',
@@ -100,6 +115,9 @@ export class TeamApiClient {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ ...body, ...organization }),
+          signal: AbortSignal.timeout(
+            Math.max(1, Math.min(this.requestTimeoutMs, remaining)),
+          ),
         });
         const text = await response.text();
         const parsed: unknown = text ? JSON.parse(text) : {};
@@ -122,6 +140,7 @@ export class TeamApiClient {
         lastError = error;
         if (attempt === this.maxRetries) break;
       }
+      if (Date.now() >= deadline) break;
       await sleep(250 * 2 ** attempt);
     }
 

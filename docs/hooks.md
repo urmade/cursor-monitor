@@ -6,12 +6,13 @@ The authenticated `/install` page generates one project-hook installer per OS:
 
 | Platform | Runtime | Network client | Optional enrichment |
 |---|---|---|---|
-| Linux | `/bin/sh` | `curl` | `git` |
-| macOS | built-in `/bin/sh` | built-in `curl` | `git` |
+| Linux | `/bin/sh` + standard text/core utilities | `curl` | `git` |
+| macOS | built-in `/bin/sh` + standard utilities | built-in `curl` | `git` |
 | Windows | Windows PowerShell 5.1+ or PowerShell 7 | built-in .NET `Invoke-WebRequest` | `git` |
 
 The installers do not invoke a package manager and do not require Python, Node,
-`jq`, or a third-party PowerShell module. Git is optional: without it, Cursor
+`jq`, or a third-party PowerShell module. POSIX installers preflight `curl`,
+`sed`, `tr`, `head`, `cut`, and `date`. Git is optional: without it, Cursor
 payload repository/branch values are still sent when available.
 
 Generic Linux does not define an HTTPS client in POSIX itself, so the Linux hook
@@ -36,16 +37,21 @@ Windows:
 .cursor/hooks/cursor-monitor-stop.ps1
 ```
 
-Commit these files in each monitored repository. Project hooks work for local
-IDEs and Cloud Agents that check out that repository. Team administrators can
-also upload the same scripts and commands through managed Team Hooks.
+Commit these files only in private repositories whose readers are allowed to
+submit monitoring events. Project hooks work for local IDEs and Cloud Agents
+that check out that repository. Team administrators can also upload the same
+scripts and commands through managed Team Hooks.
+
+If `.cursor/hooks.json` already exists, the installer preserves it and writes
+`.cursor/hooks.cursor-monitor.example.json`. Merge the two hook arrays manually;
+the installer never deletes another hook.
 
 ## Hook behavior
 
 `beforeSubmitPrompt` records an ISO timestamp under
-`~/.cursor/cursor-monitor/started-at`. Cursor does not currently include a
-conversation ID in that hook, so the file represents the most recent request
-for the install.
+`~/.cursor/cursor-monitor/started-at-<conversation-or-generation>`. When Cursor
+does not provide either identifier, it falls back to `started-at`. The stop hook
+uses the same key and can consume the fallback for compatibility.
 
 `stop`:
 
@@ -64,8 +70,14 @@ The generated hook sends:
 - `x-vercel-protection-bypass: VERCEL_PROTECTION_BYPASS`
 - `x-cursor-monitor-token: CURSOR_MONITOR_HOOK_TOKEN`
 
-If the dedicated hook token is missing, the app uses the Vercel bypass as the
-application token. Rotate to a dedicated token when practical.
+Both values are required and have different scopes. The Vercel bypass crosses
+deployment protection; the dedicated token authorizes only event ingestion.
+Human routes independently require a valid Passport identity in application
+code, even when a request crosses deployment protection.
+
+At runtime, `CURSOR_MONITOR_ENDPOINT`, `CURSOR_MONITOR_HOOK_TOKEN`, and
+`VERCEL_PROTECTION_BYPASS` override embedded values. Centrally managed Team
+Hooks should prefer these environment values to simplify rotation.
 
 Installer downloads use `Cache-Control: private, no-store` and require the
 Passport-protected application. Treat generated scripts as secrets because the

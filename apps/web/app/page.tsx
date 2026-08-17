@@ -11,14 +11,22 @@ import { NO_REPOSITORY_KEY } from '@cursor-monitor/core';
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
-  try {
-    const [{ tree, hooksTruncated, usageTruncated, hookCount, usageCount }, admin] =
-      await Promise.all([loadMonitorData(), currentAdmin()]);
-    const mergeTargets = tree.projects.filter(
-      (project) => project.key !== NO_REPOSITORY_KEY,
-    );
+  const [
+    {
+      tree,
+      hooksTruncated,
+      usageTruncated,
+      hookCount,
+      usageCount,
+      mergeRootsWithChildren,
+    },
+    admin,
+  ] = await Promise.all([loadMonitorData(), currentAdmin()]);
+  const mergeTargets = tree.projects.filter(
+    (project) => project.key !== NO_REPOSITORY_KEY,
+  );
 
-    return (
+  return (
       <div className="stack">
         <header className="page-heading">
           <div>
@@ -111,7 +119,7 @@ export default async function DashboardPage() {
                   </Link>
                   {project.sourceRepositories.length > 1 ? (
                     <span className="badge">
-                      {project.sourceRepositories.length} merged repositories
+                      {project.sourceRepositories.length} contributing repositories
                     </span>
                   ) : null}
                 </div>
@@ -147,7 +155,8 @@ export default async function DashboardPage() {
                           Save
                         </button>
                       </form>
-                      {mergeTargets.length > 1 ? (
+                      {mergeTargets.length > 1 &&
+                      !mergeRootsWithChildren.has(project.key) ? (
                         <form action={mergeRepository} className="form-row">
                           <input name="source" type="hidden" value={project.key} />
                           <label className="field">
@@ -178,16 +187,5 @@ export default async function DashboardPage() {
           </section>
         )}
       </div>
-    );
-  } catch (error) {
-    return (
-      <section className="panel empty">
-        <h1>Cursor Monitor is not ready</h1>
-        <p>{error instanceof Error ? error.message : String(error)}</p>
-        <Link className="button button-secondary" href="/settings">
-          Open operations
-        </Link>
-      </section>
-    );
-  }
+  );
 }

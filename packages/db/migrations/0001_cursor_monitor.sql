@@ -92,6 +92,7 @@ create index if not exists monitor_sync_runs_started
 
 create table if not exists monitor_sync_locks (
   source text primary key,
+  owner_id uuid not null,
   expires_at timestamptz not null
 );
 

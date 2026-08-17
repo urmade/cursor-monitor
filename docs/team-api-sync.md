@@ -29,17 +29,21 @@ requests also contain `organizationId`.
 - Later runs: start one hour before the previous successful run's end.
 - End: current server time.
 - Page size: 1,000.
-- Maximum: 20 pages per invocation.
+- Maximum: 20 pages per requested window.
 
 The one-hour overlap handles delayed or reordered upstream events. Every raw
 usage event receives a stable SHA-256 fingerprint, so overlap does not duplicate
 database rows or cost.
 
+When a window reaches 20 pages, the sync recursively bisects it down to
+five-minute windows. A minimum-size window that still truncates is recorded as
+failed and does not advance the successful watermark.
+
 ## Concurrency
 
-`monitor_sync_locks` holds a ten-minute lease for the Team usage source.
-Concurrent invocations return `skipped`. A stale lease is deleted before a new
-one is acquired.
+`monitor_sync_locks` holds a ten-minute, owner-scoped lease for the Team usage
+source. Concurrent invocations return `skipped`. A stale lease is deleted before
+a new one is acquired, and an old invocation cannot release a newer lease.
 
 ## Conversation matching
 
@@ -59,6 +63,8 @@ unmatched count. A future hook automatically makes it visible under a project.
 
 - Missing credentials produce an auditable `skipped` run.
 - `429` and `5xx` responses retry with exponential backoff.
+- Each HTTP request has an eight-second timeout and the complete API walk has a
+  45-second deadline below the Vercel function limit.
 - Authentication and other `4xx` responses fail immediately.
 - Errors are bounded before persistence.
 - Failed runs do not advance the successful window cursor.

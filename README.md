@@ -22,8 +22,9 @@ stored when their matching hook has not arrived yet.
 - Repository, branch, and individual conversation display names are editable.
 - Conversation costs are computed from deduplicated Team API events.
 - Linux, macOS, and Windows hook installers are generated from the deployed app.
-- Sync status, configuration readiness, unmatched usage, and ingestion failures
-  are visible without reading server logs.
+- Sync status, configuration readiness, unmatched usage, and stored hook totals
+  are visible without reading server logs; client-side delivery failures remain
+  in the local hook log.
 
 ## Quick start
 
@@ -48,9 +49,9 @@ Required production settings:
 | `CURSOR_TEAM_API_KEY` | Team usage polling |
 | `CURSOR_ORGANIZATION_API_KEY` + `CURSOR_ORGANIZATION_ID` | Preferred Organization API alternative |
 
-When `CURSOR_MONITOR_HOOK_TOKEN` is absent, the app uses
-`VERCEL_PROTECTION_BYPASS` as the ingestion token so an existing deployment can
-be migrated without a dead period. A separate hook token is recommended.
+The hook token and Vercel bypass are deliberately separate. Possession of an
+ingestion token permits event submission but does not grant access to human
+routes, which also require a Passport identity in the application.
 
 ## Repository map
 

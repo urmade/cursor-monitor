@@ -47,6 +47,8 @@ export type MonitorConversation = {
   id: string | null;
   displayName: string;
   repositoryKey: string;
+  /** Canonical repository reported by the newest hook event. */
+  originatingRepository: string;
   sourceRepositories: string[];
   branch: string | null;
   userEmail: string | null;
@@ -100,6 +102,15 @@ function usageByConversation(
   return result;
 }
 
+function hookConversationKey(event: MonitorHookRecord): string {
+  const canonical = canonicalConversation(
+    event.conversationKey ?? event.conversationId,
+  );
+  if (canonical !== UNKNOWN_CONVERSATION_KEY) return canonical;
+  const generation = event.generationId?.trim().toLowerCase();
+  return generation ? `generation:${generation}` : `event:${event.id}`;
+}
+
 export function buildMonitorTree(options: {
   hooks: readonly MonitorHookRecord[];
   usage: readonly MonitorUsageRecord[];
@@ -117,9 +128,7 @@ export function buildMonitorTree(options: {
   // double-counting Team usage if an old event reported a different repository.
   const ownerByConversation = new Map<string, string>();
   for (const event of orderedHooks) {
-    const conversationKey = canonicalConversation(
-      event.conversationKey ?? event.conversationId,
-    );
+    const conversationKey = hookConversationKey(event);
     if (!ownerByConversation.has(conversationKey)) {
       ownerByConversation.set(
         conversationKey,
@@ -145,9 +154,7 @@ export function buildMonitorTree(options: {
 
   const projects = new Map<string, ProjectAccumulator>();
   for (const event of orderedHooks) {
-    const conversationKey = canonicalConversation(
-      event.conversationKey ?? event.conversationId,
-    );
+    const conversationKey = hookConversationKey(event);
     const rawRepository = canonicalRepository(
       event.repositoryKey ?? event.repositoryLabel,
     );
@@ -195,6 +202,9 @@ export function buildMonitorTree(options: {
           latest.userEmail?.trim() ||
           displayConversationKey(conversation.key),
         repositoryKey: project.key,
+        originatingRepository: canonicalRepository(
+          latest.repositoryKey ?? latest.repositoryLabel,
+        ),
         sourceRepositories: [...conversation.sources].sort(),
         branch:
           conversation.events
@@ -210,10 +220,14 @@ export function buildMonitorTree(options: {
             .find(Boolean) ?? null,
         status: latest.status,
         latestAt: latest.occurredAt,
-        durationMs: conversation.events.reduce(
-          (total, event) => total + (event.durationMs ?? 0),
-          0,
-        ),
+        durationMs: (() => {
+          const durations = conversation.events
+            .map((event) => event.durationMs)
+            .filter((value): value is number => value != null);
+          return durations.length > 0
+            ? durations.reduce((total, value) => total + value, 0)
+            : null;
+        })(),
         chargedCents: matchedUsage?.chargedCents ?? null,
         usageEventCount: matchedUsage?.count ?? 0,
         events: conversation.events,

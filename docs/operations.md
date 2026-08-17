@@ -24,7 +24,7 @@ Supported keys:
 
 | Key | Required | Notes |
 |---|---|---|
-| `CURSOR_MONITOR_HOOK_TOKEN` | Recommended | Dedicated inbound app token |
+| `CURSOR_MONITOR_HOOK_TOKEN` | Yes | Dedicated inbound app token |
 | `VERCEL_PROTECTION_BYPASS` | Yes for protected deployments | Also fallback app token |
 | `CRON_SECRET` | Yes | Vercel cron authorization |
 | `CURSOR_TEAM_API_KEY` | One credential mode | Team filtered usage |

@@ -67,9 +67,11 @@ describe('platform installers', () => {
         'https://monitor.example/api/hooks/events',
       );
       expect(installer?.content).toContain('monitor-test-token');
+      expect(installer?.content).toContain('hooks.cursor-monitor.example.json');
       expect(installer?.content).not.toMatch(/\b(jq|python|node|npm|brew)\b/i);
       if (platform === 'windows') {
         expect(installer?.content).toContain('Invoke-WebRequest');
+        expect(installer?.content).toContain('UTF8Encoding($false)');
         expect(installer?.content).toContain('cursor-monitor-stop.ps1');
       } else {
         expect(installer?.content).toContain('#!/bin/sh');
@@ -77,4 +79,10 @@ describe('platform installers', () => {
       }
     },
   );
+
+  it('does not reuse the deployment bypass as the app token', () => {
+    delete process.env.CURSOR_MONITOR_HOOK_TOKEN;
+    process.env.VERCEL_PROTECTION_BYPASS = 'bypass-only';
+    expect(buildInstaller('linux')?.ready).toBe(false);
+  });
 });

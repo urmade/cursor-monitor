@@ -39,7 +39,7 @@ function branchKey(
 ): string {
   const branch = conversation.branch || 'No branch';
   return repositoryCount > 1
-    ? `${conversation.sourceRepositories[0] ?? conversation.repositoryKey}/${branch}`
+    ? `${conversation.originatingRepository}/${branch}`
     : branch;
 }
 
@@ -140,25 +140,52 @@ export default async function RepositoryPage({
         </div>
       </section>
 
+      {data.rawPayloadsTruncated ? (
+        <div className="callout">
+          Raw JSON is loaded for the newest 1,000 hook events in this project.
+          Older event metadata and aggregate totals remain visible.
+        </div>
+      ) : null}
+
       {project.sourceRepositories.length > 1 ? (
         <section className="panel stack">
           <div>
-            <h2>Merged repositories</h2>
+            <h2>Contributing repositories</h2>
             <p className="small muted">
-              Events retain their original repository key. This project combines
-              them only for display and cost aggregation.
+              Raw events retain the repository reported by each hook. A conversation
+              appears under the repository from its newest hook unless an explicit
+              merge preference attaches it elsewhere.
             </p>
           </div>
           <div className="form-row">
             {project.sourceRepositories.map((source) => (
+              <span className="badge mono" key={source}>
+                {source}
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {data.attachedRepositories.length > 0 ? (
+        <section className="panel stack">
+          <div>
+            <h2>Explicitly attached repositories</h2>
+            <p className="small muted">
+              Detaching changes only the project projection; source events remain
+              untouched.
+            </p>
+          </div>
+          <div className="form-row">
+            {data.attachedRepositories.map((source) => (
               <form action={unmergeRepository} key={source}>
                 <input name="repositoryKey" type="hidden" value={source} />
                 <button
                   className="button button-secondary"
-                  disabled={!admin || source === project.key}
+                  disabled={!admin}
                   type="submit"
                 >
-                  {source === project.key ? `${source} · root` : `Detach ${source}`}
+                  Detach {source}
                 </button>
               </form>
             ))}

@@ -101,20 +101,27 @@ admins before changing display preferences or starting a manual sync.
 ## Security model
 
 - Human pages are protected by the internalsphere Vercel Passport boundary.
-- Mutating server actions additionally require a valid Passport identity.
+- Mutating server actions additionally require a valid Passport identity. This
+  internal app intentionally treats every approved Passport viewer as an
+  administrator; add role checks before broadening its audience.
 - Hook requests require an application token and the platform bypass.
 - Cron requests require `CRON_SECRET`.
 - Team credentials are server-only encrypted secrets.
 - Supabase RLS is enabled with no anon/authenticated policies. The server
   connection is the only data path.
 - Installer responses are private and non-cacheable because they embed the
-  ingestion credential.
+  ingestion credential and Vercel bypass.
+- Human routes require a Passport identity in the root layout, so possession of
+  a hook script cannot expose dashboard telemetry.
 
 ## Scale boundaries
 
-The UI reads the newest 5,000 hook rows and 10,000 usage rows. It reports when a
-limit is reached; historical rows remain queryable in Supabase. Polling accepts
-up to 20 pages of 1,000 usage rows per invocation and marks truncated runs.
+The UI reads summary columns for the newest 5,000 hook rows and 10,000 usage
+rows. Raw JSON is fetched separately for at most 1,000 project events. It reports
+when a limit is reached; historical rows remain queryable in Supabase. Polling
+accepts up to 20 pages of 1,000 usage rows per window, recursively splits a
+truncated window, and does not advance the successful watermark if a minimum
+window still truncates.
 
 If these limits become routine, move dashboard aggregation into materialized
 summary tables while preserving the same identity functions and raw event

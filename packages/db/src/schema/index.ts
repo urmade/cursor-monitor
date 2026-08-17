@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   doublePrecision,
   index,
   integer,
@@ -38,15 +39,19 @@ export const hookEvents = pgTable(
   (table) => [
     index('monitor_hook_events_repository_received').on(
       table.repositoryKey,
-      table.receivedAt,
+      table.receivedAt.desc(),
     ),
     index('monitor_hook_events_conversation_received').on(
       table.conversationKey,
-      table.receivedAt,
+      table.receivedAt.desc(),
     ),
     uniqueIndex('monitor_hook_events_generation_event')
       .on(table.generationId, table.eventName)
       .where(sql`${table.generationId} is not null`),
+    check(
+      'monitor_hook_duration_non_negative',
+      sql`${table.durationMs} is null or ${table.durationMs} >= 0`,
+    ),
   ],
 );
 
@@ -72,7 +77,7 @@ export const teamUsageEvents = pgTable(
       table.conversationKey,
       table.occurredAt,
     ),
-    index('monitor_team_usage_occurred').on(table.occurredAt),
+    index('monitor_team_usage_occurred').on(table.occurredAt.desc()),
   ],
 );
 
@@ -87,7 +92,13 @@ export const repositoryPreferences = pgTable(
       .defaultNow(),
   },
   (table) => [
-    index('monitor_repository_preferences_merged').on(table.mergedIntoKey),
+    index('monitor_repository_preferences_merged')
+      .on(table.mergedIntoKey)
+      .where(sql`${table.mergedIntoKey} is not null`),
+    check(
+      'monitor_repository_not_self_merged',
+      sql`${table.mergedIntoKey} is null or lower(btrim(${table.repositoryKey})) <> lower(btrim(${table.mergedIntoKey}))`,
+    ),
   ],
 );
 
@@ -138,10 +149,17 @@ export const syncRuns = pgTable(
       .defaultNow(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
-  (table) => [index('monitor_sync_runs_started').on(table.startedAt)],
+  (table) => [
+    index('monitor_sync_runs_started').on(table.startedAt.desc()),
+    check(
+      'monitor_sync_runs_status',
+      sql`${table.status} in ('running', 'succeeded', 'failed', 'skipped')`,
+    ),
+  ],
 );
 
 export const syncLocks = pgTable('monitor_sync_locks', {
   source: text('source').primaryKey(),
+  ownerId: uuid('owner_id').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });

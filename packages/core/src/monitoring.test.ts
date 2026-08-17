@@ -152,4 +152,33 @@ describe('monitor tree', () => {
       eventCount: 2,
     });
   });
+
+  it('keeps events without conversation ids separate by generation and repository', () => {
+    const tree = buildMonitorTree({
+      hooks: [
+        hook({
+          id: 'one',
+          conversationId: null,
+          conversationKey: null,
+          generationId: 'generation-one',
+          repositoryKey: 'acme/one',
+        }),
+        hook({
+          id: 'two',
+          conversationId: null,
+          conversationKey: null,
+          generationId: 'generation-two',
+          repositoryKey: 'acme/two',
+        }),
+      ],
+      usage: [],
+    });
+    expect(tree.projects.map((project) => project.key).sort()).toEqual([
+      'acme/one',
+      'acme/two',
+    ]);
+    expect(tree.projects.flatMap((project) => project.conversations)).toHaveLength(
+      2,
+    );
+  });
 });

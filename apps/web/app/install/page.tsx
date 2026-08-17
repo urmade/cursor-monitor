@@ -80,7 +80,14 @@ export default async function InstallPage() {
           </li>
           <li>
             Commit the generated <span className="mono">.cursor</span> directory
-            to apply the hook to local IDEs and Cloud Agents using that repository.
+            only in private repositories whose readers may submit events. This
+            applies the hook to local IDEs and Cloud Agents using that repository.
+          </li>
+          <li>
+            Existing <span className="mono">hooks.json</span> files are preserved.
+            Merge the generated{' '}
+            <span className="mono">hooks.cursor-monitor.example.json</span> arrays
+            into the existing configuration.
           </li>
         </ol>
       </section>

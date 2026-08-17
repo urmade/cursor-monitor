@@ -9,10 +9,7 @@ import {
 export const MAX_HOOK_BYTES = 256 * 1024;
 
 function configuredHookToken(): string | null {
-  const value =
-    process.env.CURSOR_MONITOR_HOOK_TOKEN?.trim() ||
-    process.env.VERCEL_PROTECTION_BYPASS?.trim() ||
-    '';
+  const value = process.env.CURSOR_MONITOR_HOOK_TOKEN?.trim() || '';
   return value || null;
 }
 

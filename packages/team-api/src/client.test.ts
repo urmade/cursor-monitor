@@ -61,6 +61,15 @@ describe('usage identity', () => {
     ).toBe(
       usageEventFingerprint({ z: 1, conversationId: 'A', timestamp: 'x' }),
     );
+    expect(
+      usageEventFingerprint({
+        timestamp: 'x',
+        conversationId: 'A',
+        teamId: 12,
+      }),
+    ).toBe(
+      usageEventFingerprint({ timestamp: 'x', conversationId: 'A' }),
+    );
   });
 
   it('normalizes conversation ids and prefers organization credentials', () => {

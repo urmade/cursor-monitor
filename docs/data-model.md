@@ -42,7 +42,8 @@ Indexes support repository and conversation timelines.
 
 Deduplicated API telemetry.
 
-- `fingerprint`: SHA-256 of stable, recursively key-sorted event JSON
+- `fingerprint`: versioned SHA-256 identity using an upstream event ID when
+  available, otherwise stable conversation/time/user/model/cost/token fields
 - `conversation_id` / `conversation_key`
 - user, model, kind, team, charged cents
 - `payload`: complete API event
@@ -85,8 +86,9 @@ Audit log for Team API polling:
 
 ### `monitor_sync_locks`
 
-Short-lived database lease keyed by sync source. A stale lease expires after ten
-minutes and can be replaced.
+Short-lived database lease keyed by sync source. Each lease has a UUID owner, so
+a timed-out invocation cannot release its successor's lock. A stale lease
+expires after ten minutes and can be replaced.
 
 ## Projection rules
 

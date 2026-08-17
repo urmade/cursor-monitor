@@ -11,6 +11,7 @@ import {
   TeamApiClient,
   usageConversationKey,
   usageEventFingerprint,
+  type ListUsageResult,
   type UsageEvent,
 } from '@cursor-monitor/team-api';
 import { and, desc, eq, lt } from 'drizzle-orm';
@@ -20,6 +21,8 @@ const INITIAL_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 const OVERLAP_MS = 60 * 60 * 1000;
 const LOCK_MS = 10 * 60 * 1000;
 const CHUNK_SIZE = 500;
+const MINIMUM_SPLIT_WINDOW_MS = 5 * 60 * 1000;
+const MAXIMUM_SPLIT_DEPTH = 12;
 
 export type TeamSyncResult = {
   status: 'succeeded' | 'failed' | 'skipped';
@@ -46,7 +49,11 @@ function eventConversationId(event: UsageEvent): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-async function acquireLock(db: Db, now: Date): Promise<boolean> {
+async function acquireLock(
+  db: Db,
+  now: Date,
+  ownerId: string,
+): Promise<boolean> {
   await db
     .delete(syncLocks)
     .where(and(eq(syncLocks.source, SOURCE), lt(syncLocks.expiresAt, now)));
@@ -54,6 +61,7 @@ async function acquireLock(db: Db, now: Date): Promise<boolean> {
     .insert(syncLocks)
     .values({
       source: SOURCE,
+      ownerId,
       expiresAt: new Date(now.getTime() + LOCK_MS),
     })
     .onConflictDoNothing()
@@ -61,8 +69,51 @@ async function acquireLock(db: Db, now: Date): Promise<boolean> {
   return inserted.length === 1;
 }
 
-async function releaseLock(db: Db): Promise<void> {
-  await db.delete(syncLocks).where(eq(syncLocks.source, SOURCE));
+async function releaseLock(db: Db, ownerId: string): Promise<void> {
+  await db
+    .delete(syncLocks)
+    .where(and(eq(syncLocks.source, SOURCE), eq(syncLocks.ownerId, ownerId)));
+}
+
+export async function listCompleteWindow(
+  client: Pick<TeamApiClient, 'listUsageEvents'>,
+  startDate: number,
+  endDate: number,
+  deadlineAt: number,
+  depth = 0,
+): Promise<ListUsageResult> {
+  const listed = await client.listUsageEvents({
+    startDate,
+    endDate,
+    deadlineAt,
+  });
+  if (!listed.truncated) return listed;
+  if (
+    depth >= MAXIMUM_SPLIT_DEPTH ||
+    endDate - startDate <= MINIMUM_SPLIT_WINDOW_MS
+  ) {
+    return listed;
+  }
+  const midpoint = Math.floor(startDate + (endDate - startDate) / 2);
+  const older = await listCompleteWindow(
+    client,
+    startDate,
+    midpoint,
+    deadlineAt,
+    depth + 1,
+  );
+  const newer = await listCompleteWindow(
+    client,
+    midpoint,
+    endDate,
+    deadlineAt,
+    depth + 1,
+  );
+  return {
+    events: [...older.events, ...newer.events],
+    pages: older.pages + newer.pages,
+    truncated: older.truncated || newer.truncated,
+  };
 }
 
 export async function syncTeamUsage(options?: {
@@ -107,7 +158,8 @@ export async function syncTeamUsage(options?: {
     };
   }
 
-  if (!(await acquireLock(db, now))) {
+  const lockOwnerId = newId();
+  if (!(await acquireLock(db, now, lockOwnerId))) {
     return {
       status: 'skipped',
       fetched: 0,
@@ -134,10 +186,12 @@ export async function syncTeamUsage(options?: {
         credentials,
         baseUrl: options?.env?.CURSOR_API_BASE_URL ?? process.env.CURSOR_API_BASE_URL,
       });
-    const listed = await client.listUsageEvents({
-      startDate: windowStartedAt.getTime(),
-      endDate: now.getTime(),
-    });
+    const listed = await listCompleteWindow(
+      client,
+      windowStartedAt.getTime(),
+      now.getTime(),
+      Date.now() + 45_000,
+    );
     let insertedCount = 0;
 
     for (let offset = 0; offset < listed.events.length; offset += CHUNK_SIZE) {
@@ -170,6 +224,31 @@ export async function syncTeamUsage(options?: {
         .onConflictDoNothing()
         .returning({ fingerprint: teamUsageEvents.fingerprint });
       insertedCount += inserted.length;
+    }
+
+    if (listed.truncated) {
+      const message =
+        'Cursor Team API window remained truncated after recursive splitting; successful watermark was not advanced.';
+      await db
+        .update(syncRuns)
+        .set({
+          status: 'failed',
+          fetchedCount: listed.events.length,
+          insertedCount,
+          pages: listed.pages,
+          truncated: true,
+          error: message,
+          completedAt: new Date(),
+        })
+        .where(eq(syncRuns.id, runId));
+      return {
+        status: 'failed',
+        fetched: listed.events.length,
+        inserted: insertedCount,
+        pages: listed.pages,
+        truncated: true,
+        message,
+      };
     }
 
     await db
@@ -209,6 +288,6 @@ export async function syncTeamUsage(options?: {
       message,
     };
   } finally {
-    await releaseLock(db);
+    await releaseLock(db, lockOwnerId);
   }
 }
