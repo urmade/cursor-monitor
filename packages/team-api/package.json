@@ -1,0 +1,27 @@
+{
+  "name": "@cursor-monitor/team-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cursor-monitor/config": "workspace:*",
+    "@types/node": "^26.2.0",
+    "eslint": "^10.8.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

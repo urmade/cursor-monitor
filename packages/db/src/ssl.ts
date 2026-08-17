@@ -1,13 +1,9 @@
-/** Loopback URLs skip TLS; Supabase (and any remote host) requires it. */
-export function sslOptionForUrl(url: string): 'require' | undefined {
+export function sslOptionForUrl(url: string): 'require' | false {
   try {
     const host = new URL(url).hostname;
-    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
-      return undefined;
-    }
+    const local = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+    return local || process.env.DB_SSL === 'disable' ? false : 'require';
   } catch {
-    // fall through
+    return process.env.DB_SSL === 'disable' ? false : 'require';
   }
-  if (process.env.DB_SSL === 'disable') return undefined;
-  return 'require';
 }

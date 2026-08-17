@@ -1,28 +1,21 @@
 {
-  "name": "nexus",
+  "name": "cursor-monitor",
   "private": true,
   "packageManager": "pnpm@10.33.3",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm --filter @nexus/web dev",
+    "dev": "pnpm --filter @cursor-monitor/web dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "db:exec-migrations": "pnpm --filter @nexus/db exec-migrations",
-    "db:seed": "tsx packages/core/src/seed.ts",
-    "acceptance:setup": "tsx packages/core/src/acceptance-setup.ts"
+    "db:exec-migrations": "pnpm --filter @cursor-monitor/db exec-migrations"
   },
   "devDependencies": {
-    "turbo": "^2.5.4",
-    "tsx": "^4.20.3",
-    "typescript": "^5.8.3"
-  },
-  "pnpm": {
-    "overrides": {
-      "drizzle-orm": "0.44.7"
-    }
+    "tsx": "^4.23.12",
+    "turbo": "^2.10.10",
+    "typescript": "^6.0.3"
   }
 }

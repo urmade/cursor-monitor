@@ -1,7 +1,0 @@
-{
-  "id": "run-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-  "status": "FINISHED",
-  "durationMs": 42000,
-  "result": { "ok": true },
-  "git": { "branches": [] }
-}

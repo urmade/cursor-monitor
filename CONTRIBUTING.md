@@ -1,68 +1,67 @@
-# Contributing to Nexus
-
-Internalsphere-managed `nexus` app. Phase 0 de-risked the platform loop; product schema starts in Phase 1.
-
-## Prerequisites
-
-- Node 22+ (see `.nvmrc`)
-- pnpm 10 (`packageManager` in root `package.json`)
-- Docker (optional, for local Redis only)
-- `sops` ≥ 3.10 for secrets CLI encryption
+# Contributing to Cursor Monitor
 
 ## Local setup
 
 ```bash
+sh scripts/setup-repo.sh
 pnpm install
-docker compose up -d          # redis:7 (optional)
-cp .env.example .env.local
-# edit .env.local with local values (never commit it)
-# Database: use the existing Supabase integration only — set DB_POSTGRES_URL
-# from the preview/production Supabase instance. Do not stand up local Postgres.
-
-pnpm db:exec-migrations       # applies packages/db/migrations/*.sql against Supabase
-pnpm dev                      # Next.js at http://localhost:3000
+pnpm dev
 ```
 
-Useful checks:
+Local pages that read Supabase require `DB_POSTGRES_URL`. Do not create a local
+database. Database-backed behavior is validated on the PR preview deployment,
+where the managed Supabase integration is available.
+
+## Before opening a PR
 
 ```bash
+pnpm lint
 pnpm typecheck
-pnpm --filter @nexus/cursor-client test
+pnpm test
+pnpm build
 python3 scripts/app-manifest.py
 ```
 
-## Why `vercel dev` / `vercel env pull` are unavailable
+The pre-commit and pre-push hooks run the secrets guard. Do not bypass them.
 
-Everyone on the `anysphere-internal` Vercel team has **Viewer** access. Viewer cannot pull env vars or run a local Vercel runtime. Deploys and env sync happen only through the managed GitHub Actions workflow on PR previews and `main`.
+## Code organization
 
-Locally: Redis may run via Docker; the **only** database is the existing Supabase integration (`integrations.db` in `app-manifest.yml`). Prefer validating DB-backed flows on the PR preview URL. Anything that needs Passport, the protection bypass, or real Cursor credentials is validated there too.
+- `apps/web`: Next.js routes, server actions, installer generation, and UI.
+- `packages/core`: product invariants, aggregation, and Team API sync.
+- `packages/team-api`: isolated Cursor HTTP client and response types.
+- `packages/db`: Supabase connection, schema, and forward-only migrations.
+- `packages/config`: shared TypeScript and lint configuration.
+
+Keep product logic out of React components. Pure identity and grouping behavior
+belongs in `packages/core` and requires unit tests.
+
+## Schema changes
+
+1. Update `packages/db/src/schema/index.ts`.
+2. Add a new, forward-only SQL file to `packages/db/migrations/`.
+3. Do not edit an applied migration.
+4. Push the branch and verify migration/deploy checks on the PR preview.
+
+CI invokes `pnpm db:exec-migrations` against the environment's managed Supabase
+database before deploy.
 
 ## Secrets
 
-Never commit plaintext `.env*` files (git hooks block them). Add credentials via SOPS:
+Never commit plaintext credentials. Use the managed CLI:
 
 ```bash
-python3 scripts/secrets.py add --scope shared --key CURSOR_API_KEY
-python3 scripts/secrets.py list --scope local
+python3 scripts/secrets.py list --scope remote --env preview
+python3 scripts/secrets.py add --scope shared --key CURSOR_MONITOR_HOOK_TOKEN
+python3 scripts/secrets.py update --scope shared --key CURSOR_TEAM_API_KEY
 ```
 
-See the `secrets-operations` Cursor skill for scope semantics (`shared` / `preview` / `production`).
+See `docs/operations.md` for all supported settings.
 
-## Monorepo layout
+## Pull requests
 
-| Path | Role |
-|---|---|
-| `apps/web` | Only deployable (Next.js App Router); `vercel.root_directory: apps/web` |
-| `packages/contracts` | Zod schemas |
-| `packages/db` | Drizzle + migrations |
-| `packages/core` | Domain services |
-| `packages/cursor-client` | Typed `api.cursor.com` client |
-| `packages/mcp` | MCP tool definitions (stub until Phase 2) |
-| `packages/jobs` | Cron / job handlers |
-| `packages/config` | Shared TypeScript base config |
+Describe:
 
-`app-manifest.yml` declares the Supabase `db` integration and `vercel.root_directory: apps/web`. See ADR-0001.
-
-## Policy-managed files
-
-Do not edit managed workflows, `CODEOWNERS`, `.sops.yaml`, hooks, orchestrator scripts, distributed skills, `secrets/inventory.yaml`, or `QUICKSTART.md` — they are overwritten on reconciliation. Never bypass git hooks with `--no-verify`.
+- the user-visible behavior;
+- any identity, merge, or deduplication invariant affected;
+- commands run locally;
+- preview checks needed for Supabase, hooks, or Team API behavior.

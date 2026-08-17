@@ -5,5 +5,3 @@ vercel:
 integrations:
   db:
     type: supabase
-  redis:
-    type: upstash-kv

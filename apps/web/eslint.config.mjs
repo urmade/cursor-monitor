@@ -1,35 +1,30 @@
-import nextPlugin from "@next/eslint-plugin-next";
-import reactHooks from "eslint-plugin-react-hooks";
-import tseslint from "typescript-eslint";
-import { boundariesFor } from "@nexus/config/eslint-boundaries.mjs";
+import nextPlugin from '@next/eslint-plugin-next';
+import reactHooks from 'eslint-plugin-react-hooks';
+import tseslint from 'typescript-eslint';
 
-/** @type {import('eslint').Linter.Config[]} */
-const eslintConfig = [
+export default [
   {
-    ignores: [".next/**", "node_modules/**", "out/**"],
+    ignores: ['.next/**', 'node_modules/**', 'coverage/**'],
   },
   ...tseslint.configs.recommended,
   {
     plugins: {
-      "@next/next": nextPlugin,
-      "react-hooks": reactHooks,
+      '@next/next': nextPlugin,
+      'react-hooks': reactHooks,
     },
     rules: {
       ...nextPlugin.configs.recommended.rules,
-      ...nextPlugin.configs["core-web-vitals"].rules,
+      ...nextPlugin.configs['core-web-vitals'].rules,
       ...reactHooks.configs.recommended.rules,
-      "@typescript-eslint/no-unused-vars": [
-        "error",
+      '@typescript-eslint/no-unused-vars': [
+        'error',
         {
-          argsIgnorePattern: "^_",
-          varsIgnorePattern: "^_",
-          caughtErrorsIgnorePattern: "^_",
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
         },
       ],
-      "@typescript-eslint/no-explicit-any": "error",
+      '@typescript-eslint/no-explicit-any': 'error',
     },
   },
-  ...boundariesFor("web"),
 ];
-
-export default eslintConfig;

@@ -1,80 +1,35 @@
-import { headers } from 'next/headers';
 import { decodeJwt } from 'jose';
+import { headers } from 'next/headers';
 
-export type AppUser = {
-  externalSub: string;
-  email?: string;
-  name?: string;
-  rawClaims: Record<string, unknown>;
+export type AdminIdentity = {
+  id: string;
+  email: string | null;
+  name: string | null;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-/**
- * Parse Passport identity from x-vercel-oidc-passport-token.
- * Local fallback only when !process.env.VERCEL.
- */
-export async function currentUser(): Promise<AppUser | null> {
-  const h = await headers();
-  const token = h.get('x-vercel-oidc-passport-token');
-
+export async function currentAdmin(): Promise<AdminIdentity | null> {
+  const token = (await headers()).get('x-vercel-oidc-passport-token');
   if (!token) {
-    return devFallbackUser();
+    return process.env.VERCEL
+      ? null
+      : { id: 'local-development', email: 'local@example.com', name: 'Local admin' };
   }
-
   try {
-    // Within the Passport-protected Vercel boundary the edge already verified
-    // the session; we decode claims and require external_sub.
     const claims = decodeJwt(token);
-    const externalSub = claims['external_sub'];
-    if (typeof externalSub !== 'string' || externalSub.length === 0) {
-      return null;
-    }
-
-    const email =
-      typeof claims.email === 'string' ? claims.email : undefined;
-    const name = typeof claims.name === 'string' ? claims.name : undefined;
-
+    const id = claims['external_sub'];
+    if (typeof id !== 'string' || !id.trim()) return null;
     return {
-      externalSub,
-      email,
-      name,
-      rawClaims: claims as Record<string, unknown>,
+      id,
+      email: typeof claims.email === 'string' ? claims.email : null,
+      name: typeof claims.name === 'string' ? claims.name : null,
     };
   } catch {
     return null;
   }
 }
 
-function devFallbackUser(): AppUser | null {
-  // Never invent identity on a deployed host.
-  if (process.env.VERCEL) {
-    return null;
-  }
-  console.assert(
-    !process.env.VERCEL,
-    'dev identity fallback must not run under VERCEL',
-  );
-  return {
-    externalSub: 'local-dev-user',
-    email: 'local@example.com',
-    name: 'Local Dev',
-    rawClaims: { source: 'dev-fallback' },
-  };
-}
-
-export function describeUser(user: AppUser): Record<string, unknown> {
-  const out: Record<string, unknown> = {
-    external_sub: user.externalSub,
-  };
-  if (user.email) out.email = user.email;
-  if (user.name) out.name = user.name;
-  if (isRecord(user.rawClaims)) {
-    for (const key of ['sub', 'scope', 'connector_id']) {
-      if (key in user.rawClaims) out[key] = user.rawClaims[key];
-    }
-  }
-  return out;
+export async function requireAdmin(): Promise<AdminIdentity> {
+  const admin = await currentAdmin();
+  if (!admin) throw new Error('Unauthenticated');
+  return admin;
 }

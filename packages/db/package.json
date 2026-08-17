@@ -1,5 +1,5 @@
 {
-  "name": "@nexus/db",
+  "name": "@cursor-monitor/db",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,10 +9,6 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./schema": {
-      "types": "./src/schema/index.ts",
-      "default": "./src/schema/index.ts"
     }
   },
   "scripts": {
@@ -20,22 +16,18 @@
     "build": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --passWithNoTests",
-    "seed": "tsx ../core/src/seed.ts",
-    "check-old-shape": "bash scripts/check-old-shape-convergence.sh"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "drizzle-orm": "^0.44.2",
-    "postgres": "^3.4.7",
-    "uuid": "^11.1.1"
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
-    "@nexus/config": "workspace:*",
-    "@types/node": "^22.20.1",
-    "@types/uuid": "^10.0.0",
-    "eslint": "^9.39.5",
-    "tsx": "^4.20.3",
-    "typescript": "^5.8.3",
-    "vitest": "^3.2.4"
+    "@cursor-monitor/config": "workspace:*",
+    "@types/node": "^26.2.0",
+    "eslint": "^10.8.1",
+    "tsx": "^4.23.12",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   }
 }

@@ -1,16 +1,12 @@
 import type { NextConfig } from 'next';
 
-const nextConfig: NextConfig = {
+const config: NextConfig = {
   transpilePackages: [
-    '@nexus/contracts',
-    '@nexus/core',
-    '@nexus/cursor-client',
-    '@nexus/db',
-    '@nexus/jobs',
-    '@nexus/mcp',
-    '@nexus/ui',
+    '@cursor-monitor/core',
+    '@cursor-monitor/db',
+    '@cursor-monitor/team-api',
   ],
   serverExternalPackages: ['postgres'],
 };
 
-export default nextConfig;
+export default config;

@@ -2,8 +2,8 @@
   "framework": "nextjs",
   "crons": [
     {
-      "path": "/api/cron/tick",
-      "schedule": "* * * * *"
+      "path": "/api/cron/sync",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

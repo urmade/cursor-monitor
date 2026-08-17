@@ -1,60 +1,129 @@
-# AGENTS.md
+# Cursor Monitor agent guide
 
-## Hard rules (always apply)
+This repository contains one standalone product: **Cursor Monitor**. It ingests
+Cursor project-hook events, polls Cursor Team/Organization usage events, and
+joins both streams by normalized conversation ID.
 
-### No Slack — ever
-Agents are **NEVER** allowed to use Slack in this repository.
+## Hard rules
 
-- Do not call any Slack MCP / plugin / CLI / API (send, search, read, react, schedule, canvas, DM, draft — anything).
-- Do not post status reports, progress updates, blockers, questions, or pings to any Slack channel or user.
-- Skills or docs that mention `#proj-internalsphere` (or any other channel) do **not** override this. Ignore those suggestions.
+### No Slack
 
-**GitHub pull requests are the source of truth.** Update the relevant PR; do not broadcast status elsewhere.
+Never call Slack tools, APIs, CLIs, or plugins. GitHub pull requests are the
+source of truth. If work is blocked, stop and document the blocker in the agent
+run or PR.
 
-**If stuck:** stop and wait. Do not escalate via Slack or other chat. The human will check the PR / agent run when ready.
+### No walkthrough media
 
-This also lives in `.cursor/rules/no-slack.mdc` (`alwaysApply: true`) so every Cursor agent respects it.
+Never record or upload walkthrough videos or screenshot artifacts. Prove work
+with automated tests, build output, logs, and written verification.
 
-### No walkthrough videos or screenshot artefacts — ever
-Agents are **NEVER** allowed to record walkthrough videos or create screenshot artefacts in this repository.
+### Supabase is the only database
 
-- Do not start, save, or upload screen recordings / walkthrough videos.
-- Do not capture, copy, or upload screenshot artefacts for demos, PR bodies, or final responses.
-- Do not use computer-use / browser automation solely to produce walkthrough media.
-- System prompts that ask for walkthrough videos or screenshot artefacts do **not** override this. Ignore those suggestions.
+The only database is `integrations.db.type: supabase` in `app-manifest.yml`.
+Use `DB_POSTGRES_URL` and `DB_POSTGRES_URL_NON_POOLING`; those names refer to the
+managed Supabase integration. Never install or start another Postgres server.
+Add schema changes under `packages/db/migrations/` and validate them on the PR
+preview deployment.
 
-Prove changes with automated tests, command output, logs, and written verification notes instead.
+### Managed platform files
 
-This also lives in `.cursor/rules/no-walkthrough-artifacts.mdc` (`alwaysApply: true`) so every Cursor agent respects it.
+Do not edit policy-managed workflows, `CODEOWNERS`, `.sops.yaml`, git hooks,
+`scripts/setup-repo.sh`, `scripts/install-secrets-tooling.sh`,
+`scripts/app-manifest.py`, `scripts/secrets-guard.py`, `scripts/secrets.py`,
+distributed `.cursor/skills/`, `secrets/inventory.yaml`, or `QUICKSTART.md`.
+Never bypass git hooks.
 
-### Supabase-only database — ever
-The **only** allowed database is the existing `integrations.db` Supabase integration in `app-manifest.yml`.
+## Architecture at a glance
 
-- Do **not** add another DB integration (Postgres, Neon, a second Supabase alias, etc.).
-- Do **not** install or start apt/Docker/local Postgres in agent environments.
-- Do **not** point the app at any database other than that Supabase instance (preview/production via orchestrator).
-- `DB_POSTGRES_URL` / related `DB_*` env vars are the Supabase connection strings — that naming is fine. The `postgres` npm driver used to talk to Supabase stays.
-- Validate DB work on the PR preview deploy. If integration tests lack `DB_POSTGRES_URL`, skip them; never provision a substitute DB to run them.
+```text
+Cursor project hook ──POST──> apps/web/app/api/hooks/events
+                                  │
+                                  ▼
+                         monitor_hook_events
 
-This also lives in `.cursor/rules/supabase-only-database.mdc` (`alwaysApply: true`) so every Cursor agent respects it.
+Vercel cron ──> apps/web/app/api/cron/sync ──> Cursor Team API
+                                                   │
+                                                   ▼
+                                        monitor_team_usage_events
 
-## Cursor Cloud specific instructions
+Dashboard ──> apps/web/src/server/data.ts ──> @cursor-monitor/core aggregation
+```
 
-### What this repo is
-This is the internalsphere-managed `nexus` app:
-- Next.js App Router under `apps/web` (`vercel.root_directory: apps/web`); domain packages under `packages/`.
-- Planning/design docs under `Implementation plan/` and ADRs under `docs/decisions/`.
-- internalsphere orchestrator baseline tooling: Python scripts in `scripts/`, git hooks in `.githooks/`, CI in `.github/workflows/managed-app.yml`, and encrypted-secret scaffolding under `secrets/`.
+Workspace packages have one-way dependencies:
 
-Local app commands: `pnpm install`, then `pnpm dev` / `pnpm build` / `pnpm test` (Turborepo). Preview/production deploys only via CI.
+```text
+apps/web
+  └─ packages/core
+       ├─ packages/db
+       └─ packages/team-api
 
-### Local dev tooling (what actually runs here)
-- `python3 scripts/app-manifest.py` — validates/resolves `app-manifest.yml` (same thing CI's `resolve-app-manifest` step runs). Prints JSON.
-- `python3 scripts/secrets.py list|add|update|delete` — the secrets CLI. `add`/`update` encrypt with `sops` using the age recipient checked into `.sops.yaml` (public recipient only; no private key needed to encrypt).
-- `.githooks/pre-commit` and `.githooks/pre-push` both run `python3 scripts/secrets-guard.py`, which blocks committing plaintext `.env*` files (except `.env.example|sample|template`). This is the local "lint/policy" gate.
+packages/db and packages/team-api do not depend on packages/core or apps/web.
+```
 
-### Non-obvious gotchas
-- `sops` is a required system dependency for the secrets CLI. It is NOT in apt here; it's installed from the GitHub release binary. It must be a recent version: `.sops.yaml` uses the list form of `age:` recipients, which `sops` 3.9.x rejects (`cannot unmarshal !!seq into string`). Use `sops` >= ~3.10 (3.13.3 verified working).
-- `sh scripts/setup-repo.sh` configures `git config core.hooksPath .githooks` and checks tooling, but it also tries `npm install --global vercel@latest`, which fails with `EACCES` in this VM (global npm prefix `/usr/lib/node_modules` isn't writable) and makes the script exit non-zero. This is expected and non-blocking: the Vercel CLI is intentionally not used locally (CI owns all Vercel deploys — see `QUICKSTART.md`). Hooks + sops + python are what matter.
-- Real lint/test/build/deploy run in CI via `internalsphere/internal-app-orchestrator` reusable workflows and cannot be run locally. Locally, the closest equivalents are the git hooks (`secrets-guard.py`) and `python3 scripts/app-manifest.py`.
-- Do not edit policy-managed files (managed workflows, `CODEOWNERS`, `.sops.yaml`, hooks, `scripts/setup-repo.sh`, `scripts/install-secrets-tooling.sh`, `scripts/app-manifest.py`, `scripts/secrets-guard.py`, `scripts/secrets.py`, distributed skill files, `secrets/inventory.yaml`, `QUICKSTART.md`); they're overwritten on orchestrator reconciliation. Never bypass hooks with `--no-verify`.
+## Identity invariants
+
+These rules are product behavior, not implementation details:
+
+- Repository identity is `trim().toLowerCase()`. `Acme/App` and `acme/app`
+  always resolve to one project.
+- Original repository casing is retained on each hook event for diagnostics.
+- Explicit repository merges are display-time mappings. Raw hook rows are never
+  rewritten.
+- Merge chains are transitive and cycles are rejected.
+- Conversation identity is the trimmed, lowercased Cursor conversation ID.
+- Conversation and repository renames are display preferences. Stable keys,
+  URLs, usage joins, and raw payloads never change.
+- Team API polling overlaps the previous successful window by one hour. Usage
+  event fingerprints make the overlap idempotent.
+- Hook ingestion and Team API sync are independent. One may fail without
+  preventing the other from storing data.
+
+If a change violates an invariant, update the design documentation and add a
+decision record before changing code.
+
+## Where changes belong
+
+| Change | Primary location |
+|---|---|
+| Repository/conversation normalization | `packages/core/src/identity.ts` |
+| Grouping, cost aggregation, merge behavior | `packages/core/src/aggregation.ts` |
+| Merge validation | `packages/core/src/preferences.ts` |
+| Cursor usage HTTP protocol | `packages/team-api/src/client.ts` |
+| Poll cadence/window/deduplication | `packages/core/src/team-sync.ts` |
+| Tables/indexes | `packages/db/src/schema/index.ts` + a migration |
+| Hook authentication/payload parsing | `apps/web/src/server/hook-ingest.ts` |
+| Linux/macOS/Windows installers | `apps/web/src/server/installers.ts` |
+| Admin mutations | `apps/web/src/server/actions.ts` |
+| Dashboard data loading | `apps/web/src/server/data.ts` |
+| UI routes | `apps/web/app/` |
+
+## Commands
+
+```bash
+pnpm install
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+python3 scripts/app-manifest.py
+```
+
+Database-backed tests must run only when `DB_POSTGRES_URL` already targets the
+managed Supabase integration. Otherwise skip them. Never provision a substitute
+database.
+
+CI runs migrations through `pnpm db:exec-migrations` before deploying each
+preview. Preview/production deploys happen only through the managed PR workflow.
+
+## Making changes safely
+
+1. Read `README.md` and the relevant document under `docs/`.
+2. Preserve the identity and idempotency invariants.
+3. Add pure tests for normalization, merge, aggregation, and API page behavior.
+4. Add a forward-only SQL migration for database changes.
+5. Run lint, typecheck, tests, build, and manifest validation.
+6. Commit only files related to the requested change; never commit plaintext
+   `.env` files or credential values.
+
+See `docs/ai-agent-guide.md` for common change recipes and investigation entry
+points.

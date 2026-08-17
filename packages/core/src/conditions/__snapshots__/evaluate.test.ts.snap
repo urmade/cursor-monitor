@@ -1,7 +1,0 @@
-// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
-
-exports[`describeCondition > round-trips snapshot for common shapes 1`] = `"stage equals "deploy""`;
-
-exports[`describeCondition > round-trips snapshot for common shapes 2`] = `"has label risk:*"`;
-
-exports[`describeCondition > round-trips snapshot for common shapes 3`] = `"(open warnings ≥ 2 OR spec is missing)"`;

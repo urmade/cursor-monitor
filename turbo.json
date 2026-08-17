@@ -4,8 +4,13 @@
     "DB_POSTGRES_URL",
     "DB_POSTGRES_URL_NON_POOLING",
     "DB_SSL",
-    "FLAG_P3_GATES",
-    "RUN_RLS_GRANTS_TEST"
+    "CURSOR_TEAM_API_KEY",
+    "CURSOR_ORGANIZATION_API_KEY",
+    "CURSOR_ORGANIZATION_ID",
+    "CURSOR_API_BASE_URL",
+    "CURSOR_MONITOR_HOOK_TOKEN",
+    "VERCEL_PROTECTION_BYPASS",
+    "CRON_SECRET"
   ],
   "tasks": {
     "build": {
@@ -20,8 +25,13 @@
         "DB_POSTGRES_URL",
         "DB_POSTGRES_URL_NON_POOLING",
         "DB_SSL",
-        "FLAG_P3_GATES",
-        "RUN_RLS_GRANTS_TEST"
+        "CURSOR_TEAM_API_KEY",
+        "CURSOR_ORGANIZATION_API_KEY",
+        "CURSOR_ORGANIZATION_ID",
+        "CURSOR_API_BASE_URL",
+        "CURSOR_MONITOR_HOOK_TOKEN",
+        "VERCEL_PROTECTION_BYPASS",
+        "CRON_SECRET"
       ]
     },
     "dev": {

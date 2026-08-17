@@ -1,6 +1,6 @@
 {
-  "name": "@nexus/web",
-  "version": "0.1.0",
+  "name": "@cursor-monitor/web",
+  "version": "0.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
@@ -8,42 +8,28 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
-    "test:e2e": "pnpm exec tsx e2e/seed-blocking-question.ts && playwright test"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@asteasolutions/zod-to-openapi": "^7.3.4",
-    "@modelcontextprotocol/sdk": "^1.17.0",
-    "@nexus/contracts": "workspace:*",
-    "@nexus/core": "workspace:*",
-    "@nexus/cursor-client": "workspace:*",
-    "@nexus/db": "workspace:*",
-    "@nexus/jobs": "workspace:*",
-    "@nexus/mcp": "workspace:*",
-    "@nexus/ui": "workspace:*",
-    "drizzle-orm": "^0.44.2",
-    "jose": "^6.0.11",
-    "next": "16.2.12",
+    "@cursor-monitor/core": "workspace:*",
+    "@cursor-monitor/db": "workspace:*",
+    "@cursor-monitor/team-api": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "jose": "^6.2.9",
+    "next": "16.3.1",
     "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "uuid": "^11.1.0",
-    "zod": "^3.25.67"
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@next/eslint-plugin-next": "^16.2.12",
-    "@nexus/config": "workspace:*",
-    "@playwright/test": "^1.54.1",
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^22.20.1",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "@types/uuid": "^10.0.0",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.12",
+    "@cursor-monitor/config": "workspace:*",
+    "@next/eslint-plugin-next": "^16.3.1",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "eslint": "^10.8.1",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "tailwindcss": "^4",
-    "typescript": "^5.8.3",
-    "typescript-eslint": "^8.65.0",
-    "vitest": "^3.2.4"
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.10"
   }
 }
