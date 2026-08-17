@@ -199,6 +199,8 @@ export type FilteredUsageEvent = {
   serviceAccountName?: string;
   cloudAgentId?: string;
   automationId?: string;
+  /** Join key with stop-hook `conversation_id` / other session sources. */
+  conversationId?: string;
   model?: string;
   kind?: string;
   chargedCents?: number;

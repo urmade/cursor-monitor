@@ -250,6 +250,131 @@ describe('matchPendingHooksToUsageEvents', () => {
     expect(matched[0]?.lookup.costSource).toBe(HOOK_COST_PENDING_SOURCE);
     expect(matched[0]?.lookup.costLookupError).toBeNull();
   });
+
+  it('sums every usage event that shares the hook conversationId', () => {
+    const conv = '8f2e4a1b-6c3d-4e5f-9a7b-2d1c8e6f4a3b';
+    const pending: PendingHookCostRow[] = [
+      {
+        id: 'h1',
+        userEmail: 'a@example.com',
+        model: 'gpt-5',
+        conversationId: conv,
+        receivedAt: new Date(now.getTime() - 10 * 60 * 1000),
+        finishedAt: new Date(now.getTime() - 10 * 60 * 1000),
+      },
+    ];
+    const matched = matchPendingHooksToUsageEvents({
+      pending,
+      events: [
+        {
+          timestamp: String(now.getTime() - 12 * 60 * 1000),
+          userEmail: 'a@example.com',
+          conversationId: conv,
+          model: 'gpt-5',
+          chargedCents: 21.36,
+        },
+        {
+          timestamp: String(now.getTime() - 11 * 60 * 1000),
+          userEmail: 'a@example.com',
+          conversationId: conv,
+          model: 'claude-4.5-sonnet',
+          chargedCents: 37.33,
+        },
+        {
+          timestamp: String(now.getTime() - 9 * 60 * 1000),
+          userEmail: 'a@example.com',
+          conversationId: 'other-conversation',
+          model: 'gpt-5',
+          chargedCents: 999,
+        },
+      ],
+      source: HOOK_COST_TEAM_SOURCE,
+      now,
+      delayMs: 0,
+      maxAgeMs: 6 * 60 * 60 * 1000,
+    });
+    expect(matched[0]?.lookup.chargedCents).toBeCloseTo(58.69);
+    expect(matched[0]?.lookup.costSource).toMatch(/conversationId/);
+  });
+
+  it('does not price a hook from a different conversation’s usage events', () => {
+    const pending: PendingHookCostRow[] = [
+      {
+        id: 'h1',
+        userEmail: 'a@example.com',
+        model: 'gpt-5',
+        conversationId: 'hook-conv',
+        receivedAt: new Date(now.getTime() - 10 * 60 * 1000),
+        finishedAt: null,
+      },
+    ];
+    const matched = matchPendingHooksToUsageEvents({
+      pending,
+      events: [
+        {
+          timestamp: String(now.getTime() - 10 * 60 * 1000),
+          userEmail: 'a@example.com',
+          conversationId: 'other-conv',
+          model: 'gpt-5',
+          chargedCents: 50,
+        },
+      ],
+      source: HOOK_COST_TEAM_SOURCE,
+      now,
+      delayMs: 0,
+      maxAgeMs: 6 * 60 * 60 * 1000,
+      expireUnmatched: false,
+    });
+    expect(matched[0]?.lookup.chargedCents).toBeNull();
+    expect(matched[0]?.lookup.costSource).toBe(HOOK_COST_PENDING_SOURCE);
+  });
+
+  it('splits same-conversation events across consecutive hooks by nearest time', () => {
+    const conv = 'conv-split';
+    const t1 = new Date(now.getTime() - 20 * 60 * 1000);
+    const t2 = new Date(now.getTime() - 5 * 60 * 1000);
+    const pending: PendingHookCostRow[] = [
+      {
+        id: 'h1',
+        userEmail: 'a@example.com',
+        model: 'gpt-5',
+        conversationId: conv,
+        receivedAt: t1,
+        finishedAt: t1,
+      },
+      {
+        id: 'h2',
+        userEmail: 'a@example.com',
+        model: 'gpt-5',
+        conversationId: conv,
+        receivedAt: t2,
+        finishedAt: t2,
+      },
+    ];
+    const matched = matchPendingHooksToUsageEvents({
+      pending,
+      events: [
+        {
+          timestamp: String(t1.getTime() - 30_000),
+          userEmail: 'a@example.com',
+          conversationId: conv,
+          chargedCents: 10,
+        },
+        {
+          timestamp: String(t2.getTime() - 30_000),
+          userEmail: 'a@example.com',
+          conversationId: conv,
+          chargedCents: 40,
+        },
+      ],
+      source: HOOK_COST_TEAM_SOURCE,
+      now,
+      delayMs: 0,
+      maxAgeMs: 6 * 60 * 60 * 1000,
+    });
+    expect(matched[0]?.lookup.chargedCents).toBe(10);
+    expect(matched[1]?.lookup.chargedCents).toBe(40);
+  });
 });
 
 describe('reconcileStopHookUsageCosts', () => {
@@ -298,6 +423,7 @@ describe('reconcileStopHookUsageCosts', () => {
         },
       ],
       fetchEvents: async () => events,
+      loadPricedFingerprints: async () => new Set(),
       apply: async (id, lookup) => {
         applied.push({ id, cents: lookup.chargedCents });
       },
@@ -412,32 +538,33 @@ describe('reconcileStopHookUsageCostsFromFirstHook', () => {
     expect(applied).toEqual([{ id: 'old', cents: 4 }]);
   });
 
-  it('does not reuse usage events already attached to priced hooks', async () => {
+  it('does not price a hook from another conversation’s usage events', async () => {
     const now = new Date('2026-08-16T12:00:00.000Z');
     const first = new Date(now.getTime() - 60 * 60 * 1000);
-    const event: FilteredUsageEvent = {
-      timestamp: String(first.getTime()),
-      userEmail: 'a@example.com',
-      model: 'gpt-5',
-      chargedCents: 9.5,
-    };
     const applied: string[] = [];
     const summary = await reconcileStopHookUsageCostsFromFirstHook({
       now,
       loadEarliest: async () => first,
-      loadUnpriced: async () => [
+      loadHooks: async () => [
         {
           id: 'pending',
           userEmail: 'a@example.com',
           model: 'gpt-5',
+          conversationId: 'hook-conv',
           receivedAt: first,
           finishedAt: null,
         },
       ],
-      loadPricedFingerprints: async () =>
-        new Set([usageEventFingerprint(event)]),
       loadCredentials: async () => [cred],
-      fetchEvents: async () => [event],
+      fetchEvents: async () => [
+        {
+          timestamp: String(first.getTime()),
+          userEmail: 'a@example.com',
+          conversationId: 'other-conv',
+          model: 'gpt-5',
+          chargedCents: 9.5,
+        },
+      ],
       apply: async (id) => {
         applied.push(id);
       },
@@ -445,6 +572,49 @@ describe('reconcileStopHookUsageCostsFromFirstHook', () => {
     expect(summary.upgraded).toBe(0);
     expect(summary.unmatched).toBe(1);
     expect(applied).toEqual([]);
+  });
+
+  it('overwrites a previously guessed cost when conversation events are found', async () => {
+    const now = new Date('2026-08-16T12:00:00.000Z');
+    const first = new Date(now.getTime() - 60 * 60 * 1000);
+    const conv = 'yesterday-conv';
+    const applied: Array<{ id: string; cents: number | null }> = [];
+    const summary = await reconcileStopHookUsageCostsFromFirstHook({
+      now,
+      loadEarliest: async () => first,
+      loadHooks: async () => [
+        {
+          id: 'already-priced-wrong',
+          userEmail: 'a@example.com',
+          model: 'gpt-5',
+          conversationId: conv,
+          receivedAt: first,
+          finishedAt: first,
+        },
+      ],
+      loadCredentials: async () => [cred],
+      fetchEvents: async () => [
+        {
+          timestamp: String(first.getTime() - 30_000),
+          userEmail: 'a@example.com',
+          conversationId: conv,
+          model: 'gpt-5',
+          chargedCents: 21,
+        },
+        {
+          timestamp: String(first.getTime() - 10_000),
+          userEmail: 'a@example.com',
+          conversationId: conv,
+          model: 'claude-4.5-sonnet',
+          chargedCents: 37,
+        },
+      ],
+      apply: async (id, lookup) => {
+        applied.push({ id, cents: lookup.chargedCents });
+      },
+    });
+    expect(summary.upgraded).toBe(1);
+    expect(applied).toEqual([{ id: 'already-priced-wrong', cents: 58 }]);
   });
 
   it('does not write expired errors onto unmatched historical hooks', async () => {

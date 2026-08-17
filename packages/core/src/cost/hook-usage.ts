@@ -41,8 +41,10 @@ export type PendingHookCostRow = {
   id: string;
   userEmail: string | null;
   model: string | null;
+  conversationId?: string | null;
   receivedAt: Date;
   finishedAt: Date | null;
+  startedAt?: Date | null;
 };
 
 export type HookCostReconcileSummary = {
@@ -98,6 +100,23 @@ export function parseEventTimestampMs(raw: string | undefined): number {
   return Number.isFinite(asDate) ? asDate : 0;
 }
 
+export function normalizeConversationId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed.toLowerCase() : null;
+}
+
+export function usageEventConversationId(
+  event: FilteredUsageEvent,
+): string | null {
+  const rec = event as Record<string, unknown>;
+  return (
+    normalizeConversationId(event.conversationId) ??
+    normalizeConversationId(rec.conversation_id) ??
+    normalizeConversationId(rec.conversationID)
+  );
+}
+
 export function usageEventFingerprint(event: FilteredUsageEvent): string {
   return [
     event.timestamp ?? '',
@@ -106,7 +125,24 @@ export function usageEventFingerprint(event: FilteredUsageEvent): string {
     String(event.chargedCents ?? ''),
     event.cloudAgentId ?? '',
     String(event.teamId ?? ''),
+    usageEventConversationId(event) ?? '',
   ].join('|');
+}
+
+function hookAnchorMs(row: PendingHookCostRow): number {
+  return (row.finishedAt ?? row.receivedAt).getTime();
+}
+
+export function sumChargedCents(events: FilteredUsageEvent[]): number | null {
+  let sum = 0;
+  let any = false;
+  for (const event of events) {
+    if (typeof event.chargedCents === 'number' && Number.isFinite(event.chargedCents)) {
+      sum += event.chargedCents;
+      any = true;
+    }
+  }
+  return any ? sum : null;
 }
 
 function modelMatches(
@@ -154,6 +190,8 @@ export function selectUsageEventForStopHook(
       (e) => !excluded.has(usageEventFingerprint(e)),
     );
   }
+  // Heuristic matching must not steal events that join to a conversation.
+  candidates = candidates.filter((e) => usageEventConversationId(e) == null);
   if (candidates.length === 0) return null;
 
   const withModel = candidates.filter((e) =>
@@ -184,6 +222,94 @@ export function selectUsageEventForStopHook(
     }
   }
   return best;
+}
+
+/**
+ * Assign usage events to stop hooks by `conversationId` (the join key on
+ * `/teams/filtered-usage-events`). Multiple events in one conversation are
+ * summed onto the nearest hook in that conversation.
+ */
+export function assignUsageEventsByConversation(
+  hooks: PendingHookCostRow[],
+  events: FilteredUsageEvent[],
+  used: Set<string>,
+): Map<string, FilteredUsageEvent[]> {
+  const assigned = new Map<string, FilteredUsageEvent[]>();
+  const hooksByConv = new Map<string, PendingHookCostRow[]>();
+  for (const hook of hooks) {
+    const id = normalizeConversationId(hook.conversationId);
+    if (!id) continue;
+    const list = hooksByConv.get(id) ?? [];
+    list.push(hook);
+    hooksByConv.set(id, list);
+  }
+  if (hooksByConv.size === 0) return assigned;
+
+  const eventsByConv = new Map<string, FilteredUsageEvent[]>();
+  for (const event of events) {
+    if (used.has(usageEventFingerprint(event))) continue;
+    const id = usageEventConversationId(event);
+    if (!id || !hooksByConv.has(id)) continue;
+    const list = eventsByConv.get(id) ?? [];
+    list.push(event);
+    eventsByConv.set(id, list);
+  }
+
+  for (const [convId, convHooks] of hooksByConv) {
+    const ordered = [...convHooks].sort((a, b) => hookAnchorMs(a) - hookAnchorMs(b));
+    const buckets = new Map<string, FilteredUsageEvent[]>();
+    for (const hook of ordered) buckets.set(hook.id, []);
+
+    const convEvents = eventsByConv.get(convId) ?? [];
+    for (const event of convEvents) {
+      const te = parseEventTimestampMs(event.timestamp);
+      let best = ordered[0]!;
+      let bestDist = Math.abs(te - hookAnchorMs(best));
+      for (let i = 1; i < ordered.length; i += 1) {
+        const hook = ordered[i]!;
+        const dist = Math.abs(te - hookAnchorMs(hook));
+        if (dist < bestDist) {
+          best = hook;
+          bestDist = dist;
+        }
+      }
+      buckets.get(best.id)!.push(event);
+      used.add(usageEventFingerprint(event));
+    }
+
+    for (const [hookId, matched] of buckets) {
+      assigned.set(hookId, matched);
+    }
+  }
+  return assigned;
+}
+
+export function lookupFromMatchedEvents(
+  matched: FilteredUsageEvent[],
+  opts: { source: string; conversationId?: string | null },
+): HookUsageCostLookup {
+  const charged = sumChargedCents(matched);
+  const conversationId =
+    normalizeConversationId(opts.conversationId) ??
+    (matched[0] ? usageEventConversationId(matched[0]) : null);
+  const usageEvent =
+    matched.length === 1
+      ? { ...matched[0] }
+      : {
+          conversationId,
+          chargedCents: charged,
+          eventCount: matched.length,
+          events: matched,
+        };
+  return {
+    chargedCents: charged,
+    costSource: conversationId
+      ? `${opts.source}:conversationId`
+      : opts.source,
+    usageEvent,
+    costLookupError:
+      charged == null ? 'Matched usage event lacked chargedCents' : null,
+  };
 }
 
 export async function fetchTeamUsageEvents(opts: {
@@ -236,8 +362,35 @@ export function lookupFromUsageEvents(
     excludeFingerprints?: ReadonlySet<string>;
     anchorMs?: number;
     maxDistanceMs?: number;
+    conversationId?: string | null;
   },
 ): HookUsageCostLookup {
+  const conversationId = normalizeConversationId(opts.conversationId);
+  if (conversationId) {
+    const used = new Set(opts.excludeFingerprints ?? []);
+    const matched = events.filter((event) => {
+      if (used.has(usageEventFingerprint(event))) return false;
+      if (usageEventConversationId(event) !== conversationId) return false;
+      if (opts.anchorMs != null && opts.maxDistanceMs != null) {
+        const ts = parseEventTimestampMs(event.timestamp);
+        if (Math.abs(ts - opts.anchorMs) > opts.maxDistanceMs) return false;
+      }
+      return true;
+    });
+    if (matched.length === 0) {
+      return {
+        chargedCents: null,
+        costSource: opts.source,
+        usageEvent: null,
+        costLookupError: `No usage events for conversation ${conversationId}`,
+      };
+    }
+    return lookupFromMatchedEvents(matched, {
+      source: opts.source,
+      conversationId,
+    });
+  }
+
   const matched = selectUsageEventForStopHook(events, opts);
   if (!matched) {
     const window = `${Math.round((opts.lookbackMs ?? DEFAULT_LOOKBACK_MS) / 60000)}m`;
@@ -426,6 +579,29 @@ function asDate(value: Date | string | null | undefined): Date | null {
   return Number.isFinite(parsed) ? new Date(parsed) : null;
 }
 
+function mapHookCostRow(
+  row: {
+    id: string;
+    userEmail: string | null;
+    model: string | null;
+    conversationId?: string | null;
+    receivedAt: Date | string;
+    finishedAt: Date | string | null;
+    startedAt?: Date | string | null;
+  },
+  now: Date,
+): PendingHookCostRow {
+  return {
+    id: row.id,
+    userEmail: row.userEmail,
+    model: row.model,
+    conversationId: normalizeConversationId(row.conversationId),
+    receivedAt: asDate(row.receivedAt) ?? now,
+    finishedAt: asDate(row.finishedAt),
+    startedAt: asDate(row.startedAt ?? null),
+  };
+}
+
 export async function loadPendingHookCostRows(opts: {
   now: Date;
   delayMs: number;
@@ -442,8 +618,10 @@ export async function loadPendingHookCostRows(opts: {
       id: cursorStopHookEvents.id,
       userEmail: cursorStopHookEvents.userEmail,
       model: cursorStopHookEvents.model,
+      conversationId: cursorStopHookEvents.conversationId,
       receivedAt: cursorStopHookEvents.receivedAt,
       finishedAt: cursorStopHookEvents.finishedAt,
+      startedAt: cursorStopHookEvents.startedAt,
     })
     .from(cursorStopHookEvents)
     .where(
@@ -460,13 +638,7 @@ export async function loadPendingHookCostRows(opts: {
     .orderBy(cursorStopHookEvents.receivedAt)
     .limit(opts.limit ?? 200);
 
-  return rows.map((row) => ({
-    id: row.id,
-    userEmail: row.userEmail,
-    model: row.model,
-    receivedAt: asDate(row.receivedAt) ?? now,
-    finishedAt: asDate(row.finishedAt),
-  }));
+  return rows.map((row) => mapHookCostRow(row, now));
 }
 
 export async function loadEarliestStopHookReceivedAt(): Promise<Date | null> {
@@ -494,21 +666,45 @@ export async function loadUnpricedHookCostRows(opts?: {
       id: cursorStopHookEvents.id,
       userEmail: cursorStopHookEvents.userEmail,
       model: cursorStopHookEvents.model,
+      conversationId: cursorStopHookEvents.conversationId,
       receivedAt: cursorStopHookEvents.receivedAt,
       finishedAt: cursorStopHookEvents.finishedAt,
+      startedAt: cursorStopHookEvents.startedAt,
     })
     .from(cursorStopHookEvents)
     .where(and(...filters))
     .orderBy(asc(cursorStopHookEvents.receivedAt))
     .limit(limit);
 
-  return rows.map((row) => ({
-    id: row.id,
-    userEmail: row.userEmail,
-    model: row.model,
-    receivedAt: asDate(row.receivedAt) ?? now,
-    finishedAt: asDate(row.finishedAt),
-  }));
+  return rows.map((row) => mapHookCostRow(row, now));
+}
+
+/** Every stop hook from `fromReceivedAt`, including rows that already have cost. */
+export async function loadAllHookCostRowsFrom(opts?: {
+  fromReceivedAt?: Date;
+  limit?: number;
+}): Promise<PendingHookCostRow[]> {
+  const now = new Date();
+  const limit = opts?.limit ?? HOOK_COST_BACKFILL_LIMIT;
+  const filters = opts?.fromReceivedAt
+    ? [gte(cursorStopHookEvents.receivedAt, opts.fromReceivedAt)]
+    : [];
+  const rows = await getDb()
+    .select({
+      id: cursorStopHookEvents.id,
+      userEmail: cursorStopHookEvents.userEmail,
+      model: cursorStopHookEvents.model,
+      conversationId: cursorStopHookEvents.conversationId,
+      receivedAt: cursorStopHookEvents.receivedAt,
+      finishedAt: cursorStopHookEvents.finishedAt,
+      startedAt: cursorStopHookEvents.startedAt,
+    })
+    .from(cursorStopHookEvents)
+    .where(filters.length > 0 ? and(...filters) : undefined)
+    .orderBy(asc(cursorStopHookEvents.receivedAt))
+    .limit(limit);
+
+  return rows.map((row) => mapHookCostRow(row, now));
 }
 
 /** Fingerprints of usage events already attached to priced hooks in the window. */
@@ -530,16 +726,37 @@ export async function loadPricedUsageEventFingerprints(opts: {
   const used = new Set<string>();
   for (const row of rows) {
     if (!row.usageEvent || typeof row.usageEvent !== 'object') continue;
-    used.add(usageEventFingerprint(row.usageEvent as FilteredUsageEvent));
+    for (const fp of fingerprintsFromStoredUsageEvent(row.usageEvent)) {
+      used.add(fp);
+    }
   }
   return used;
+}
+
+export function fingerprintsFromStoredUsageEvent(
+  stored: Record<string, unknown>,
+): string[] {
+  const nested = stored.events;
+  if (Array.isArray(nested)) {
+    return nested.flatMap((item) =>
+      item && typeof item === 'object'
+        ? [usageEventFingerprint(item as FilteredUsageEvent)]
+        : [],
+    );
+  }
+  return [usageEventFingerprint(stored as FilteredUsageEvent)];
 }
 
 export async function applyHookCostLookup(
   id: string,
   result: HookUsageCostLookup,
   lookedUpAt: Date,
+  opts?: { overwrite?: boolean },
 ): Promise<void> {
+  const filters = [eq(cursorStopHookEvents.id, id)];
+  if (!opts?.overwrite) {
+    filters.push(isNull(cursorStopHookEvents.chargedCents));
+  }
   await getDb()
     .update(cursorStopHookEvents)
     .set({
@@ -549,12 +766,7 @@ export async function applyHookCostLookup(
       usageEvent: result.usageEvent,
       costLookedUpAt: lookedUpAt,
     })
-    .where(
-      and(
-        eq(cursorStopHookEvents.id, id),
-        isNull(cursorStopHookEvents.chargedCents),
-      ),
-    );
+    .where(and(...filters));
 }
 
 export async function fetchUsageEventsForWindow(opts: {
@@ -624,24 +836,53 @@ export function matchPendingHooksToUsageEvents(opts: {
   const used = new Set<string>(opts.excludeFingerprints ?? []);
   const lookbackMs = opts.lookbackMs ?? DEFAULT_LOOKBACK_MS;
   const expireUnmatched = opts.expireUnmatched !== false;
+  const byConversation = assignUsageEventsByConversation(
+    opts.pending,
+    opts.events,
+    used,
+  );
   return opts.pending.map((row) => {
     const ageMs = opts.now.getTime() - row.receivedAt.getTime();
-    const lookup = lookupFromUsageEvents(opts.events, {
-      userEmail: row.userEmail,
-      model: row.model,
-      source: opts.source,
-      lookbackMs,
-      excludeFingerprints: used,
-      ...(opts.anchorToHook
-        ? {
-            anchorMs: (row.finishedAt ?? row.receivedAt).getTime(),
-            maxDistanceMs: opts.maxDistanceMs,
-          }
-        : {}),
-    });
-    if (lookup.usageEvent) {
-      const matched = lookup.usageEvent as FilteredUsageEvent;
-      used.add(usageEventFingerprint(matched));
+    const conversationEvents = normalizeConversationId(row.conversationId)
+      ? (byConversation.get(row.id) ?? [])
+      : null;
+    const lookup =
+      conversationEvents && conversationEvents.length > 0
+        ? lookupFromMatchedEvents(conversationEvents, {
+            source: opts.source,
+            conversationId: row.conversationId,
+          })
+        : conversationEvents
+          ? {
+              chargedCents: null as number | null,
+              costSource: opts.source,
+              usageEvent: null as Record<string, unknown> | null,
+              costLookupError: `No usage events for conversation ${row.conversationId}`,
+            }
+          : lookupFromUsageEvents(opts.events, {
+              userEmail: row.userEmail,
+              model: row.model,
+              source: opts.source,
+              lookbackMs,
+              excludeFingerprints: used,
+              ...(opts.anchorToHook
+                ? {
+                    anchorMs: hookAnchorMs(row),
+                    maxDistanceMs: opts.maxDistanceMs,
+                  }
+                : {}),
+            });
+    if (lookup.usageEvent && !conversationEvents) {
+      const stored = lookup.usageEvent as FilteredUsageEvent & {
+        events?: FilteredUsageEvent[];
+      };
+      if (Array.isArray(stored.events)) {
+        for (const event of stored.events) {
+          used.add(usageEventFingerprint(event));
+        }
+      } else {
+        used.add(usageEventFingerprint(stored));
+      }
     }
     const expired =
       expireUnmatched && lookup.chargedCents == null && ageMs >= opts.maxAgeMs;
@@ -680,6 +921,7 @@ export async function reconcileStopHookUsageCosts(opts?: {
   lookbackPaddingMs?: number;
   loadPending?: typeof loadPendingHookCostRows;
   loadCredentials?: () => Promise<TeamCostCredential[]>;
+  loadPricedFingerprints?: typeof loadPricedUsageEventFingerprints;
   fetchEvents?: FetchTeamUsageEvents;
   apply?: typeof applyHookCostLookup;
 }): Promise<HookCostReconcileSummary> {
@@ -688,6 +930,8 @@ export async function reconcileStopHookUsageCosts(opts?: {
   const maxAgeMs = opts?.maxAgeMs ?? HOOK_COST_MAX_AGE_MS;
   const cadenceMs = opts?.cadenceMs ?? HOOK_COST_CADENCE_MS;
   const loadPending = opts?.loadPending ?? loadPendingHookCostRows;
+  const loadPricedFingerprints =
+    opts?.loadPricedFingerprints ?? loadPricedUsageEventFingerprints;
   const apply = opts?.apply ?? applyHookCostLookup;
 
   const pending = await loadPending({
@@ -778,6 +1022,9 @@ export async function reconcileStopHookUsageCosts(opts?: {
     now,
     delayMs,
     maxAgeMs,
+    excludeFingerprints: await loadPricedFingerprints({
+      fromReceivedAt: new Date(startDate),
+    }),
   });
 
   let upgraded = 0;
@@ -824,8 +1071,8 @@ function emptyBackfillSummary(
 
 /**
  * Manual historical backfill: page every Team usage event from the first
- * recorded stop hook through now, then fill unpriced hooks. Already-priced
- * rows are left alone. Unmatched rows stay pending (not expired).
+ * recorded stop hook through now, join on conversationId (summing every
+ * matching usage event), and overwrite previously guessed costs.
  */
 export async function reconcileStopHookUsageCostsFromFirstHook(opts?: {
   now?: Date;
@@ -833,6 +1080,8 @@ export async function reconcileStopHookUsageCostsFromFirstHook(opts?: {
   maxDistanceMs?: number;
   unpricedLimit?: number;
   loadEarliest?: typeof loadEarliestStopHookReceivedAt;
+  loadHooks?: typeof loadAllHookCostRowsFrom;
+  /** @deprecated Use loadHooks — kept so existing tests keep compiling. */
   loadUnpriced?: typeof loadUnpricedHookCostRows;
   loadPricedFingerprints?: typeof loadPricedUsageEventFingerprints;
   loadCredentials?: () => Promise<TeamCostCredential[]>;
@@ -844,10 +1093,12 @@ export async function reconcileStopHookUsageCostsFromFirstHook(opts?: {
   const maxDistanceMs = opts?.maxDistanceMs ?? HOOK_COST_MAX_AGE_MS;
   const unpricedLimit = opts?.unpricedLimit ?? HOOK_COST_BACKFILL_LIMIT;
   const loadEarliest = opts?.loadEarliest ?? loadEarliestStopHookReceivedAt;
-  const loadUnpriced = opts?.loadUnpriced ?? loadUnpricedHookCostRows;
-  const loadPricedFingerprints =
-    opts?.loadPricedFingerprints ?? loadPricedUsageEventFingerprints;
-  const apply = opts?.apply ?? applyHookCostLookup;
+  const loadHooks =
+    opts?.loadHooks ?? opts?.loadUnpriced ?? loadAllHookCostRowsFrom;
+  const apply =
+    opts?.apply ??
+    ((id, lookup, at) =>
+      applyHookCostLookup(id, lookup, at, { overwrite: true }));
 
   const earliest = await loadEarliest();
   const credentials = opts?.loadCredentials
@@ -861,7 +1112,7 @@ export async function reconcileStopHookUsageCostsFromFirstHook(opts?: {
     });
   }
 
-  const pending = await loadUnpriced({
+  const pending = await loadHooks({
     fromReceivedAt: earliest,
     limit: unpricedLimit,
   });
@@ -925,10 +1176,6 @@ export async function reconcileStopHookUsageCostsFromFirstHook(opts?: {
     });
   }
 
-  const pricedFingerprints = await loadPricedFingerprints({
-    fromReceivedAt: earliest,
-  });
-
   const matched = matchPendingHooksToUsageEvents({
     pending,
     events: fetched.events,
@@ -936,7 +1183,6 @@ export async function reconcileStopHookUsageCostsFromFirstHook(opts?: {
     now,
     delayMs: 0,
     maxAgeMs: HOOK_COST_MAX_AGE_MS,
-    excludeFingerprints: pricedFingerprints,
     expireUnmatched: false,
     anchorToHook: true,
     maxDistanceMs,

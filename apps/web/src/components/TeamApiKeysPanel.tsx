@@ -168,7 +168,9 @@ export function TeamApiKeysPanel({
             Keys are tested against POST /teams/filtered-usage-events before
             they are saved. Cost is filled in about five minutes after each
             stop hook. Match historical cost pages every usage event from the
-            first recorded hook through now.
+            first recorded hook through now and joins on conversation id
+            (summing every matching usage event, including rows that were
+            previously priced by time/model guess).
           </p>
         </div>
       </PanelHeader>
