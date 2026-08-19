@@ -52,7 +52,7 @@ export default async function SettingsPage() {
       <section className="grid">
         <article className="panel">
           <div className="row-between">
-            <h2>PostgreSQL database</h2>
+            <h2>{configuration.databaseAdapter} database</h2>
             {configured(!databaseError)}
           </div>
           <p className="small muted">
@@ -161,9 +161,10 @@ export default async function SettingsPage() {
       <section className="panel">
         <h2>Change configuration safely</h2>
         <p className="small muted">
-          Configure a server-only <span className="mono">DATABASE_URL</span> or
-          supported provider alias. The reference internalsphere deployment
-          supplies its alias through the managed integration. See{' '}
+          Select one <span className="mono">DATABASE_ADAPTER</span> and configure
+          its server-only <span className="mono">DATABASE_URL</span>. The
+          reference internalsphere deployment supplies the default adapter&apos;s
+          alias through the managed integration. See{' '}
           <span className="mono">docs/operations.md</span> for exact key names,
           failure modes, and verification commands. Never commit plaintext
           credentials.

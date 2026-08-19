@@ -19,8 +19,7 @@
   },
   "dependencies": {
     "@cursor-monitor/db": "workspace:*",
-    "@cursor-monitor/team-api": "workspace:*",
-    "drizzle-orm": "^0.45.2"
+    "@cursor-monitor/team-api": "workspace:*"
   },
   "devDependencies": {
     "@cursor-monitor/config": "workspace:*",

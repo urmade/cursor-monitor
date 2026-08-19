@@ -68,7 +68,7 @@ export default async function DashboardPage() {
             {hooksTruncated ? '5,000 hook events' : ''}
             {hooksTruncated && usageTruncated ? ' and ' : ''}
             {usageTruncated ? '10,000 usage events' : ''}. Historical rows remain
-            in PostgreSQL.
+            in the configured database.
           </div>
         ) : null}
 

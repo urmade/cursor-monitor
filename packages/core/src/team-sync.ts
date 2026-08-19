@@ -1,10 +1,8 @@
 import {
-  getDb,
+  getDatabase,
   newId,
-  syncLocks,
-  syncRuns,
-  teamUsageEvents,
-  type Db,
+  type DatabaseAdapter,
+  type NewUsageEvent,
 } from '@cursor-monitor/db';
 import {
   credentialsFromEnv,
@@ -14,7 +12,6 @@ import {
   type ListUsageResult,
   type UsageEvent,
 } from '@cursor-monitor/team-api';
-import { and, desc, eq, lt } from 'drizzle-orm';
 
 const SOURCE = 'cursor-team-usage';
 const INITIAL_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -47,32 +44,6 @@ function eventConversationId(event: UsageEvent): string | null {
   const value =
     event.conversationId ?? record['conversation_id'] ?? record['conversationID'];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-async function acquireLock(
-  db: Db,
-  now: Date,
-  ownerId: string,
-): Promise<boolean> {
-  await db
-    .delete(syncLocks)
-    .where(and(eq(syncLocks.source, SOURCE), lt(syncLocks.expiresAt, now)));
-  const inserted = await db
-    .insert(syncLocks)
-    .values({
-      source: SOURCE,
-      ownerId,
-      expiresAt: new Date(now.getTime() + LOCK_MS),
-    })
-    .onConflictDoNothing()
-    .returning({ source: syncLocks.source });
-  return inserted.length === 1;
-}
-
-async function releaseLock(db: Db, ownerId: string): Promise<void> {
-  await db
-    .delete(syncLocks)
-    .where(and(eq(syncLocks.source, SOURCE), eq(syncLocks.ownerId, ownerId)));
 }
 
 export async function listCompleteWindow(
@@ -117,28 +88,22 @@ export async function listCompleteWindow(
 }
 
 export async function syncTeamUsage(options?: {
-  db?: Db;
+  database?: DatabaseAdapter;
   now?: Date;
   env?: NodeJS.ProcessEnv;
-  client?: TeamApiClient;
+  client?: Pick<TeamApiClient, 'listUsageEvents'>;
 }): Promise<TeamSyncResult> {
-  const db = options?.db ?? getDb();
+  const database = options?.database ?? getDatabase();
   const now = options?.now ?? new Date();
   const credentials = credentialsFromEnv(options?.env);
-  const [previous] = await db
-    .select({ windowEndedAt: syncRuns.windowEndedAt })
-    .from(syncRuns)
-    .where(
-      and(eq(syncRuns.source, SOURCE), eq(syncRuns.status, 'succeeded')),
-    )
-    .orderBy(desc(syncRuns.startedAt))
-    .limit(1);
-  const windowStartedAt = previous
-    ? new Date(previous.windowEndedAt.getTime() - OVERLAP_MS)
+  const previousWindowEnd =
+    await database.sync.latestSuccessfulWindowEnd(SOURCE);
+  const windowStartedAt = previousWindowEnd
+    ? new Date(previousWindowEnd.getTime() - OVERLAP_MS)
     : new Date(now.getTime() - INITIAL_LOOKBACK_MS);
 
   if (!credentials) {
-    await db.insert(syncRuns).values({
+    await database.sync.insertRun({
       id: newId(),
       source: SOURCE,
       status: 'skipped',
@@ -159,7 +124,14 @@ export async function syncTeamUsage(options?: {
   }
 
   const lockOwnerId = newId();
-  if (!(await acquireLock(db, now, lockOwnerId))) {
+  if (
+    !(await database.sync.tryAcquireLease({
+      source: SOURCE,
+      ownerId: lockOwnerId,
+      now,
+      expiresAt: new Date(now.getTime() + LOCK_MS),
+    }))
+  ) {
     return {
       status: 'skipped',
       fetched: 0,
@@ -171,7 +143,7 @@ export async function syncTeamUsage(options?: {
   }
 
   const runId = newId();
-  await db.insert(syncRuns).values({
+  await database.sync.insertRun({
     id: runId,
     source: SOURCE,
     status: 'running',
@@ -197,50 +169,41 @@ export async function syncTeamUsage(options?: {
     for (let offset = 0; offset < listed.events.length; offset += CHUNK_SIZE) {
       const chunk = listed.events.slice(offset, offset + CHUNK_SIZE);
       if (chunk.length === 0) continue;
-      const inserted = await db
-        .insert(teamUsageEvents)
-        .values(
-          chunk.map((event) => ({
-            fingerprint: usageEventFingerprint(event),
-            occurredAt: parseTimestamp(event.timestamp),
-            conversationId: eventConversationId(event),
-            conversationKey: usageConversationKey(event),
-            userEmail: event.userEmail?.trim() || null,
-            model: event.model?.trim() || null,
-            kind: event.kind?.trim() || null,
-            teamId:
-              typeof event.teamId === 'number' && Number.isFinite(event.teamId)
-                ? Math.trunc(event.teamId)
-                : null,
-            chargedCents:
-              typeof event.chargedCents === 'number' &&
-              Number.isFinite(event.chargedCents)
-                ? event.chargedCents
-                : null,
-            payload: { ...event },
-            fetchedAt: now,
-          })),
-        )
-        .onConflictDoNothing()
-        .returning({ fingerprint: teamUsageEvents.fingerprint });
-      insertedCount += inserted.length;
+      const events: NewUsageEvent[] = chunk.map((event) => ({
+        fingerprint: usageEventFingerprint(event),
+        occurredAt: parseTimestamp(event.timestamp),
+        conversationId: eventConversationId(event),
+        conversationKey: usageConversationKey(event),
+        userEmail: event.userEmail?.trim() || null,
+        model: event.model?.trim() || null,
+        kind: event.kind?.trim() || null,
+        teamId:
+          typeof event.teamId === 'number' && Number.isFinite(event.teamId)
+            ? Math.trunc(event.teamId)
+            : null,
+        chargedCents:
+          typeof event.chargedCents === 'number' &&
+          Number.isFinite(event.chargedCents)
+            ? event.chargedCents
+            : null,
+        payload: { ...event },
+        fetchedAt: now,
+      }));
+      insertedCount += await database.usage.insertDeduplicated(events);
     }
 
     if (listed.truncated) {
       const message =
         'Cursor Team API window remained truncated after recursive splitting; successful watermark was not advanced.';
-      await db
-        .update(syncRuns)
-        .set({
-          status: 'failed',
-          fetchedCount: listed.events.length,
-          insertedCount,
-          pages: listed.pages,
-          truncated: true,
-          error: message,
-          completedAt: new Date(),
-        })
-        .where(eq(syncRuns.id, runId));
+      await database.sync.updateRun(runId, {
+        status: 'failed',
+        fetchedCount: listed.events.length,
+        insertedCount,
+        pages: listed.pages,
+        truncated: true,
+        error: message,
+        completedAt: new Date(),
+      });
       return {
         status: 'failed',
         fetched: listed.events.length,
@@ -251,17 +214,14 @@ export async function syncTeamUsage(options?: {
       };
     }
 
-    await db
-      .update(syncRuns)
-      .set({
-        status: 'succeeded',
-        fetchedCount: listed.events.length,
-        insertedCount,
-        pages: listed.pages,
-        truncated: listed.truncated,
-        completedAt: new Date(),
-      })
-      .where(eq(syncRuns.id, runId));
+    await database.sync.updateRun(runId, {
+      status: 'succeeded',
+      fetchedCount: listed.events.length,
+      insertedCount,
+      pages: listed.pages,
+      truncated: listed.truncated,
+      completedAt: new Date(),
+    });
     return {
       status: 'succeeded',
       fetched: listed.events.length,
@@ -271,14 +231,11 @@ export async function syncTeamUsage(options?: {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await db
-      .update(syncRuns)
-      .set({
-        status: 'failed',
-        error: message.slice(0, 1000),
-        completedAt: new Date(),
-      })
-      .where(eq(syncRuns.id, runId));
+    await database.sync.updateRun(runId, {
+      status: 'failed',
+      error: message.slice(0, 1000),
+      completedAt: new Date(),
+    });
     return {
       status: 'failed',
       fetched: 0,
@@ -288,6 +245,6 @@ export async function syncTeamUsage(options?: {
       message,
     };
   } finally {
-    await releaseLock(db, lockOwnerId);
+    await database.sync.releaseLease(SOURCE, lockOwnerId);
   }
 }

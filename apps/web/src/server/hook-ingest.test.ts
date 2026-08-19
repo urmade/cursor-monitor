@@ -7,6 +7,7 @@ const previous = {
   bypass: process.env.VERCEL_PROTECTION_BYPASS,
   publicUrl: process.env.CURSOR_MONITOR_PUBLIC_URL,
   deployment: process.env.DEPLOYMENT_URL,
+  databaseAdapter: process.env.DATABASE_ADAPTER,
   database: process.env.DATABASE_URL,
 };
 
@@ -20,6 +21,7 @@ afterEach(() => {
   restore('VERCEL_PROTECTION_BYPASS', previous.bypass);
   restore('CURSOR_MONITOR_PUBLIC_URL', previous.publicUrl);
   restore('DEPLOYMENT_URL', previous.deployment);
+  restore('DATABASE_ADAPTER', previous.databaseAdapter);
   restore('DATABASE_URL', previous.database);
 });
 
@@ -97,6 +99,7 @@ describe('platform installers', () => {
 
   it('regenerates the current app endpoint without exposing database details', () => {
     process.env.CURSOR_MONITOR_HOOK_TOKEN = 'monitor-test-token';
+    process.env.DATABASE_ADAPTER = 'private-backend';
     process.env.DATABASE_URL =
       'postgres://database-user:database-password@database.internal/monitor';
     process.env.CURSOR_MONITOR_PUBLIC_URL = 'https://monitor-one.example';
@@ -110,5 +113,6 @@ describe('platform installers', () => {
     expect(second).not.toContain('monitor-one.example');
     expect(second).not.toContain('database.internal');
     expect(second).not.toContain('database-password');
+    expect(second).not.toContain('private-backend');
   });
 });

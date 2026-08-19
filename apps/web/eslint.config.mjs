@@ -25,6 +25,21 @@ export default [
         },
       ],
       '@typescript-eslint/no-explicit-any': 'error',
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['drizzle-orm', 'drizzle-orm/*'],
+              message: 'Use the backend-neutral @cursor-monitor/db contract.',
+            },
+            {
+              group: ['@cursor-monitor/db/src/*'],
+              message: 'Database adapter internals are private to packages/db.',
+            },
+          ],
+        },
+      ],
     },
   },
 ];

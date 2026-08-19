@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-export * from './client';
-export * from './config';
-export * from './schema';
+export type * from './adapter';
+export {
+  closeDatabase,
+  getDatabase,
+  getDatabaseAdapterInfo,
+} from './runtime';
 
 export function newId(): string {
   return randomUUID();

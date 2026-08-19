@@ -9,7 +9,7 @@ export type Db = PostgresJsDatabase<typeof schema>;
 let sqlClient: Sql | null = null;
 let database: Db | null = null;
 
-/** Generic PostgreSQL runtime connection, safe for transaction-mode poolers. */
+/** Internal connection for the default PostgreSQL adapter. */
 export function getDb(): Db {
   if (database) return database;
   const url = resolveDatabaseUrl();
@@ -25,15 +25,8 @@ export function getDb(): Db {
 
 export async function pingDb(): Promise<boolean> {
   try {
-    const url = resolveDatabaseUrl();
-    const ssl = sslOptionForUrl(url);
-    const client = sqlClient ?? postgres(url, {
-      prepare: false,
-      max: 1,
-      ...(ssl === undefined ? {} : { ssl }),
-    });
-    await client`select 1`;
-    if (!sqlClient) await client.end({ timeout: 1 });
+    getDb();
+    await sqlClient!`select 1`;
     return true;
   } catch {
     return false;

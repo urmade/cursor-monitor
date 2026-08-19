@@ -9,15 +9,9 @@ import {
   type RepositoryPreference,
 } from '@cursor-monitor/core';
 import {
-  branchPreferences,
-  conversationPreferences,
-  getDb,
-  hookEvents,
-  repositoryPreferences,
-  syncRuns,
-  teamUsageEvents,
+  getDatabase,
+  getDatabaseAdapterInfo,
 } from '@cursor-monitor/db';
-import { count, desc, eq, inArray, sql } from 'drizzle-orm';
 
 const HOOK_LIMIT = 5000;
 const USAGE_LIMIT = 10_000;
@@ -36,7 +30,7 @@ export type LoadedMonitorData = {
 };
 
 export async function loadMonitorData(): Promise<LoadedMonitorData> {
-  const db = getDb();
+  const database = getDatabase();
   const [
     hooks,
     usage,
@@ -45,50 +39,17 @@ export async function loadMonitorData(): Promise<LoadedMonitorData> {
     hookTotal,
     usageTotal,
   ] = await Promise.all([
-    db
-      .select({
-        id: hookEvents.id,
-        eventName: hookEvents.eventName,
-        conversationId: hookEvents.conversationId,
-        conversationKey: hookEvents.conversationKey,
-        generationId: hookEvents.generationId,
-        repositoryKey: hookEvents.repositoryKey,
-        repositoryLabel: hookEvents.repositoryLabel,
-        gitBranch: hookEvents.gitBranch,
-        workspaceRoot: hookEvents.workspaceRoot,
-        userEmail: hookEvents.userEmail,
-        model: hookEvents.model,
-        status: hookEvents.status,
-        durationMs: hookEvents.durationMs,
-        payload: sql<Record<string, unknown>>`'{}'::jsonb`,
-        occurredAt: hookEvents.occurredAt,
-        receivedAt: hookEvents.receivedAt,
-      })
-      .from(hookEvents)
-      .orderBy(desc(hookEvents.occurredAt))
-      .limit(HOOK_LIMIT),
-    db
-      .select({
-        fingerprint: teamUsageEvents.fingerprint,
-        conversationId: teamUsageEvents.conversationId,
-        conversationKey: teamUsageEvents.conversationKey,
-        userEmail: teamUsageEvents.userEmail,
-        model: teamUsageEvents.model,
-        kind: teamUsageEvents.kind,
-        chargedCents: teamUsageEvents.chargedCents,
-        occurredAt: teamUsageEvents.occurredAt,
-      })
-      .from(teamUsageEvents)
-      .orderBy(desc(teamUsageEvents.occurredAt))
-      .limit(USAGE_LIMIT),
-    db.select().from(repositoryPreferences),
-    db.select().from(conversationPreferences),
-    db.select({ value: count() }).from(hookEvents),
-    db.select({ value: count() }).from(teamUsageEvents),
+    database.hooks.listRecent(HOOK_LIMIT),
+    database.usage.listRecent(USAGE_LIMIT),
+    database.repositoryPreferences.list(),
+    database.conversationPreferences.list(),
+    database.hooks.count(),
+    database.usage.count(),
   ]);
 
   const hookRecords: MonitorHookRecord[] = hooks.map((row) => ({
     ...row,
+    payload: {},
     occurredAt: iso(row.occurredAt),
     receivedAt: iso(row.receivedAt),
   }));
@@ -118,8 +79,8 @@ export async function loadMonitorData(): Promise<LoadedMonitorData> {
         resolveMergeRoot(preference.repositoryKey, preferencesByRepo),
       ),
   );
-  const hookCount = Number(hookTotal[0]?.value ?? 0);
-  const usageCount = Number(usageTotal[0]?.value ?? 0);
+  const hookCount = hookTotal;
+  const usageCount = usageTotal;
 
   return {
     tree: buildMonitorTree({
@@ -149,10 +110,7 @@ export async function loadRepositoryProject(repository: string) {
   const hydratedIds = eventIds.slice(0, 1000);
   const rawPayloads =
     hydratedIds.length > 0
-      ? await getDb()
-          .select({ id: hookEvents.id, payload: hookEvents.payload })
-          .from(hookEvents)
-          .where(inArray(hookEvents.id, hydratedIds))
+      ? await getDatabase().hooks.listPayloads(hydratedIds)
       : [];
   const payloadById = new Map(rawPayloads.map((row) => [row.id, row.payload]));
   const hydratedProject = project
@@ -188,7 +146,7 @@ export async function loadRepositoryProject(repository: string) {
 export async function loadRepositoryPreferences(): Promise<
   RepositoryPreference[]
 > {
-  const rows = await getDb().select().from(repositoryPreferences);
+  const rows = await getDatabase().repositoryPreferences.list();
   return rows.map((row) => ({
     repositoryKey: row.repositoryKey,
     displayName: row.displayName,
@@ -200,19 +158,12 @@ export async function loadBranchNames(
   repository: string,
 ): Promise<Map<string, string>> {
   const key = canonicalRepository(repository);
-  const rows = await getDb()
-    .select()
-    .from(branchPreferences)
-    .where(eq(branchPreferences.repositoryKey, key));
+  const rows = await getDatabase().branchPreferences.list(key);
   return new Map(rows.map((row) => [row.branchKey, row.displayName]));
 }
 
 export async function loadSyncStatus() {
-  const rows = await getDb()
-    .select()
-    .from(syncRuns)
-    .orderBy(desc(syncRuns.startedAt))
-    .limit(10);
+  const rows = await getDatabase().sync.listRecentRuns(10);
   return rows.map((row) => ({
     ...row,
     windowStartedAt: iso(row.windowStartedAt),
@@ -237,5 +188,6 @@ export function loadConfigurationStatus() {
       process.env.CURSOR_MONITOR_HOOK_TOKEN?.trim(),
     ),
     cronSecret: Boolean(process.env.CRON_SECRET?.trim()),
+    databaseAdapter: getDatabaseAdapterInfo().displayName,
   };
 }
