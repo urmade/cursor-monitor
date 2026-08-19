@@ -155,6 +155,11 @@ export async function loadRepositoryPreferences(): Promise<
   }));
 }
 
+export async function loadConversationNames(): Promise<Map<string, string>> {
+  const rows = await getDatabase().conversationPreferences.list();
+  return new Map(rows.map((row) => [row.conversationKey, row.displayName]));
+}
+
 export async function loadBranchNames(
   repository: string,
 ): Promise<Map<string, string>> {

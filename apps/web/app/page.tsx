@@ -1,9 +1,7 @@
 import Link from 'next/link';
 import { formatCost, formatDate } from '@/src/lib/format';
-import {
-  mergeRepository,
-  renameRepository,
-} from '@/src/server/actions';
+import { renamePath, repositoryPath } from '@/src/lib/paths';
+import { mergeRepository } from '@/src/server/actions';
 import { loadMonitorData } from '@/src/server/data';
 import { currentAdmin } from '@/src/server/identity';
 import { NO_REPOSITORY_KEY } from '@cursor-monitor/core';
@@ -98,7 +96,7 @@ export default async function DashboardPage() {
                 <div>
                   <Link
                     className="project-card-link"
-                    href={`/repositories/${encodeURIComponent(project.key)}`}
+                    href={repositoryPath(project.key)}
                   >
                     <h3>{project.displayName}</h3>
                     <div className="mono small subtle">{project.key}</div>
@@ -124,61 +122,49 @@ export default async function DashboardPage() {
                   ) : null}
                 </div>
 
-                <div className="card-footer small subtle">
-                  Latest {project.latestAt ? formatDate(project.latestAt) : '—'}
+                <div className="card-footer row-between">
+                  <span className="small subtle">
+                    Latest {project.latestAt ? formatDate(project.latestAt) : '—'}
+                  </span>
+                  {admin && project.key !== NO_REPOSITORY_KEY ? (
+                    <Link
+                      aria-label={`Rename ${project.displayName}`}
+                      className="button button-secondary"
+                      href={renamePath(project.key)}
+                    >
+                      Rename
+                    </Link>
+                  ) : null}
                 </div>
 
-                {admin && project.key !== NO_REPOSITORY_KEY ? (
+                {admin &&
+                project.key !== NO_REPOSITORY_KEY &&
+                mergeTargets.length > 1 &&
+                !mergeRootsWithChildren.has(project.key) ? (
                   <details className="manage">
                     <summary>Manage repository</summary>
                     <div className="manage-content">
-                      <form action={renameRepository} className="form-row">
-                        <input
-                          name="repositoryKey"
-                          type="hidden"
-                          value={project.key}
-                        />
+                      <form action={mergeRepository} className="form-row">
+                        <input name="source" type="hidden" value={project.key} />
                         <label className="field">
-                          <span>Display name</span>
-                          <input
-                            defaultValue={
-                              project.displayName === project.key
-                                ? ''
-                                : project.displayName
-                            }
-                            maxLength={120}
-                            name="displayName"
-                            placeholder={project.key}
-                          />
+                          <span>Attach to project</span>
+                          <select defaultValue="" name="target" required>
+                            <option disabled value="">
+                              Select target…
+                            </option>
+                            {mergeTargets
+                              .filter((target) => target.key !== project.key)
+                              .map((target) => (
+                                <option key={target.key} value={target.key}>
+                                  {target.displayName}
+                                </option>
+                              ))}
+                          </select>
                         </label>
                         <button className="button button-secondary" type="submit">
-                          Save
+                          Merge
                         </button>
                       </form>
-                      {mergeTargets.length > 1 &&
-                      !mergeRootsWithChildren.has(project.key) ? (
-                        <form action={mergeRepository} className="form-row">
-                          <input name="source" type="hidden" value={project.key} />
-                          <label className="field">
-                            <span>Attach to project</span>
-                            <select defaultValue="" name="target" required>
-                              <option disabled value="">
-                                Select target…
-                              </option>
-                              {mergeTargets
-                                .filter((target) => target.key !== project.key)
-                                .map((target) => (
-                                  <option key={target.key} value={target.key}>
-                                    {target.displayName}
-                                  </option>
-                                ))}
-                            </select>
-                          </label>
-                          <button className="button button-secondary" type="submit">
-                            Merge
-                          </button>
-                        </form>
-                      ) : null}
                     </div>
                   </details>
                 ) : null}
