@@ -2,11 +2,38 @@
 
 ## Deployment
 
-Preview and production deploy only through the managed GitHub workflow. Pushing
-a PR provisions the preview Supabase integration, applies migrations, and
-deploys `apps/web`.
+Every deployment must run `pnpm db:exec-migrations` before starting `apps/web`.
+The reference internalsphere deployment does this through the managed GitHub
+workflow: a PR provisions its PostgreSQL-compatible Supabase resource, applies
+migrations, and deploys the app.
 
-Do not run `vercel deploy`, `vercel env pull`, or a local database.
+Other deployments may use any standards-compatible PostgreSQL service and their
+own deployment tooling.
+
+## Database configuration
+
+Set `DATABASE_URL` to the server-only PostgreSQL runtime connection. Existing
+provider names are resolved in this order:
+
+1. `DATABASE_URL`
+2. `POSTGRES_URL`
+3. `DB_POSTGRES_URL`
+
+Set `MIGRATION_DATABASE_URL` when migrations need a direct connection instead of
+the pooled runtime URL. Migration aliases are
+`DATABASE_URL_NON_POOLING`, `POSTGRES_URL_NON_POOLING`, and
+`DB_POSTGRES_URL_NON_POOLING`; migration execution falls back to the runtime URL
+when none is configured.
+
+Remote connections require TLS by default. A connection-string `sslmode` takes
+precedence; `PGSSLMODE=disable` is available for a database that explicitly does
+not support TLS. `DB_SSL=disable` remains as a legacy alias. Localhost
+connections default to TLS disabled.
+
+The migration identity must be able to create and alter tables and take a
+PostgreSQL advisory lock. If a separate runtime identity is used, grant it
+read/write access to the `monitor_*` tables. The app does not require Supabase
+roles, extensions, or APIs.
 
 ## Secrets
 
@@ -25,15 +52,16 @@ Supported keys:
 | Key | Required | Notes |
 |---|---|---|
 | `CURSOR_MONITOR_HOOK_TOKEN` | Yes | Dedicated inbound app token |
-| `VERCEL_PROTECTION_BYPASS` | Yes for protected deployments | Also fallback app token |
+| `VERCEL_PROTECTION_BYPASS` | Yes for protected deployments | Deployment protection only |
 | `CRON_SECRET` | Yes | Vercel cron authorization |
 | `CURSOR_TEAM_API_KEY` | One credential mode | Team filtered usage |
 | `CURSOR_ORGANIZATION_API_KEY` | One credential mode | Pair with organization ID |
 | `CURSOR_ORGANIZATION_ID` | Organization mode | Required with organization key |
 | `CURSOR_API_BASE_URL` | No | Defaults to official Cursor API |
 
-Supabase `DB_*` values are injected by `integrations.db`; do not add them as
-manual secrets.
+In the reference deployment, `DB_*` values are injected by `integrations.db`;
+do not duplicate them as manual secrets. Other deployments should store
+`DATABASE_URL` and `MIGRATION_DATABASE_URL` in their platform secret manager.
 
 ## Health surfaces
 
@@ -82,8 +110,8 @@ on every plan.
 ### Sync always skips as running
 
 The lock expires after ten minutes. If no run is active and the row remains,
-inspect `monitor_sync_locks` in the managed Supabase project and compare its
-`expires_at` value. Normal syncs delete the lease in `finally`.
+inspect `monitor_sync_locks` in PostgreSQL and compare its `expires_at` value.
+Normal syncs delete the lease in `finally`.
 
 ### Costs appear pending
 

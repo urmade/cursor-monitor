@@ -3,5 +3,7 @@ owner: tobias.urban@anysphere.co
 vercel:
   root_directory: apps/web
 integrations:
+  # Reference internalsphere deployment only. Runtime code accepts generic
+  # PostgreSQL through DATABASE_URL and provider-compatible aliases.
   db:
     type: supabase

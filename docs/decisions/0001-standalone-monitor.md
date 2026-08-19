@@ -3,6 +3,9 @@
 - Status: Accepted
 - Date: 2026-08-17
 
+The database-provider constraints in this decision are superseded by
+[ADR 0002](./0002-generic-postgres-baseline.md).
+
 ## Context
 
 Repository and conversation monitoring was previously embedded in a broader

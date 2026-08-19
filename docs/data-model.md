@@ -107,3 +107,8 @@ repositories and prevents renames from breaking stable identity.
 Migrations are forward-only and applied lexically by
 `packages/db/src/exec-migrations.ts` under a Postgres advisory lock. Never modify
 an applied migration. Update the Drizzle schema and add a new SQL file together.
+
+The baseline migrations target standards-compatible PostgreSQL without
+provider-owned extensions or required roles. Migration `0003` disables the
+original deployment-specific RLS defaults; adopting organizations may add
+provider-specific access controls in their own forward migrations.

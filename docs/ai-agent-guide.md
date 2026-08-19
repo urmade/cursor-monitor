@@ -93,8 +93,8 @@ pnpm build
 python3 scripts/app-manifest.py
 ```
 
-Database behavior is validated on the PR preview because local substitute
-databases are forbidden. The strongest preview checks are:
+Database behavior is validated against an explicitly configured development or
+preview PostgreSQL database. The strongest checks are:
 
 - migration succeeded;
 - `/api/health` returns `200`;

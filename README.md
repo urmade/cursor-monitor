@@ -30,21 +30,29 @@ stored when their matching hook has not arrived yet.
 
 ```bash
 pnpm install
-pnpm dev
+DATABASE_URL=postgresql://user:password@host:5432/database pnpm db:exec-migrations
+DATABASE_URL=postgresql://user:password@host:5432/database pnpm dev
 ```
 
-The app is deployed through the managed internalsphere PR workflow. The database
-is the existing `db` Supabase integration from `app-manifest.yml`; do not run a
-substitute database locally.
+Use a secret manager or uncommitted local environment file instead of placing a
+real connection string in source or shared shell history. `DATABASE_URL` accepts
+any standards-compatible PostgreSQL connection. If the runtime URL is pooled,
+set `MIGRATION_DATABASE_URL` to a direct connection before running migrations.
+
+The reference internalsphere deployment still provisions the `db` Supabase
+integration from `app-manifest.yml`. Its `DB_POSTGRES_URL` and
+`DB_POSTGRES_URL_NON_POOLING` values are backward-compatible provider aliases,
+not application requirements.
 
 Required production settings:
 
 | Setting | Purpose |
 |---|---|
-| `DB_POSTGRES_URL` | Managed Supabase runtime connection |
-| `DB_POSTGRES_URL_NON_POOLING` | Direct migration connection |
+| `DATABASE_URL` | Generic PostgreSQL runtime connection |
+| `MIGRATION_DATABASE_URL` | Optional direct migration connection |
 | `CRON_SECRET` | Authenticates the five-minute Vercel cron |
 | `CURSOR_MONITOR_HOOK_TOKEN` | Authenticates incoming project-hook events |
+| `CURSOR_MONITOR_PUBLIC_URL` | Stable public URL embedded in fresh hook installers |
 | `VERCEL_PROTECTION_BYPASS` | Allows hooks through deployment protection |
 | `CURSOR_TEAM_API_KEY` | Team usage polling |
 | `CURSOR_ORGANIZATION_API_KEY` + `CURSOR_ORGANIZATION_ID` | Preferred Organization API alternative |
@@ -70,7 +78,7 @@ packages/core/               Product rules and orchestration
   src/team-sync.ts           Poll windows, locking, and persistence
 
 packages/team-api/           Cursor usage API HTTP client
-packages/db/                 Drizzle schema, Supabase client, migrations
+packages/db/                 PostgreSQL configuration, Drizzle schema, migrations
 packages/config/             Shared TypeScript and ESLint configuration
 ```
 
@@ -83,6 +91,7 @@ packages/config/             Shared TypeScript and ESLint configuration
 - `docs/operations.md` — secrets, health checks, failure recovery
 - `docs/ai-agent-guide.md` — code exploration and common modification recipes
 - `docs/decisions/0001-standalone-monitor.md` — architectural decision record
+- `docs/decisions/0002-generic-postgres-baseline.md` — database portability
 
 ## Verification
 

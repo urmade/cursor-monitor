@@ -17,13 +17,19 @@ run or PR.
 Never record or upload walkthrough videos or screenshot artifacts. Prove work
 with automated tests, build output, logs, and written verification.
 
-### Supabase is the only database
+### Database portability
 
-The only database is `integrations.db.type: supabase` in `app-manifest.yml`.
-Use `DB_POSTGRES_URL` and `DB_POSTGRES_URL_NON_POOLING`; those names refer to the
-managed Supabase integration. Never install or start another Postgres server.
-Add schema changes under `packages/db/migrations/` and validate them on the PR
-preview deployment.
+Generic PostgreSQL is the baseline database. The application must work with a
+standard `DATABASE_URL` and must not require Supabase APIs, roles, extensions,
+or client libraries. `MIGRATION_DATABASE_URL` may provide a direct migration
+connection and otherwise defaults to the runtime URL.
+
+The `db` Supabase integration in `app-manifest.yml` is only the reference
+internalsphere deployment. Its `DB_POSTGRES_URL` and
+`DB_POSTGRES_URL_NON_POOLING` values remain supported aliases. Organizations may
+replace the deployment or add another backend, but provider-specific behavior
+must remain behind `packages/db` and preserve product invariants. Database
+credentials are server-only and must never be added to generated hooks.
 
 ### Managed platform files
 
@@ -108,12 +114,13 @@ pnpm build
 python3 scripts/app-manifest.py
 ```
 
-Database-backed tests must run only when `DB_POSTGRES_URL` already targets the
-managed Supabase integration. Otherwise skip them. Never provision a substitute
+Database-backed tests must use an explicitly supplied test connection and must
+never silently target production. Unit tests must remain runnable without a
 database.
 
 CI runs migrations through `pnpm db:exec-migrations` before deploying each
-preview. Preview/production deploys happen only through the managed PR workflow.
+preview in the reference deployment. Other deployments must run the same
+forward-only migrations before starting the app.
 
 ## Making changes safely
 
@@ -135,12 +142,11 @@ The startup update script runs `pnpm install`. Standard commands live in
 
 - **Toolchain**: Node 22 and pnpm 10.33.3 (pinned via `packageManager`) are
   preinstalled. `pnpm dev` serves `apps/web` on port 3000 with Turbopack.
-- **No database in the VM**: `DB_POSTGRES_URL` is not set locally, and per the
-  hard rules a substitute Postgres must never be started. Consequences while
-  running locally: `/api/health` returns `503`, and DB-backed routes (`/`,
-  `/repositories/[repository]`, `/settings`, `/api/hooks/events`, the cron sync)
-  throw at request time. This is expected — validate all database behavior on
-  the PR preview deploy, not in the VM.
+- **No database is configured by default in the VM**: Unless `DATABASE_URL` or a
+  supported provider alias is supplied, `/api/health` returns `503` and
+  DB-backed routes (`/`, `/repositories/[repository]`, `/settings`,
+  `/api/hooks/events`, the cron sync) throw at request time. Unit tests and
+  builds remain database-free.
 - **What works without a database**: hook-installer generation. `currentAdmin()`
   returns a stub admin whenever `VERCEL` is unset, so `/install` and
   `/api/install/{linux,macos,windows}` render without auth. Installers only
@@ -152,5 +158,5 @@ The startup update script runs `pnpm install`. Standard commands live in
   `apps/web/AGENTS.md` and `apps/web/CLAUDE.md` (Next 16 `agentRules`). None are
   gitignored — leave them out of commits.
 - **Verification**: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and
-  `python3 scripts/app-manifest.py` all pass offline with no database. DB-backed
-  tests self-skip unless `DB_POSTGRES_URL` targets managed Supabase.
+  `python3 scripts/app-manifest.py` all pass offline with no database. Optional
+  integration tests require an explicit non-production test connection.

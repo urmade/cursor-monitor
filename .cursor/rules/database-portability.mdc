@@ -1,0 +1,42 @@
+---
+description: Keep generic PostgreSQL as the baseline and isolate optional database providers behind the database package
+alwaysApply: true
+---
+
+# Database portability — hard project rule
+
+Cursor Monitor must run against a standards-compatible PostgreSQL database
+without requiring Supabase APIs, roles, extensions, or client libraries.
+
+## Connection contract
+
+- `DATABASE_URL` is the canonical runtime connection string.
+- `MIGRATION_DATABASE_URL` is an optional direct connection for migrations and
+  defaults to the runtime URL.
+- Provider aliases such as `DB_POSTGRES_URL` and
+  `DB_POSTGRES_URL_NON_POOLING` may remain for deployment compatibility, but
+  application behavior must not depend on the provider that supplied them.
+- Database credentials stay server-side. Cursor hooks send events to the
+  application HTTP endpoint and must never receive database connection details.
+
+## Provider boundaries
+
+- Generic PostgreSQL is the required baseline implementation.
+- The Supabase integration in `app-manifest.yml` is the reference internalsphere
+  deployment, not a product invariant.
+- Organizations may replace the reference deployment or add another database
+  backend. Provider-specific code belongs behind `packages/db`; it must not leak
+  into `packages/core`, hook payloads, or UI identity behavior.
+- New backends must preserve identity, idempotency, migration, locking, and
+  transaction semantics and must include backend-specific tests and operations
+  documentation.
+
+## Schema and validation
+
+- PostgreSQL schema changes use forward-only migrations under
+  `packages/db/migrations/`.
+- Do not require provider-owned roles or extensions in the baseline schema.
+- Unit tests must run without a live database. Integration tests may use an
+  explicitly supplied test database and must never silently target production.
+- Never commit connection strings, passwords, plaintext `.env` files, or
+  provider credentials.
