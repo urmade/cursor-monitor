@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { formatCost, formatDate } from '@/src/lib/format';
-import { renamePath, repositoryPath } from '@/src/lib/paths';
-import { mergeRepository } from '@/src/server/actions';
+import { repositoryPath } from '@/src/lib/paths';
+import { RenameControl } from '@/src/components/RenameControl';
+import { mergeRepository, renameRepository } from '@/src/server/actions';
 import { loadMonitorData } from '@/src/server/data';
 import { currentAdmin } from '@/src/server/identity';
 import { NO_REPOSITORY_KEY } from '@cursor-monitor/core';
@@ -127,13 +128,22 @@ export default async function DashboardPage() {
                     Latest {project.latestAt ? formatDate(project.latestAt) : '—'}
                   </span>
                   {admin && project.key !== NO_REPOSITORY_KEY ? (
-                    <Link
-                      aria-label={`Rename ${project.displayName}`}
-                      className="button button-secondary"
-                      href={renamePath(project.key)}
-                    >
-                      Rename
-                    </Link>
+                    <RenameControl
+                      action={renameRepository}
+                      ariaLabel={`Rename ${project.displayName}`}
+                      currentName={
+                        project.displayName === project.key
+                          ? ''
+                          : project.displayName
+                      }
+                      eyebrow="Display preference"
+                      hiddenFields={{ repositoryKey: project.key }}
+                      lede="This label appears on the dashboard and project page. The canonical repository key, URLs, and raw hook payloads stay the same."
+                      placeholder={project.key}
+                      stableLabel="Repository key"
+                      stableValue={project.key}
+                      title={`Rename ${project.displayName}`}
+                    />
                   ) : null}
                 </div>
 

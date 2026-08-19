@@ -362,10 +362,35 @@ h3 {
   color: var(--danger);
 }
 
-.rename-page {
-  width: 100%;
-  min-height: calc(100dvh - 172px);
-  grid-template-rows: auto auto minmax(24rem, 1fr);
+.rename-dialog {
+  position: fixed;
+  inset: 0;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background:
+    radial-gradient(circle at 15% -10%, #1b2942 0, transparent 32rem),
+    var(--background);
+  color: var(--text);
+}
+
+.rename-dialog::backdrop {
+  background: rgb(11 13 16 / 72%);
+}
+
+.rename-dialog-body {
+  display: grid;
+  grid-template-rows: auto minmax(24rem, 1fr);
+  gap: 18px;
+  box-sizing: border-box;
+  width: min(1260px, calc(100% - 40px));
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 36px 0 72px;
 }
 
 .rename-panel {
@@ -650,9 +675,10 @@ th {
     display: none;
   }
 
-  .rename-page {
-    min-height: calc(100dvh - 140px);
-    grid-template-rows: auto auto minmax(16rem, 1fr);
+  .rename-dialog-body {
+    width: min(100% - 24px, 1260px);
+    padding-top: 24px;
+    grid-template-rows: auto minmax(16rem, 1fr);
   }
 
   .rename-panel {

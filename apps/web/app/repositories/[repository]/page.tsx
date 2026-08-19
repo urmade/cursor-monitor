@@ -2,19 +2,27 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import {
   canonicalRepository,
+  displayConversationKey,
   NO_REPOSITORY_KEY,
   UNKNOWN_CONVERSATION_KEY,
   type MonitorConversation,
 } from '@cursor-monitor/core';
-import { unmergeRepository } from '@/src/server/actions';
+import {
+  renameBranch,
+  renameConversation,
+  renameRepository,
+  unmergeRepository,
+} from '@/src/server/actions';
 import {
   loadBranchNames,
+  loadConversationNames,
   loadRepositoryProject,
 } from '@/src/server/data';
 import { currentAdmin } from '@/src/server/identity';
+import { RenameControl } from '@/src/components/RenameControl';
 import { conversationBranchKey } from '@/src/lib/branches';
 import { formatCost, formatDate, formatDuration } from '@/src/lib/format';
-import { renamePath, repositoryPath } from '@/src/lib/paths';
+import { repositoryPath } from '@/src/lib/paths';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,10 +61,11 @@ export default async function RepositoryPage({
     notFound();
   }
   project = project!;
-  const [{ sort }, admin, branchNames] = await Promise.all([
+  const [{ sort }, admin, branchNames, conversationNames] = await Promise.all([
     searchParams,
     currentAdmin(),
     loadBranchNames(project.key),
+    loadConversationNames(),
   ]);
   const conversations = [...project.conversations].sort((a, b) =>
     sort === 'cost'
@@ -106,13 +115,20 @@ export default async function RepositoryPage({
             Sort by activity
           </Link>
           {admin && project.key !== NO_REPOSITORY_KEY ? (
-            <Link
-              aria-label={`Rename ${project.displayName}`}
-              className="button button-secondary"
-              href={renamePath(project.key)}
-            >
-              Rename
-            </Link>
+            <RenameControl
+              action={renameRepository}
+              ariaLabel={`Rename ${project.displayName}`}
+              currentName={
+                project.displayName === project.key ? '' : project.displayName
+              }
+              eyebrow="Display preference"
+              hiddenFields={{ repositoryKey: project.key }}
+              lede="This label appears on the dashboard and project page. The canonical repository key, URLs, and raw hook payloads stay the same."
+              placeholder={project.key}
+              stableLabel="Repository key"
+              stableValue={project.key}
+              title={`Rename ${project.displayName}`}
+            />
           ) : null}
           {githubUrl ? (
             <a className="button button-secondary" href={githubUrl}>
@@ -208,13 +224,21 @@ export default async function RepositoryPage({
                   {items.length} conversation{items.length === 1 ? '' : 's'}
                 </span>
                 {admin ? (
-                  <Link
-                    aria-label={`Rename ${label || branch}`}
-                    className="button button-secondary"
-                    href={renamePath(project.key, { branch })}
-                  >
-                    Rename
-                  </Link>
+                  <RenameControl
+                    action={renameBranch}
+                    ariaLabel={`Rename ${label || branch}`}
+                    currentName={label ?? ''}
+                    eyebrow="Display preference"
+                    hiddenFields={{
+                      repositoryKey: project.key,
+                      branchKey: branch,
+                    }}
+                    lede="This label groups conversations on the project page. The underlying git branch name is unchanged."
+                    placeholder={branch}
+                    stableLabel="Branch key"
+                    stableValue={branch}
+                    title={`Rename ${label || branch}`}
+                  />
                 ) : null}
               </div>
             </div>
@@ -251,15 +275,27 @@ export default async function RepositoryPage({
                         </span>
                         {admin &&
                         conversation.key !== UNKNOWN_CONVERSATION_KEY ? (
-                          <Link
-                            aria-label={`Rename ${conversation.displayName}`}
-                            className="button button-secondary"
-                            href={renamePath(project.key, {
-                              conversation: conversation.key,
-                            })}
-                          >
-                            Rename
-                          </Link>
+                          <RenameControl
+                            action={renameConversation}
+                            ariaLabel={`Rename ${conversation.displayName}`}
+                            currentName={
+                              conversationNames.get(conversation.key)?.trim() ??
+                              ''
+                            }
+                            eyebrow="Display preference"
+                            hiddenFields={{
+                              conversationKey: conversation.key,
+                              repositoryKey: project.key,
+                            }}
+                            lede="This label appears on the project page. Conversation identity, usage joins, and raw payloads stay on the original Cursor conversation ID."
+                            placeholder={
+                              conversation.userEmail?.trim() ||
+                              displayConversationKey(conversation.key)
+                            }
+                            stableLabel="Conversation ID"
+                            stableValue={conversation.id ?? conversation.key}
+                            title={`Rename ${conversation.displayName}`}
+                          />
                         ) : null}
                       </div>
                     </div>
