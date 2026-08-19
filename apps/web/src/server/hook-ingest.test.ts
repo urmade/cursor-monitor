@@ -144,4 +144,23 @@ describe('Team Hook scripts', () => {
       'Content-Disposition': 'attachment; filename="cursor-monitor-linux-stop.sh"',
     });
   });
+
+  it('regenerates direct scripts without exposing database details', () => {
+    process.env.CURSOR_MONITOR_HOOK_TOKEN = 'monitor-test-token';
+    process.env.DATABASE_ADAPTER = 'private-backend';
+    process.env.DATABASE_URL =
+      'postgres://database-user:database-password@database.internal/monitor';
+    process.env.CURSOR_MONITOR_PUBLIC_URL = 'https://monitor-one.example';
+    const first = getHookScript('linux', 'stop')?.content;
+
+    process.env.CURSOR_MONITOR_PUBLIC_URL = 'https://monitor-two.example';
+    const second = getHookScript('linux', 'stop')?.content;
+
+    expect(first).toContain('https://monitor-one.example/api/hooks/events');
+    expect(second).toContain('https://monitor-two.example/api/hooks/events');
+    expect(second).not.toContain('monitor-one.example');
+    expect(second).not.toContain('database.internal');
+    expect(second).not.toContain('database-password');
+    expect(second).not.toContain('private-backend');
+  });
 });

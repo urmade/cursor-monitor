@@ -80,6 +80,12 @@ Follow `docs/database-adapters.md`. Keep exactly one selected backend, preserve
 all semantic operations in `DatabaseAdapter`, route migrations through
 `pnpm db:exec-migrations`, and do not expose provider code outside `packages/db`.
 
+### Replace the database adapter
+
+Follow `docs/database-adapters.md`. Keep exactly one selected backend, preserve
+all semantic operations in `DatabaseAdapter`, route migrations through
+`pnpm db:exec-migrations`, and do not expose provider code outside `packages/db`.
+
 ### Add a dashboard preference
 
 Display-only preferences need:

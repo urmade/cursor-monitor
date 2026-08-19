@@ -42,7 +42,7 @@
         "PGSSLMODE",
         "DB_SSL",
         "CURSOR_TEAM_API_KEY",
-    "CURSOR_TEAM_API_KEYS",
+        "CURSOR_TEAM_API_KEYS",
         "CURSOR_ORGANIZATION_API_KEY",
         "CURSOR_ORGANIZATION_ID",
         "CURSOR_API_BASE_URL",
