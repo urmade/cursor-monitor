@@ -5,10 +5,19 @@
 The sync supports either:
 
 1. `CURSOR_ORGANIZATION_API_KEY` and `CURSOR_ORGANIZATION_ID` (preferred), or
-2. `CURSOR_TEAM_API_KEY`.
+2. one or more Team API keys through `CURSOR_TEAM_API_KEY` and/or
+   `CURSOR_TEAM_API_KEYS`.
 
-Organization credentials take precedence. `CURSOR_API_BASE_URL` defaults to
-`https://api.cursor.com` and exists only for controlled API-compatible testing.
+Organization credentials take precedence. When organization mode is configured,
+Team keys are ignored.
+
+`CURSOR_TEAM_API_KEYS` accepts comma- or newline-separated values. If both
+`CURSOR_TEAM_API_KEY` and `CURSOR_TEAM_API_KEYS` are set, the values are merged
+and deduplicated. Each configured Team key is polled independently during a sync;
+usage rows still deduplicate by fingerprint across keys.
+
+`CURSOR_API_BASE_URL` defaults to `https://api.cursor.com` and exists only for
+controlled API-compatible testing.
 
 The client uses HTTP Basic auth with the API key as the username and an empty
 password.

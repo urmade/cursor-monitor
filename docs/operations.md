@@ -67,7 +67,8 @@ Supported keys:
 |---|---|---|
 | `CURSOR_MONITOR_HOOK_TOKEN` | Yes | Dedicated inbound app token; see `docs/hooks.md` |
 | `CRON_SECRET` | Vercel cron only | Authorizes scheduled `/api/cron/sync`; omit locally |
-| `CURSOR_TEAM_API_KEY` | One credential mode | Team filtered usage |
+| `CURSOR_TEAM_API_KEY` | Team mode | One Team API key |
+| `CURSOR_TEAM_API_KEYS` | Team mode | Additional comma/newline-separated Team keys |
 | `CURSOR_ORGANIZATION_API_KEY` | One credential mode | Pair with organization ID |
 | `CURSOR_ORGANIZATION_ID` | Organization mode | Required with organization key |
 | `CURSOR_API_BASE_URL` | No | Defaults to official Cursor API |

@@ -151,18 +151,56 @@ export class TeamApiClient {
   }
 }
 
-export function credentialsFromEnv(
+export function parseDelimitedSecrets(value: string | undefined): string[] {
+  if (!value?.trim()) return [];
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const part of value.split(/[\n,]+/)) {
+    const trimmed = part.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    keys.push(trimmed);
+  }
+  return keys;
+}
+
+export function teamApiKeysFromEnv(
   env: NodeJS.ProcessEnv = process.env,
-): TeamApiCredentials | null {
+): string[] {
+  const keys = [
+    ...parseDelimitedSecrets(env.CURSOR_TEAM_API_KEYS),
+    ...parseDelimitedSecrets(env.CURSOR_TEAM_API_KEY),
+  ];
+  const seen = new Set<string>();
+  return keys.filter((key) => {
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function credentialsListFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): TeamApiCredentials[] {
   const organizationKey = env.CURSOR_ORGANIZATION_API_KEY?.trim();
   const organizationId = env.CURSOR_ORGANIZATION_ID?.trim();
   if (organizationKey && organizationId) {
-    return {
-      kind: 'organization',
-      apiKey: organizationKey,
-      organizationId,
-    };
+    return [
+      {
+        kind: 'organization',
+        apiKey: organizationKey,
+        organizationId,
+      },
+    ];
   }
-  const teamKey = env.CURSOR_TEAM_API_KEY?.trim();
-  return teamKey ? { kind: 'team', apiKey: teamKey } : null;
+  return teamApiKeysFromEnv(env).map((apiKey) => ({
+    kind: 'team' as const,
+    apiKey,
+  }));
+}
+
+export function credentialsFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): TeamApiCredentials | null {
+  return credentialsListFromEnv(env)[0] ?? null;
 }

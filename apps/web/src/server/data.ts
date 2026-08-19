@@ -12,6 +12,7 @@ import {
   getDatabase,
   getDatabaseAdapterInfo,
 } from '@cursor-monitor/db';
+import { credentialsListFromEnv, teamApiKeysFromEnv } from '@cursor-monitor/team-api';
 
 const HOOK_LIMIT = 5000;
 const USAGE_LIMIT = 10_000;
@@ -174,16 +175,20 @@ export async function loadSyncStatus() {
 }
 
 export function loadConfigurationStatus() {
-  const organization =
-    Boolean(process.env.CURSOR_ORGANIZATION_API_KEY?.trim()) &&
-    Boolean(process.env.CURSOR_ORGANIZATION_ID?.trim());
+  const credentials = credentialsListFromEnv();
+  const organization = credentials.some(
+    (credential) => credential.kind === 'organization',
+  );
+  const teamKeyCount = teamApiKeysFromEnv().length;
   return {
-    teamApi: organization || Boolean(process.env.CURSOR_TEAM_API_KEY?.trim()),
+    teamApi: credentials.length > 0,
     teamApiMode: organization
       ? 'Organization API'
-      : process.env.CURSOR_TEAM_API_KEY?.trim()
-        ? 'Team API'
-        : null,
+      : teamKeyCount === 1
+        ? 'Team API (1 key)'
+        : teamKeyCount > 1
+          ? `Team API (${teamKeyCount} keys)`
+          : null,
     hookToken: Boolean(
       process.env.CURSOR_MONITOR_HOOK_TOKEN?.trim(),
     ),

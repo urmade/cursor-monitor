@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { credentialsFromEnv, TeamApiClient } from './client';
+import {
+  credentialsFromEnv,
+  credentialsListFromEnv,
+  TeamApiClient,
+  teamApiKeysFromEnv,
+} from './client';
 import { stableJson, usageConversationKey, usageEventFingerprint } from './fingerprint';
 
 describe('TeamApiClient', () => {
@@ -83,5 +88,22 @@ describe('usage identity', () => {
         CURSOR_TEAM_API_KEY: 'team-key',
       }),
     ).toMatchObject({ kind: 'organization', apiKey: 'org-key' });
+  });
+
+  it('parses multiple team keys from comma or newline separated env values', () => {
+    expect(
+      teamApiKeysFromEnv({
+        CURSOR_TEAM_API_KEYS: 'alpha, beta\nbeta ,gamma',
+      }),
+    ).toEqual(['alpha', 'beta', 'gamma']);
+    expect(
+      credentialsListFromEnv({
+        CURSOR_TEAM_API_KEY: 'legacy-key',
+        CURSOR_TEAM_API_KEYS: 'legacy-key,extra-key',
+      }),
+    ).toEqual([
+      { kind: 'team', apiKey: 'legacy-key' },
+      { kind: 'team', apiKey: 'extra-key' },
+    ]);
   });
 });

@@ -5,11 +5,12 @@ import {
   type NewUsageEvent,
 } from '@cursor-monitor/db';
 import {
-  credentialsFromEnv,
+  credentialsListFromEnv,
   TeamApiClient,
   usageConversationKey,
   usageEventFingerprint,
   type ListUsageResult,
+  type TeamApiCredentials,
   type UsageEvent,
 } from '@cursor-monitor/team-api';
 
@@ -87,22 +88,92 @@ export async function listCompleteWindow(
   };
 }
 
+export async function listCompleteWindowForCredentials(
+  credentialsList: readonly TeamApiCredentials[],
+  startDate: number,
+  endDate: number,
+  deadlineAt: number,
+  options?: {
+    client?: Pick<TeamApiClient, 'listUsageEvents'>;
+    createClient?: (
+      credentials: TeamApiCredentials,
+    ) => Pick<TeamApiClient, 'listUsageEvents'>;
+    baseUrl?: string;
+  },
+): Promise<ListUsageResult> {
+  if (credentialsList.length === 0) {
+    return { events: [], pages: 0, truncated: false };
+  }
+
+  if (options?.client && credentialsList.length === 1) {
+    return listCompleteWindow(
+      options.client,
+      startDate,
+      endDate,
+      deadlineAt,
+    );
+  }
+
+  const errors: string[] = [];
+  let events: UsageEvent[] = [];
+  let pages = 0;
+  let truncated = false;
+
+  for (const [index, credentials] of credentialsList.entries()) {
+    const client =
+      options?.createClient?.(credentials) ??
+      options?.client ??
+      new TeamApiClient({
+        credentials,
+        baseUrl: options?.baseUrl,
+      });
+    try {
+      const listed = await listCompleteWindow(
+        client,
+        startDate,
+        endDate,
+        deadlineAt,
+      );
+      events = events.concat(listed.events);
+      pages += listed.pages;
+      truncated = truncated || listed.truncated;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const label =
+        credentials.kind === 'organization'
+          ? `organization credential ${index + 1}`
+          : `team key ${index + 1}`;
+      errors.push(`${label}: ${message}`);
+    }
+  }
+
+  if (errors.length === credentialsList.length) {
+    throw new Error(errors.join('; '));
+  }
+
+  return { events, pages, truncated };
+}
+
 export async function syncTeamUsage(options?: {
   database?: DatabaseAdapter;
   now?: Date;
   env?: NodeJS.ProcessEnv;
   client?: Pick<TeamApiClient, 'listUsageEvents'>;
+  createClient?: (
+    credentials: TeamApiCredentials,
+  ) => Pick<TeamApiClient, 'listUsageEvents'>;
 }): Promise<TeamSyncResult> {
   const database = options?.database ?? getDatabase();
   const now = options?.now ?? new Date();
-  const credentials = credentialsFromEnv(options?.env);
+  const env = options?.env ?? process.env;
+  const credentialsList = credentialsListFromEnv(env);
   const previousWindowEnd =
     await database.sync.latestSuccessfulWindowEnd(SOURCE);
   const windowStartedAt = previousWindowEnd
     ? new Date(previousWindowEnd.getTime() - OVERLAP_MS)
     : new Date(now.getTime() - INITIAL_LOOKBACK_MS);
 
-  if (!credentials) {
+  if (credentialsList.length === 0) {
     await database.sync.insertRun({
       id: newId(),
       source: SOURCE,
@@ -110,7 +181,7 @@ export async function syncTeamUsage(options?: {
       windowStartedAt,
       windowEndedAt: now,
       error:
-        'Configure CURSOR_TEAM_API_KEY or CURSOR_ORGANIZATION_API_KEY plus CURSOR_ORGANIZATION_ID.',
+        'Configure CURSOR_TEAM_API_KEY, CURSOR_TEAM_API_KEYS, or CURSOR_ORGANIZATION_API_KEY plus CURSOR_ORGANIZATION_ID.',
       completedAt: now,
     });
     return {
@@ -152,17 +223,16 @@ export async function syncTeamUsage(options?: {
   });
 
   try {
-    const client =
-      options?.client ??
-      new TeamApiClient({
-        credentials,
-        baseUrl: options?.env?.CURSOR_API_BASE_URL ?? process.env.CURSOR_API_BASE_URL,
-      });
-    const listed = await listCompleteWindow(
-      client,
+    const listed = await listCompleteWindowForCredentials(
+      credentialsList,
       windowStartedAt.getTime(),
       now.getTime(),
       Date.now() + 45_000,
+      {
+        client: options?.client,
+        createClient: options?.createClient,
+        baseUrl: env.CURSOR_API_BASE_URL ?? process.env.CURSOR_API_BASE_URL,
+      },
     );
     let insertedCount = 0;
 

@@ -60,7 +60,8 @@ Required production settings:
 | `CURSOR_MONITOR_HOOK_TOKEN` | Authenticates incoming Team Hook events (see `docs/hooks.md`) |
 | `CURSOR_MONITOR_PUBLIC_URL` | Stable public URL embedded in fresh Team Hook scripts |
 | `CRON_SECRET` | Vercel cron only — authorizes scheduled `/api/cron/sync` |
-| `CURSOR_TEAM_API_KEY` | Team usage polling |
+| `CURSOR_TEAM_API_KEY` | Team usage polling (single key) |
+| `CURSOR_TEAM_API_KEYS` | Team usage polling (multiple keys, comma/newline separated) |
 | `CURSOR_ORGANIZATION_API_KEY` + `CURSOR_ORGANIZATION_ID` | Preferred Organization API alternative |
 
 The hook token is separate from Passport sign-in. Possession of an ingestion token
