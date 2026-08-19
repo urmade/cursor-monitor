@@ -2,19 +2,26 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import {
   canonicalRepository,
+  displayConversationKey,
   NO_REPOSITORY_KEY,
   UNKNOWN_CONVERSATION_KEY,
   type MonitorConversation,
 } from '@cursor-monitor/core';
-import { unmergeRepository } from '@/src/server/actions';
+import {
+  renameBranch,
+  renameConversation,
+  renameRepository,
+  unmergeRepository,
+} from '@/src/server/actions';
 import {
   loadBranchNames,
   loadRepositoryProject,
 } from '@/src/server/data';
 import { currentAdmin } from '@/src/server/identity';
+import { RenameControl } from '@/src/components/RenameControl';
 import { conversationBranchKey } from '@/src/lib/branches';
 import { formatCost, formatDate, formatDuration } from '@/src/lib/format';
-import { renamePath, repositoryPath } from '@/src/lib/paths';
+import { repositoryPath } from '@/src/lib/paths';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,7 +96,14 @@ export default async function RepositoryPage({
       <header className="page-heading">
         <div>
           <p className="eyebrow">Project</p>
-          <h1>{project.displayName}</h1>
+          <RenameControl
+            action={renameRepository}
+            as="h1"
+            canRename={Boolean(admin) && project.key !== NO_REPOSITORY_KEY}
+            hiddenFields={{ repositoryKey: project.key }}
+            placeholder={project.key}
+            value={project.displayName}
+          />
           <p className="lede mono">{project.key}</p>
         </div>
         <div className="code-actions">
@@ -105,15 +119,6 @@ export default async function RepositoryPage({
           >
             Sort by activity
           </Link>
-          {admin && project.key !== NO_REPOSITORY_KEY ? (
-            <Link
-              aria-label={`Rename ${project.displayName}`}
-              className="button button-secondary"
-              href={renamePath(project.key)}
-            >
-              Rename
-            </Link>
-          ) : null}
           {githubUrl ? (
             <a className="button button-secondary" href={githubUrl}>
               Open GitHub ↗
@@ -200,31 +205,47 @@ export default async function RepositoryPage({
           <section className="stack" key={branch}>
             <div className="section-heading">
               <div>
-                <h2 className="mono">{label || branch}</h2>
+                <RenameControl
+                  action={renameBranch}
+                  as="h2"
+                  canRename={Boolean(admin)}
+                  className="mono"
+                  hiddenFields={{
+                    repositoryKey: project.key,
+                    branchKey: branch,
+                  }}
+                  placeholder={branch}
+                  value={label || branch}
+                />
                 {label ? <span className="small subtle mono">{branch}</span> : null}
               </div>
-              <div className="code-actions">
-                <span className="badge">
-                  {items.length} conversation{items.length === 1 ? '' : 's'}
-                </span>
-                {admin ? (
-                  <Link
-                    aria-label={`Rename ${label || branch}`}
-                    className="button button-secondary"
-                    href={renamePath(project.key, { branch })}
-                  >
-                    Rename
-                  </Link>
-                ) : null}
-              </div>
+              <span className="badge">
+                {items.length} conversation{items.length === 1 ? '' : 's'}
+              </span>
             </div>
 
             <div className="conversation-list">
               {items.map((conversation) => (
                 <details className="conversation-card" key={conversation.key}>
                   <summary>
-                    <span>
-                      <strong>{conversation.displayName}</strong>
+                    <span className="conversation-title">
+                      <RenameControl
+                        action={renameConversation}
+                        as="strong"
+                        canRename={
+                          Boolean(admin) &&
+                          conversation.key !== UNKNOWN_CONVERSATION_KEY
+                        }
+                        hiddenFields={{
+                          conversationKey: conversation.key,
+                          repositoryKey: project.key,
+                        }}
+                        placeholder={
+                          conversation.userEmail?.trim() ||
+                          displayConversationKey(conversation.key)
+                        }
+                        value={conversation.displayName}
+                      />
                       <small className="mono subtle">
                         {conversation.id ?? 'No conversation id'}
                       </small>
@@ -245,22 +266,8 @@ export default async function RepositoryPage({
                         {conversation.model ?? 'Unknown model'} ·{' '}
                         {formatDuration(conversation.durationMs)}
                       </div>
-                      <div className="code-actions">
-                        <span className="small subtle">
-                          Latest {formatDate(conversation.latestAt)}
-                        </span>
-                        {admin &&
-                        conversation.key !== UNKNOWN_CONVERSATION_KEY ? (
-                          <Link
-                            aria-label={`Rename ${conversation.displayName}`}
-                            className="button button-secondary"
-                            href={renamePath(project.key, {
-                              conversation: conversation.key,
-                            })}
-                          >
-                            Rename
-                          </Link>
-                        ) : null}
+                      <div className="small subtle">
+                        Latest {formatDate(conversation.latestAt)}
                       </div>
                     </div>
 

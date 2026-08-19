@@ -11,8 +11,7 @@ import {
 } from '@cursor-monitor/core';
 import { getDatabase } from '@cursor-monitor/db';
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
-import { repositoryPath, safeInternalPath } from '@/src/lib/paths';
+import { repositoryPath } from '@/src/lib/paths';
 import { requireAdmin } from './identity';
 
 function text(form: FormData, name: string): string {
@@ -27,16 +26,7 @@ function assertDisplayName(value: string): void {
 function refresh(repository?: string): void {
   revalidatePath('/');
   revalidatePath('/settings');
-  if (repository) {
-    const path = repositoryPath(repository);
-    revalidatePath(path);
-    revalidatePath(`${path}/rename`);
-  }
-}
-
-function finish(form: FormData, repositoryKey: string): never {
-  refresh(repositoryKey);
-  redirect(safeInternalPath(text(form, 'returnTo'), repositoryPath(repositoryKey)));
+  if (repository) revalidatePath(repositoryPath(repository));
 }
 
 export async function renameRepository(form: FormData): Promise<void> {
@@ -52,7 +42,7 @@ export async function renameRepository(form: FormData): Promise<void> {
     displayName || null,
     new Date(),
   );
-  finish(form, repositoryKey);
+  refresh(repositoryKey);
 }
 
 export async function mergeRepository(form: FormData): Promise<void> {
@@ -110,7 +100,7 @@ export async function renameConversation(form: FormData): Promise<void> {
       new Date(),
     );
   }
-  finish(form, text(form, 'repositoryKey'));
+  refresh(text(form, 'repositoryKey'));
 }
 
 export async function renameBranch(form: FormData): Promise<void> {
@@ -128,7 +118,7 @@ export async function renameBranch(form: FormData): Promise<void> {
       new Date(),
     );
   }
-  finish(form, repositoryKey);
+  refresh(repositoryKey);
 }
 
 export async function runTeamSync(): Promise<void> {

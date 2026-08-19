@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { formatCost, formatDate } from '@/src/lib/format';
-import { renamePath, repositoryPath } from '@/src/lib/paths';
-import { mergeRepository } from '@/src/server/actions';
+import { repositoryPath } from '@/src/lib/paths';
+import { RenameControl } from '@/src/components/RenameControl';
+import { mergeRepository, renameRepository } from '@/src/server/actions';
 import { loadMonitorData } from '@/src/server/data';
 import { currentAdmin } from '@/src/server/identity';
 import { NO_REPOSITORY_KEY } from '@cursor-monitor/core';
@@ -94,11 +95,27 @@ export default async function DashboardPage() {
             {tree.projects.map((project) => (
               <article className="project-card" key={project.key}>
                 <div>
+                  {admin && project.key !== NO_REPOSITORY_KEY ? (
+                    <RenameControl
+                      action={renameRepository}
+                      as="h3"
+                      hiddenFields={{ repositoryKey: project.key }}
+                      href={repositoryPath(project.key)}
+                      placeholder={project.key}
+                      value={project.displayName}
+                    />
+                  ) : (
+                    <Link
+                      className="project-card-link"
+                      href={repositoryPath(project.key)}
+                    >
+                      <h3>{project.displayName}</h3>
+                    </Link>
+                  )}
                   <Link
                     className="project-card-link"
                     href={repositoryPath(project.key)}
                   >
-                    <h3>{project.displayName}</h3>
                     <div className="mono small subtle">{project.key}</div>
                     <div className="stats">
                       <span className="stat">
@@ -122,19 +139,8 @@ export default async function DashboardPage() {
                   ) : null}
                 </div>
 
-                <div className="card-footer row-between">
-                  <span className="small subtle">
-                    Latest {project.latestAt ? formatDate(project.latestAt) : '—'}
-                  </span>
-                  {admin && project.key !== NO_REPOSITORY_KEY ? (
-                    <Link
-                      aria-label={`Rename ${project.displayName}`}
-                      className="button button-secondary"
-                      href={renamePath(project.key)}
-                    >
-                      Rename
-                    </Link>
-                  ) : null}
+                <div className="card-footer small subtle">
+                  Latest {project.latestAt ? formatDate(project.latestAt) : '—'}
                 </div>
 
                 {admin &&

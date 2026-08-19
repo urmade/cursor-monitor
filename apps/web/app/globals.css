@@ -320,10 +320,24 @@ h3 {
 }
 
 .button-link {
-  min-height: auto;
+  display: inline;
+  min-height: 0;
   padding: 0;
+  border: none;
+  border-radius: 0;
   background: none;
   color: var(--accent);
+  font: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  appearance: none;
+}
+
+.button-link:hover {
+  color: var(--accent-strong);
 }
 
 .button[disabled] {
@@ -362,49 +376,68 @@ h3 {
   color: var(--danger);
 }
 
-.rename-page {
-  width: 100%;
-  min-height: calc(100dvh - 172px);
-  grid-template-rows: auto auto minmax(24rem, 1fr);
-}
-
-.rename-panel {
-  width: 100%;
+.inline-rename {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 10px;
   min-width: 0;
-  padding: 28px 32px;
 }
 
-.rename-form {
-  display: grid;
-  align-content: start;
-  gap: 20px;
+.inline-rename h1 {
+  margin: 0 0 8px;
+}
+
+.inline-rename h2,
+.inline-rename h3,
+.inline-rename strong {
+  margin: 0;
+}
+
+.inline-rename-link {
+  min-width: 0;
+}
+
+.inline-rename .button-link {
+  flex: none;
+  font-size: 12px;
+}
+
+.inline-rename-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   width: 100%;
 }
 
-.rename-identity {
-  display: grid;
-  gap: 4px;
+.inline-rename-input {
+  flex: 1 1 12rem;
+  width: auto;
+  min-width: 0;
 }
 
-.rename-identity strong {
-  font-size: 14px;
+.inline-rename-input-h1 {
+  min-height: 46px;
+  font-size: clamp(25px, 3vw, 34px);
+  font-weight: 700;
+  letter-spacing: -.035em;
+}
+
+.inline-rename-input-h2,
+.inline-rename-input-h3,
+.inline-rename-input-strong {
   font-weight: 650;
-  overflow-wrap: anywhere;
 }
 
-.rename-form .field {
-  width: 100%;
-}
-
-.rename-form input {
-  min-height: 48px;
+.inline-rename-input-h2 {
   font-size: 16px;
 }
 
-.rename-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.inline-rename-input-h3,
+.inline-rename-input-strong {
+  font-size: 14px;
 }
 
 .form-row {
@@ -489,6 +522,12 @@ details > summary::-webkit-details-marker {
 
 .conversation-card > summary:hover {
   background: var(--surface-raised);
+}
+
+.conversation-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .conversation-body {
@@ -648,14 +687,5 @@ th {
 
   .conversation-card > summary > :nth-child(3) {
     display: none;
-  }
-
-  .rename-page {
-    min-height: calc(100dvh - 140px);
-    grid-template-rows: auto auto minmax(16rem, 1fr);
-  }
-
-  .rename-panel {
-    padding: 20px;
   }
 }
