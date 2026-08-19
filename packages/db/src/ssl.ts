@@ -17,7 +17,7 @@ export function sslOptionForUrl(
     if (environmentMode === 'disable') return false;
     if (environmentMode) return 'require';
 
-    const host = parsed.hostname;
+    const host = parsed.hostname.replace(/^\[|\]$/g, '');
     const local = host === 'localhost' || host === '127.0.0.1' || host === '::1';
     return local ? false : 'require';
   } catch {
