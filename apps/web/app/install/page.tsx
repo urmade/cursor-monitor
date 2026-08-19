@@ -57,9 +57,9 @@ export default async function InstallPage() {
       {!ready ? (
         <div className="callout">
           Hook authentication is not configured. Add{' '}
-          <span className="mono">CURSOR_MONITOR_HOOK_TOKEN</span> or make the
-          platform-provided <span className="mono">VERCEL_PROTECTION_BYPASS</span>{' '}
-          available, then redeploy.
+          <span className="mono">CURSOR_MONITOR_HOOK_TOKEN</span>, then redeploy.
+          Protected deployments must separately provide{' '}
+          <span className="mono">VERCEL_PROTECTION_BYPASS</span>.
         </div>
       ) : null}
 

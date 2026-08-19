@@ -2,27 +2,19 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import postgres from 'postgres';
+import { resolveMigrationUrl } from './config';
 import { sslOptionForUrl } from './ssl';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const lockKey = 1_987_451_621;
 
 export async function execMigrations(connectionUrl?: string): Promise<void> {
-  const url =
-    connectionUrl ??
-    process.env.DB_POSTGRES_URL_NON_POOLING ??
-    process.env.DB_POSTGRES_URL;
-  if (!url) {
-    throw new Error(
-      'Set DB_POSTGRES_URL_NON_POOLING or DB_POSTGRES_URL before running migrations',
-    );
-  }
-
+  const url = resolveMigrationUrl(connectionUrl);
   const ssl = sslOptionForUrl(url);
   const client = postgres(url, {
     max: 1,
     connect_timeout: 15,
-    ...(ssl ? { ssl } : {}),
+    ...(ssl === undefined ? {} : { ssl }),
   });
   try {
     await client`select pg_advisory_lock(${lockKey})`;

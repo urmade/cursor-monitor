@@ -52,7 +52,7 @@ export default async function SettingsPage() {
       <section className="grid">
         <article className="panel">
           <div className="row-between">
-            <h2>Supabase database</h2>
+            <h2>PostgreSQL database</h2>
             {configured(!databaseError)}
           </div>
           <p className="small muted">
@@ -161,10 +161,12 @@ export default async function SettingsPage() {
       <section className="panel">
         <h2>Change configuration safely</h2>
         <p className="small muted">
-          All credentials are managed as SOPS-encrypted internalsphere secrets.
-          See <span className="mono">docs/operations.md</span> for exact key names,
-          rotation steps, failure modes, and verification commands. Never put
-          plaintext credentials in a local environment file or PR description.
+          Configure a server-only <span className="mono">DATABASE_URL</span> or
+          supported provider alias. The reference internalsphere deployment
+          supplies its alias through the managed integration. See{' '}
+          <span className="mono">docs/operations.md</span> for exact key names,
+          failure modes, and verification commands. Never commit plaintext
+          credentials.
         </p>
       </section>
     </div>

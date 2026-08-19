@@ -1,9 +1,29 @@
-export function sslOptionForUrl(url: string): 'require' | false {
+type Environment = Readonly<Record<string, string | undefined>>;
+
+export function sslOptionForUrl(
+  url: string,
+  environment: Environment = process.env,
+): 'require' | false | undefined {
   try {
-    const host = new URL(url).hostname;
+    const parsed = new URL(url);
+    const urlMode = parsed.searchParams.get('sslmode')?.toLowerCase();
+    if (urlMode === 'disable') return false;
+    if (urlMode) return undefined;
+
+    const environmentMode = (
+      environment.PGSSLMODE ??
+      environment.DB_SSL
+    )?.toLowerCase();
+    if (environmentMode === 'disable') return false;
+    if (environmentMode) return 'require';
+
+    const host = parsed.hostname;
     const local = host === 'localhost' || host === '127.0.0.1' || host === '::1';
-    return local || process.env.DB_SSL === 'disable' ? false : 'require';
+    return local ? false : 'require';
   } catch {
-    return process.env.DB_SSL === 'disable' ? false : 'require';
+    return environment.PGSSLMODE === 'disable' ||
+      environment.DB_SSL === 'disable'
+      ? false
+      : 'require';
   }
 }

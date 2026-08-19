@@ -5,13 +5,22 @@ import { buildInstaller } from './installers';
 const previous = {
   token: process.env.CURSOR_MONITOR_HOOK_TOKEN,
   bypass: process.env.VERCEL_PROTECTION_BYPASS,
+  publicUrl: process.env.CURSOR_MONITOR_PUBLIC_URL,
   deployment: process.env.DEPLOYMENT_URL,
+  database: process.env.DATABASE_URL,
 };
 
+function restore(name: string, value: string | undefined) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
 afterEach(() => {
-  process.env.CURSOR_MONITOR_HOOK_TOKEN = previous.token;
-  process.env.VERCEL_PROTECTION_BYPASS = previous.bypass;
-  process.env.DEPLOYMENT_URL = previous.deployment;
+  restore('CURSOR_MONITOR_HOOK_TOKEN', previous.token);
+  restore('VERCEL_PROTECTION_BYPASS', previous.bypass);
+  restore('CURSOR_MONITOR_PUBLIC_URL', previous.publicUrl);
+  restore('DEPLOYMENT_URL', previous.deployment);
+  restore('DATABASE_URL', previous.database);
 });
 
 describe('hook ingestion', () => {
@@ -84,5 +93,22 @@ describe('platform installers', () => {
     delete process.env.CURSOR_MONITOR_HOOK_TOKEN;
     process.env.VERCEL_PROTECTION_BYPASS = 'bypass-only';
     expect(buildInstaller('linux')?.ready).toBe(false);
+  });
+
+  it('regenerates the current app endpoint without exposing database details', () => {
+    process.env.CURSOR_MONITOR_HOOK_TOKEN = 'monitor-test-token';
+    process.env.DATABASE_URL =
+      'postgres://database-user:database-password@database.internal/monitor';
+    process.env.CURSOR_MONITOR_PUBLIC_URL = 'https://monitor-one.example';
+    const first = buildInstaller('linux')?.content;
+
+    process.env.CURSOR_MONITOR_PUBLIC_URL = 'https://monitor-two.example';
+    const second = buildInstaller('linux')?.content;
+
+    expect(first).toContain('https://monitor-one.example/api/hooks/events');
+    expect(second).toContain('https://monitor-two.example/api/hooks/events');
+    expect(second).not.toContain('monitor-one.example');
+    expect(second).not.toContain('database.internal');
+    expect(second).not.toContain('database-password');
   });
 });
