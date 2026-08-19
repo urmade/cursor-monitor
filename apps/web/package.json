@@ -14,7 +14,6 @@
     "@cursor-monitor/core": "workspace:*",
     "@cursor-monitor/db": "workspace:*",
     "@cursor-monitor/team-api": "workspace:*",
-    "drizzle-orm": "^0.45.2",
     "jose": "^6.2.9",
     "next": "16.3.1",
     "react": "19.2.8",

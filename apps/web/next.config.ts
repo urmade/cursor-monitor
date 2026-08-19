@@ -6,7 +6,6 @@ const config: NextConfig = {
     '@cursor-monitor/db',
     '@cursor-monitor/team-api',
   ],
-  serverExternalPackages: ['postgres'],
 };
 
 export default config;

@@ -1,9 +1,9 @@
-import { pingDb } from '@cursor-monitor/db';
+import { getDatabase } from '@cursor-monitor/db';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const database = await pingDb();
+  const database = await getDatabase().ping();
   return Response.json(
     {
       ok: database,

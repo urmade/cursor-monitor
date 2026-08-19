@@ -29,9 +29,6 @@ importers:
       '@cursor-monitor/team-api':
         specifier: workspace:*
         version: link:../../packages/team-api
-      drizzle-orm:
-        specifier: ^0.45.2
-        version: 0.45.2(postgres@3.4.9)
       jose:
         specifier: ^6.2.9
         version: 6.2.9
@@ -97,9 +94,6 @@ importers:
       '@cursor-monitor/team-api':
         specifier: workspace:*
         version: link:../team-api
-      drizzle-orm:
-        specifier: ^0.45.2
-        version: 0.45.2(postgres@3.4.9)
     devDependencies:
       '@cursor-monitor/config':
         specifier: workspace:*

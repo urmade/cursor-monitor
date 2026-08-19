@@ -41,9 +41,10 @@ failed and does not advance the successful watermark.
 
 ## Concurrency
 
-`monitor_sync_locks` holds a ten-minute, owner-scoped lease for the Team usage
-source. Concurrent invocations return `skipped`. A stale lease is deleted before
-a new one is acquired, and an old invocation cannot release a newer lease.
+The configured database adapter holds a ten-minute, owner-scoped lease for the
+Team usage source (`monitor_sync_locks` in the default PostgreSQL adapter).
+Concurrent invocations return `skipped`. A stale lease can be replaced, and an
+old invocation cannot release a newer lease.
 
 ## Conversation matching
 
@@ -77,7 +78,7 @@ a Passport admin and respects the same lock.
 
 ## Changing the sync
 
-Protocol changes belong in `packages/team-api`. Window, lock, fingerprint
-persistence, and database behavior belong in `packages/core/src/team-sync.ts`.
-Keep these concerns separate so the HTTP client stays testable without a
-database.
+Protocol changes belong in `packages/team-api`. Window and fingerprint creation
+belong in `packages/core/src/team-sync.ts`; deduplication, lease, and persistence
+semantics are implemented by `packages/db/src/adapter.ts`. Keep these concerns
+separate so orchestration and the HTTP client stay testable without a database.

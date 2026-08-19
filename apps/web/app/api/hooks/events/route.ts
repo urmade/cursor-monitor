@@ -1,4 +1,4 @@
-import { hookEvents, getDb, newId } from '@cursor-monitor/db';
+import { getDatabase, newId } from '@cursor-monitor/db';
 import { NextResponse } from 'next/server';
 import {
   authorizeHookRequest,
@@ -30,20 +30,16 @@ export async function POST(request: Request) {
   const receivedAt = new Date();
   const event = parseHookEvent(value, receivedAt);
   const id = newId();
-  const inserted = await getDb()
-    .insert(hookEvents)
-    .values({
-      id,
-      ...event,
-      receivedAt,
-    })
-    .onConflictDoNothing()
-    .returning({ id: hookEvents.id });
+  const insertedId = await getDatabase().hooks.insert({
+    id,
+    ...event,
+    receivedAt,
+  });
 
   return NextResponse.json({
     ok: true,
-    id: inserted[0]?.id ?? null,
-    duplicate: inserted.length === 0,
+    id: insertedId,
+    duplicate: insertedId === null,
     repository: event.repositoryKey,
     conversation: event.conversationKey,
     occurredAt: event.occurredAt.toISOString(),

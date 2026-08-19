@@ -1,0 +1,49 @@
+---
+description: Keep one replaceable database adapter behind the database package
+alwaysApply: true
+---
+
+# Single database adapter — hard project rule
+
+Cursor Monitor ships with PostgreSQL as its default database adapter, but
+organizations may replace it with any backend that satisfies the adapter
+contract.
+
+## Connection contract
+
+- `DATABASE_ADAPTER` selects one adapter and defaults to `postgres`.
+- Exactly one database adapter and one logical database configuration are active
+  per deployment. Do not add fan-out, fallback, dual-read, dual-write, or
+  per-request database routing.
+- `DATABASE_URL` is the canonical runtime connection for the selected adapter.
+- `MIGRATION_DATABASE_URL` is an optional direct connection for migrations and
+  defaults to the runtime URL.
+- Provider aliases such as `DB_POSTGRES_URL` and
+  `DB_POSTGRES_URL_NON_POOLING` may remain for deployment compatibility, but
+  application behavior must not depend on the provider that supplied them.
+- Database credentials stay server-side. Cursor hooks send events to the
+  application HTTP endpoint and must never receive database connection details.
+
+## Provider boundaries
+
+- PostgreSQL is the default shipped adapter, not a product requirement.
+- The Supabase integration in `app-manifest.yml` is the reference internalsphere
+  deployment, not a product invariant.
+- Organizations may replace the default adapter or reference deployment.
+  Provider-specific clients, queries, schemas, and migrations belong behind
+  `packages/db`; they must not leak into `packages/core`, hook payloads, or UI
+  identity behavior.
+- Replacement adapters must preserve identity, idempotency, migration, locking,
+  ordering, and transaction semantics and must include adapter contract tests
+  and operations documentation.
+- Follow `docs/database-adapters.md` when replacing or adding an adapter
+  implementation.
+
+## Schema and validation
+
+- Each adapter owns its schema and forward-only migrations. The default
+  PostgreSQL adapter uses `packages/db/migrations/`.
+- Unit tests must run without a live database. Integration tests may use an
+  explicitly supplied test database and must never silently target production.
+- Never commit connection strings, passwords, plaintext `.env` files, or
+  provider credentials.

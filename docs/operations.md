@@ -2,11 +2,52 @@
 
 ## Deployment
 
-Preview and production deploy only through the managed GitHub workflow. Pushing
-a PR provisions the preview Supabase integration, applies migrations, and
-deploys `apps/web`.
+Every deployment must run `pnpm db:exec-migrations` before starting `apps/web`.
+This command migrates the one adapter selected by `DATABASE_ADAPTER`. The
+reference internalsphere deployment does this through the managed GitHub
+workflow: a PR provisions its PostgreSQL-compatible Supabase resource, applies
+migrations, and deploys the app.
 
-Do not run `vercel deploy`, `vercel env pull`, or a local database.
+Other deployments may replace the default adapter and use their own deployment
+tooling. See `docs/database-adapters.md`.
+
+## Database configuration
+
+`DATABASE_ADAPTER` selects one adapter and defaults to `postgres`. It accepts one
+exact ID, not a list. The runtime never falls back to another adapter and rejects
+a second adapter or logical database configuration in the same process.
+
+Set `DATABASE_URL` to the selected adapter's server-only runtime connection.
+`MIGRATION_DATABASE_URL` optionally supplies its migration connection. These
+variables describe one logical database, not separate data sources.
+
+For the default PostgreSQL adapter, provider names are resolved in this order:
+
+1. `DATABASE_URL`
+2. `POSTGRES_URL`
+3. `DB_POSTGRES_URL`
+
+Set `MIGRATION_DATABASE_URL` when migrations need a direct connection instead of
+the pooled runtime URL. Migration aliases are
+`DATABASE_URL_NON_POOLING`, `POSTGRES_URL_NON_POOLING`, and
+`DB_POSTGRES_URL_NON_POOLING`. Each alias is paired with its runtime family so a
+legacy provider URL cannot override a selected `DATABASE_URL`; migration
+execution falls back to the selected runtime URL when its matching direct value
+is not configured.
+
+Remote connections require TLS by default. A connection-string `sslmode` takes
+precedence. Standard `PGSSLMODE` values are supported; `verify-full` preserves
+certificate and hostname verification, while the application tightens
+`verify-ca` to `verify-full`. Use `disable` only for a database that explicitly
+does not support TLS. `DB_SSL` remains as a legacy alias. Localhost connections
+default to TLS disabled.
+
+The default adapter's migration identity must be able to create and alter tables
+and take a PostgreSQL advisory lock. If a separate runtime identity is used,
+grant it read/write access to the `monitor_*` tables and configure RLS policies
+(or deliberately disable RLS) for that identity. The app does not require
+Supabase roles, extensions, or APIs. Replacement adapters document equivalent
+permissions and locking requirements.
 
 ## Secrets
 
@@ -25,15 +66,16 @@ Supported keys:
 | Key | Required | Notes |
 |---|---|---|
 | `CURSOR_MONITOR_HOOK_TOKEN` | Yes | Dedicated inbound app token |
-| `VERCEL_PROTECTION_BYPASS` | Yes for protected deployments | Also fallback app token |
+| `VERCEL_PROTECTION_BYPASS` | Yes for protected deployments | Deployment protection only |
 | `CRON_SECRET` | Yes | Vercel cron authorization |
 | `CURSOR_TEAM_API_KEY` | One credential mode | Team filtered usage |
 | `CURSOR_ORGANIZATION_API_KEY` | One credential mode | Pair with organization ID |
 | `CURSOR_ORGANIZATION_ID` | Organization mode | Required with organization key |
 | `CURSOR_API_BASE_URL` | No | Defaults to official Cursor API |
 
-Supabase `DB_*` values are injected by `integrations.db`; do not add them as
-manual secrets.
+In the reference deployment, `DB_*` values are injected by `integrations.db`;
+do not duplicate them as manual secrets. Other deployments should store the one
+selected adapter ID and its connection values in their platform secret manager.
 
 ## Health surfaces
 
@@ -82,8 +124,9 @@ on every plan.
 ### Sync always skips as running
 
 The lock expires after ten minutes. If no run is active and the row remains,
-inspect `monitor_sync_locks` in the managed Supabase project and compare its
-`expires_at` value. Normal syncs delete the lease in `finally`.
+inspect the configured adapter's sync lease storage (`monitor_sync_locks` in the
+default PostgreSQL adapter) and compare its expiry. Normal syncs release the
+lease in `finally`.
 
 ### Costs appear pending
 

@@ -28,19 +28,22 @@ identity invariants in `AGENTS.md`.
 | How is an OS script generated? | `apps/web/src/server/installers.ts` |
 | Where does a rename write? | `apps/web/src/server/actions.ts` |
 | How are rows loaded into the UI? | `apps/web/src/server/data.ts` |
-| What table/index owns a field? | `packages/db/src/schema/index.ts` |
+| What persistence operation owns a field? | `packages/db/src/adapter.ts` |
+| What PostgreSQL table/index owns a field? | `packages/db/src/schema/index.ts` |
+| How do I replace the database? | `docs/database-adapters.md` |
 
 ## Common change recipes
 
 ### Add a field from hook payload to the UI
 
-1. Add the column in Drizzle and a forward-only migration.
-2. Parse it in `hook-ingest.ts`.
-3. Include it in the insert route.
-4. Add it to `MonitorHookRecord`.
-5. Map it in `data.ts`.
-6. Render it on the repository page.
-7. Test parsing and aggregation separately.
+1. Add the field to the database adapter contract.
+2. Add it to the default PostgreSQL schema and a forward-only migration.
+3. Parse it in `hook-ingest.ts`.
+4. Include it in the adapter insert input.
+5. Add it to `MonitorHookRecord`.
+6. Map it in `data.ts`.
+7. Render it on the repository page.
+8. Test parsing and aggregation separately.
 
 Do not remove the value from raw `payload`.
 
@@ -71,6 +74,12 @@ Never solve grouping by rewriting historical raw events.
 5. Do not introduce Python, Node, `jq`, package managers, or third-party modules.
 6. Update installer tests and `docs/hooks.md`.
 
+### Replace the database adapter
+
+Follow `docs/database-adapters.md`. Keep exactly one selected backend, preserve
+all semantic operations in `DatabaseAdapter`, route migrations through
+`pnpm db:exec-migrations`, and do not expose provider code outside `packages/db`.
+
 ### Add a dashboard preference
 
 Display-only preferences need:
@@ -93,8 +102,8 @@ pnpm build
 python3 scripts/app-manifest.py
 ```
 
-Database behavior is validated on the PR preview because local substitute
-databases are forbidden. The strongest preview checks are:
+Database behavior is validated against an explicitly configured development or
+preview instance for the selected adapter. The strongest checks are:
 
 - migration succeeded;
 - `/api/health` returns `200`;
@@ -111,5 +120,6 @@ databases are forbidden. The strongest preview checks are:
 - Does a failed external request leave a stale lock or block hook ingestion?
 - Are secrets absent from source, tests, logs, and PR text?
 - Is raw source data retained when display behavior changes?
-- Does a schema change include both Drizzle and forward SQL?
+- Does a schema change update the neutral contract and the selected adapter's
+  schema and forward migration?
 - Can a new admin find the change through `README.md` or this guide?

@@ -18,7 +18,10 @@ function powershellQuote(value: string): string {
 }
 
 export function publicBaseUrl(): string {
-  const explicit = process.env.DEPLOYMENT_URL?.trim();
+  const explicit = (
+    process.env.CURSOR_MONITOR_PUBLIC_URL ??
+    process.env.DEPLOYMENT_URL
+  )?.trim();
   if (explicit) return explicit.replace(/\/$/, '');
   const production = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
   if (process.env.VERCEL_ENV === 'production' && production) {

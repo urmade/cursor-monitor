@@ -3,5 +3,7 @@ owner: tobias.urban@anysphere.co
 vercel:
   root_directory: apps/web
 integrations:
+  # Reference internalsphere deployment only. PostgreSQL is the default
+  # replaceable adapter, and each deployment configures one database.
   db:
     type: supabase

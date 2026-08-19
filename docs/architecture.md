@@ -30,9 +30,9 @@ domain.
 └────────┼────────────────────────┼───────────────────────────┘
          ▼                        ▼
 ┌────────────────────────────────────────────────────────────┐
-│ Managed Supabase                                          │
-│ monitor_hook_events     monitor_team_usage_events          │
-│ preferences            monitor_sync_runs / locks           │
+│ Configured database adapter (default: PostgreSQL)         │
+│ hook events            team usage events                  │
+│ preferences            sync runs / leases                 │
 └───────────────────────────┬────────────────────────────────┘
                             ▼
                  @cursor-monitor/core/aggregation
@@ -50,14 +50,19 @@ paginates, and returns raw usage events. It has no database or UI dependency.
 
 ### `packages/db`
 
-Knows Supabase/Postgres persistence only. It exports the Drizzle schema and
-runtime connection. It has no product-rule dependency.
+Owns the backend-neutral semantic contract, immutable single-adapter selector,
+and adapter lifecycle. PostgreSQL is the default implementation; its Drizzle
+schema, driver, SQL, locks, provider aliases, and migrations are internal.
+Replacement implementations remain behind this boundary. See
+`docs/database-adapters.md`.
 
 ### `packages/core`
 
 Owns stable identities, merge validation, project aggregation, usage matching,
-sync windows, locks, and deduplicated persistence. It depends on `db` and
-`team-api`, never on Next.js.
+sync windows, and usage fingerprint creation. It orchestrates semantic
+persistence operations through `db`; the selected adapter owns locks,
+deduplicated writes, and transactions. Core depends on `db` and `team-api`,
+never on Next.js.
 
 ### `apps/web`
 
@@ -107,8 +112,9 @@ admins before changing display preferences or starting a manual sync.
 - Hook requests require an application token and the platform bypass.
 - Cron requests require `CRON_SECRET`.
 - Team credentials are server-only encrypted secrets.
-- Supabase RLS is enabled with no anon/authenticated policies. The server
-  connection is the only data path.
+- Database credentials are server-only. The configured adapter must not expose a
+  client-side data path; adopting organizations may add infrastructure-specific
+  controls.
 - Installer responses are private and non-cacheable because they embed the
   ingestion credential and Vercel bypass.
 - Human routes require a Passport identity in the root layout, so possession of
@@ -118,7 +124,8 @@ admins before changing display preferences or starting a manual sync.
 
 The UI reads summary columns for the newest 5,000 hook rows and 10,000 usage
 rows. Raw JSON is fetched separately for at most 1,000 project events. It reports
-when a limit is reached; historical rows remain queryable in Supabase. Polling
+when a limit is reached; historical rows remain queryable in the configured
+database. Polling
 accepts up to 20 pages of 1,000 usage rows per window, recursively splits a
 truncated window, and does not advance the successful watermark if a minimum
 window still truncates.

@@ -79,6 +79,18 @@ At runtime, `CURSOR_MONITOR_ENDPOINT`, `CURSOR_MONITOR_HOOK_TOKEN`, and
 `VERCEL_PROTECTION_BYPASS` override embedded values. Centrally managed Team
 Hooks should prefer these environment values to simplify rotation.
 
+Fresh installers are generated from the running app configuration.
+`CURSOR_MONITOR_PUBLIC_URL` is the preferred explicit public base URL;
+`DEPLOYMENT_URL` and Vercel deployment URL variables remain supported
+fallbacks. Regenerating an installer after the public URL changes embeds the new
+endpoint automatically.
+
+Database adapter IDs and credentials are never embedded in hooks. Replacing
+`DATABASE_ADAPTER`, `DATABASE_URL`, or a provider alias changes only the
+server-side persistence target and does not require a hook update.
+Already-installed hook files need regeneration only when the application URL or
+hook token changes, unless centrally managed runtime overrides are used.
+
 Installer downloads use `Cache-Control: private, no-store` and require the
 Passport-protected application. Treat generated scripts as secrets because the
 credential is embedded for portability.
