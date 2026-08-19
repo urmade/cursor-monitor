@@ -320,10 +320,24 @@ h3 {
 }
 
 .button-link {
-  min-height: auto;
+  display: inline;
+  min-height: 0;
   padding: 0;
+  border: none;
+  border-radius: 0;
   background: none;
   color: var(--accent);
+  font: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  appearance: none;
+}
+
+.button-link:hover {
+  color: var(--accent-strong);
 }
 
 .button[disabled] {
@@ -386,7 +400,7 @@ h3 {
 
 .inline-rename .button-link {
   flex: none;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .inline-rename-form {
