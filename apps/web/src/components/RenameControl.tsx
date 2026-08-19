@@ -1,122 +1,140 @@
 'use client';
 
-import { useRef } from 'react';
+import type { ReactNode } from 'react';
+import { useState } from 'react';
+import Link from 'next/link';
 import { useFormStatus } from 'react-dom';
+
+type ValueTag = 'h1' | 'h2' | 'h3' | 'strong' | 'span';
 
 type RenameControlProps = {
   action: (form: FormData) => Promise<void>;
-  ariaLabel: string;
-  eyebrow: string;
-  title: string;
-  lede: string;
-  stableLabel: string;
-  stableValue: string;
-  currentName: string;
-  placeholder: string;
+  as?: ValueTag;
+  canRename?: boolean;
+  className?: string;
+  href?: string;
   hiddenFields: Record<string, string>;
+  placeholder: string;
+  value: string;
 };
 
-function SaveNameButton() {
+function stop(event: { preventDefault(): void; stopPropagation(): void }) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function SaveButton() {
   const { pending } = useFormStatus();
   return (
     <button className="button button-primary" disabled={pending} type="submit">
-      {pending ? 'Saving…' : 'Save name'}
+      {pending ? 'Saving…' : 'Save'}
     </button>
+  );
+}
+
+function DisplayValue({
+  as: Tag = 'span',
+  children,
+  className,
+  href,
+}: {
+  as?: ValueTag;
+  children: ReactNode;
+  className?: string;
+  href?: string;
+}) {
+  const value = <Tag className={className}>{children}</Tag>;
+  return href ? (
+    <Link className="inline-rename-link" href={href}>
+      {value}
+    </Link>
+  ) : (
+    value
   );
 }
 
 export function RenameControl({
   action,
-  ariaLabel,
-  eyebrow,
-  title,
-  lede,
-  stableLabel,
-  stableValue,
-  currentName,
-  placeholder,
+  as = 'span',
+  canRename = true,
+  className,
+  href,
   hiddenFields,
+  placeholder,
+  value,
 }: RenameControlProps) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [editing, setEditing] = useState(false);
 
-  function open() {
-    dialogRef.current?.showModal();
-  }
-
-  function close() {
-    dialogRef.current?.close();
+  if (!canRename) {
+    return (
+      <DisplayValue as={as} className={className} href={href}>
+        {value}
+      </DisplayValue>
+    );
   }
 
   async function submit(formData: FormData) {
     await action(formData);
-    close();
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <form
+        action={submit}
+        className="inline-rename-form"
+        onClick={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            stop(event);
+            setEditing(false);
+          }
+        }}
+      >
+        {Object.entries(hiddenFields).map(([name, fieldValue]) => (
+          <input key={name} name={name} type="hidden" value={fieldValue} />
+        ))}
+        <input
+          aria-label="Display name"
+          autoFocus
+          className={`inline-rename-input inline-rename-input-${as}${className ? ` ${className}` : ''}`}
+          defaultValue={value}
+          maxLength={120}
+          name="displayName"
+          placeholder={placeholder}
+        />
+        <SaveButton />
+        <button
+          className="button button-secondary"
+          onClick={(event) => {
+            stop(event);
+            setEditing(false);
+          }}
+          type="button"
+        >
+          Cancel
+        </button>
+      </form>
+    );
   }
 
   return (
-    <>
+    <span className="inline-rename">
+      <DisplayValue as={as} className={className} href={href}>
+        {value}
+      </DisplayValue>
       <button
-        aria-label={ariaLabel}
-        className="button button-secondary"
+        className="button-link"
         onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          open();
+          stop(event);
+          setEditing(true);
         }}
+        onMouseDown={(event) => event.stopPropagation()}
         type="button"
       >
         Rename
       </button>
-      <dialog
-        aria-label={title}
-        className="rename-dialog"
-        ref={dialogRef}
-      >
-        <div className="rename-dialog-body">
-          <header className="page-heading">
-            <div>
-              <p className="eyebrow">{eyebrow}</p>
-              <h1>{title}</h1>
-              <p className="lede">{lede}</p>
-            </div>
-          </header>
-          <section className="panel rename-panel">
-            <form action={submit} className="rename-form">
-              {Object.entries(hiddenFields).map(([name, value]) => (
-                <input key={name} name={name} type="hidden" value={value} />
-              ))}
-              <div className="rename-identity">
-                <span className="small subtle">{stableLabel}</span>
-                <strong className="mono">{stableValue}</strong>
-              </div>
-              <label className="field">
-                <span>Display name</span>
-                <input
-                  autoFocus
-                  defaultValue={currentName}
-                  key={currentName}
-                  maxLength={120}
-                  name="displayName"
-                  placeholder={placeholder}
-                />
-              </label>
-              <p className="small muted">
-                Leave blank to restore the default name. The stable{' '}
-                {stableLabel.toLowerCase()} never changes.
-              </p>
-              <div className="rename-actions">
-                <SaveNameButton />
-                <button
-                  className="button button-secondary"
-                  onClick={close}
-                  type="button"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
-      </dialog>
-    </>
+    </span>
   );
 }

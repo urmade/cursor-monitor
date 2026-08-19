@@ -95,11 +95,27 @@ export default async function DashboardPage() {
             {tree.projects.map((project) => (
               <article className="project-card" key={project.key}>
                 <div>
+                  {admin && project.key !== NO_REPOSITORY_KEY ? (
+                    <RenameControl
+                      action={renameRepository}
+                      as="h3"
+                      hiddenFields={{ repositoryKey: project.key }}
+                      href={repositoryPath(project.key)}
+                      placeholder={project.key}
+                      value={project.displayName}
+                    />
+                  ) : (
+                    <Link
+                      className="project-card-link"
+                      href={repositoryPath(project.key)}
+                    >
+                      <h3>{project.displayName}</h3>
+                    </Link>
+                  )}
                   <Link
                     className="project-card-link"
                     href={repositoryPath(project.key)}
                   >
-                    <h3>{project.displayName}</h3>
                     <div className="mono small subtle">{project.key}</div>
                     <div className="stats">
                       <span className="stat">
@@ -123,28 +139,8 @@ export default async function DashboardPage() {
                   ) : null}
                 </div>
 
-                <div className="card-footer row-between">
-                  <span className="small subtle">
-                    Latest {project.latestAt ? formatDate(project.latestAt) : '—'}
-                  </span>
-                  {admin && project.key !== NO_REPOSITORY_KEY ? (
-                    <RenameControl
-                      action={renameRepository}
-                      ariaLabel={`Rename ${project.displayName}`}
-                      currentName={
-                        project.displayName === project.key
-                          ? ''
-                          : project.displayName
-                      }
-                      eyebrow="Display preference"
-                      hiddenFields={{ repositoryKey: project.key }}
-                      lede="This label appears on the dashboard and project page. The canonical repository key, URLs, and raw hook payloads stay the same."
-                      placeholder={project.key}
-                      stableLabel="Repository key"
-                      stableValue={project.key}
-                      title={`Rename ${project.displayName}`}
-                    />
-                  ) : null}
+                <div className="card-footer small subtle">
+                  Latest {project.latestAt ? formatDate(project.latestAt) : '—'}
                 </div>
 
                 {admin &&

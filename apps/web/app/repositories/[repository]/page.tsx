@@ -15,7 +15,6 @@ import {
 } from '@/src/server/actions';
 import {
   loadBranchNames,
-  loadConversationNames,
   loadRepositoryProject,
 } from '@/src/server/data';
 import { currentAdmin } from '@/src/server/identity';
@@ -61,11 +60,10 @@ export default async function RepositoryPage({
     notFound();
   }
   project = project!;
-  const [{ sort }, admin, branchNames, conversationNames] = await Promise.all([
+  const [{ sort }, admin, branchNames] = await Promise.all([
     searchParams,
     currentAdmin(),
     loadBranchNames(project.key),
-    loadConversationNames(),
   ]);
   const conversations = [...project.conversations].sort((a, b) =>
     sort === 'cost'
@@ -98,7 +96,14 @@ export default async function RepositoryPage({
       <header className="page-heading">
         <div>
           <p className="eyebrow">Project</p>
-          <h1>{project.displayName}</h1>
+          <RenameControl
+            action={renameRepository}
+            as="h1"
+            canRename={Boolean(admin) && project.key !== NO_REPOSITORY_KEY}
+            hiddenFields={{ repositoryKey: project.key }}
+            placeholder={project.key}
+            value={project.displayName}
+          />
           <p className="lede mono">{project.key}</p>
         </div>
         <div className="code-actions">
@@ -114,22 +119,6 @@ export default async function RepositoryPage({
           >
             Sort by activity
           </Link>
-          {admin && project.key !== NO_REPOSITORY_KEY ? (
-            <RenameControl
-              action={renameRepository}
-              ariaLabel={`Rename ${project.displayName}`}
-              currentName={
-                project.displayName === project.key ? '' : project.displayName
-              }
-              eyebrow="Display preference"
-              hiddenFields={{ repositoryKey: project.key }}
-              lede="This label appears on the dashboard and project page. The canonical repository key, URLs, and raw hook payloads stay the same."
-              placeholder={project.key}
-              stableLabel="Repository key"
-              stableValue={project.key}
-              title={`Rename ${project.displayName}`}
-            />
-          ) : null}
           {githubUrl ? (
             <a className="button button-secondary" href={githubUrl}>
               Open GitHub ↗
@@ -216,39 +205,47 @@ export default async function RepositoryPage({
           <section className="stack" key={branch}>
             <div className="section-heading">
               <div>
-                <h2 className="mono">{label || branch}</h2>
+                <RenameControl
+                  action={renameBranch}
+                  as="h2"
+                  canRename={Boolean(admin)}
+                  className="mono"
+                  hiddenFields={{
+                    repositoryKey: project.key,
+                    branchKey: branch,
+                  }}
+                  placeholder={branch}
+                  value={label || branch}
+                />
                 {label ? <span className="small subtle mono">{branch}</span> : null}
               </div>
-              <div className="code-actions">
-                <span className="badge">
-                  {items.length} conversation{items.length === 1 ? '' : 's'}
-                </span>
-                {admin ? (
-                  <RenameControl
-                    action={renameBranch}
-                    ariaLabel={`Rename ${label || branch}`}
-                    currentName={label ?? ''}
-                    eyebrow="Display preference"
-                    hiddenFields={{
-                      repositoryKey: project.key,
-                      branchKey: branch,
-                    }}
-                    lede="This label groups conversations on the project page. The underlying git branch name is unchanged."
-                    placeholder={branch}
-                    stableLabel="Branch key"
-                    stableValue={branch}
-                    title={`Rename ${label || branch}`}
-                  />
-                ) : null}
-              </div>
+              <span className="badge">
+                {items.length} conversation{items.length === 1 ? '' : 's'}
+              </span>
             </div>
 
             <div className="conversation-list">
               {items.map((conversation) => (
                 <details className="conversation-card" key={conversation.key}>
                   <summary>
-                    <span>
-                      <strong>{conversation.displayName}</strong>
+                    <span className="conversation-title">
+                      <RenameControl
+                        action={renameConversation}
+                        as="strong"
+                        canRename={
+                          Boolean(admin) &&
+                          conversation.key !== UNKNOWN_CONVERSATION_KEY
+                        }
+                        hiddenFields={{
+                          conversationKey: conversation.key,
+                          repositoryKey: project.key,
+                        }}
+                        placeholder={
+                          conversation.userEmail?.trim() ||
+                          displayConversationKey(conversation.key)
+                        }
+                        value={conversation.displayName}
+                      />
                       <small className="mono subtle">
                         {conversation.id ?? 'No conversation id'}
                       </small>
@@ -269,34 +266,8 @@ export default async function RepositoryPage({
                         {conversation.model ?? 'Unknown model'} ·{' '}
                         {formatDuration(conversation.durationMs)}
                       </div>
-                      <div className="code-actions">
-                        <span className="small subtle">
-                          Latest {formatDate(conversation.latestAt)}
-                        </span>
-                        {admin &&
-                        conversation.key !== UNKNOWN_CONVERSATION_KEY ? (
-                          <RenameControl
-                            action={renameConversation}
-                            ariaLabel={`Rename ${conversation.displayName}`}
-                            currentName={
-                              conversationNames.get(conversation.key)?.trim() ??
-                              ''
-                            }
-                            eyebrow="Display preference"
-                            hiddenFields={{
-                              conversationKey: conversation.key,
-                              repositoryKey: project.key,
-                            }}
-                            lede="This label appears on the project page. Conversation identity, usage joins, and raw payloads stay on the original Cursor conversation ID."
-                            placeholder={
-                              conversation.userEmail?.trim() ||
-                              displayConversationKey(conversation.key)
-                            }
-                            stableLabel="Conversation ID"
-                            stableValue={conversation.id ?? conversation.key}
-                            title={`Rename ${conversation.displayName}`}
-                          />
-                        ) : null}
+                      <div className="small subtle">
+                        Latest {formatDate(conversation.latestAt)}
                       </div>
                     </div>
 
