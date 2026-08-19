@@ -127,3 +127,30 @@ preview. Preview/production deploys happen only through the managed PR workflow.
 
 See `docs/ai-agent-guide.md` for common change recipes and investigation entry
 points.
+
+## Cursor Cloud specific instructions
+
+The startup update script runs `pnpm install`. Standard commands live in
+`README.md` and the `## Commands` section above; run them from the repo root.
+
+- **Toolchain**: Node 22 and pnpm 10.33.3 (pinned via `packageManager`) are
+  preinstalled. `pnpm dev` serves `apps/web` on port 3000 with Turbopack.
+- **No database in the VM**: `DB_POSTGRES_URL` is not set locally, and per the
+  hard rules a substitute Postgres must never be started. Consequences while
+  running locally: `/api/health` returns `503`, and DB-backed routes (`/`,
+  `/repositories/[repository]`, `/settings`, `/api/hooks/events`, the cron sync)
+  throw at request time. This is expected — validate all database behavior on
+  the PR preview deploy, not in the VM.
+- **What works without a database**: hook-installer generation. `currentAdmin()`
+  returns a stub admin whenever `VERCEL` is unset, so `/install` and
+  `/api/install/{linux,macos,windows}` render without auth. Installers only
+  become downloadable (`ready: true`) when `CURSOR_MONITOR_HOOK_TOKEN` is
+  exported in the dev server's environment; otherwise the page shows a
+  "not configured" callout. This is the easiest end-to-end smoke test in the VM.
+- **Generated files, do not commit**: `next dev`/`next build` rewrite
+  `apps/web/next-env.d.ts` (toggling `.next/dev/types` vs `.next/types`) and emit
+  `apps/web/AGENTS.md` and `apps/web/CLAUDE.md` (Next 16 `agentRules`). None are
+  gitignored — leave them out of commits.
+- **Verification**: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and
+  `python3 scripts/app-manifest.py` all pass offline with no database. DB-backed
+  tests self-skip unless `DB_POSTGRES_URL` targets managed Supabase.
