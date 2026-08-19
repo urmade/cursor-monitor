@@ -33,8 +33,8 @@ product does not need multi-database aggregation, fallback, or routing.
 - Replacement adapters must preserve hook and usage deduplication, repository
   merge serialization, sync lease ownership and expiry, ordering, bounded reads,
   timestamp behavior, and migration atomicity.
-- Database credentials remain server-only and are never included in Cursor hook
-  installers or payloads.
+- Database credentials remain server-only and are never included in Cursor Team
+  Hook scripts or payloads.
 
 ## Consequences
 

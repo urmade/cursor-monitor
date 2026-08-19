@@ -38,8 +38,8 @@ export default async function DashboardPage() {
               overlapping sync windows.
             </p>
           </div>
-          <Link className="button button-primary" href="/install">
-            Install hooks
+          <Link className="button button-primary" href="/hooks">
+            Configure Team Hooks
           </Link>
         </header>
 
@@ -84,11 +84,11 @@ export default async function DashboardPage() {
           <section className="panel empty">
             <h2>No activity yet</h2>
             <p>
-              Install a platform hook in a repository. Its first completed Cursor
-              request creates the project automatically.
+              Configure Team Hooks for your organization. The first completed
+              Cursor request creates the project automatically.
             </p>
-            <Link className="button button-primary" href="/install">
-              Open hook installer
+            <Link className="button button-primary" href="/hooks">
+              Open Team Hook setup
             </Link>
           </section>
         ) : (

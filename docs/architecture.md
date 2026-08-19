@@ -15,7 +15,7 @@ domain.
 ```text
 ┌──────────────────────┐           ┌──────────────────────┐
 │ Cursor IDE / Agent   │           │ Cursor Team API      │
-│ project hooks        │           │ filtered usage       │
+│ managed Team Hooks   │           │ filtered usage       │
 └──────────┬───────────┘           └──────────┬───────────┘
            │ POST                                 ▲
            ▼                                      │ every 5m
@@ -77,8 +77,7 @@ admins before changing display preferences or starting a manual sync.
 1. The installed stop hook reads Cursor JSON from stdin.
 2. It enriches the payload with repository, branch, workspace, and paired start
    and finish timestamps.
-3. It sends `x-cursor-monitor-token` for app authentication and
-   `x-vercel-protection-bypass` for deployment protection.
+3. It sends `x-cursor-monitor-token` for app authentication.
 4. `/api/hooks/events` validates auth and the 256 KiB body limit.
 5. The parser preserves the raw payload, stores original repository casing, and
    computes canonical keys.
@@ -109,14 +108,14 @@ admins before changing display preferences or starting a manual sync.
 - Mutating server actions additionally require a valid Passport identity. This
   internal app intentionally treats every approved Passport viewer as an
   administrator; add role checks before broadening its audience.
-- Hook requests require an application token and the platform bypass.
-- Cron requests require `CRON_SECRET`.
+- Hook requests require the dedicated application token.
+- Cron requests require `CRON_SECRET` on Vercel scheduled invocations only.
 - Team credentials are server-only encrypted secrets.
 - Database credentials are server-only. The configured adapter must not expose a
   client-side data path; adopting organizations may add infrastructure-specific
   controls.
-- Installer responses are private and non-cacheable because they embed the
-  ingestion credential and Vercel bypass.
+- Team Hook script responses are private and non-cacheable because the stop
+  script embeds the ingestion credential.
 - Human routes require a Passport identity in the root layout, so possession of
   a hook script cannot expose dashboard telemetry.
 

@@ -36,7 +36,7 @@ the selected database provider.
   deployment configures one adapter and one database.
 - Generated hooks derive their HTTP endpoint from the running app. Changing a
   database connection does not require hook changes, and no database value may
-  be embedded in an installer.
+  be embedded in a Team Hook script.
 
 ## Consequences
 

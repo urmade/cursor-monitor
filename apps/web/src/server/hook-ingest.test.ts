@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { authorizeHookRequest, parseHookEvent } from './hook-ingest';
-import { buildInstaller } from './installers';
+import { buildHookScripts, getHookScript } from './hook-scripts';
 
 const previous = {
   token: process.env.CURSOR_MONITOR_HOOK_TOKEN,
-  bypass: process.env.VERCEL_PROTECTION_BYPASS,
   publicUrl: process.env.CURSOR_MONITOR_PUBLIC_URL,
   deployment: process.env.DEPLOYMENT_URL,
   databaseAdapter: process.env.DATABASE_ADAPTER,
@@ -18,7 +17,6 @@ function restore(name: string, value: string | undefined) {
 
 afterEach(() => {
   restore('CURSOR_MONITOR_HOOK_TOKEN', previous.token);
-  restore('VERCEL_PROTECTION_BYPASS', previous.bypass);
   restore('CURSOR_MONITOR_PUBLIC_URL', previous.publicUrl);
   restore('DEPLOYMENT_URL', previous.deployment);
   restore('DATABASE_ADAPTER', previous.databaseAdapter);
@@ -65,48 +63,56 @@ describe('hook ingestion', () => {
   });
 });
 
-describe('platform installers', () => {
+describe('Team Hook scripts', () => {
   it.each(['linux', 'macos', 'windows'] as const)(
-    'generates a dependency-light %s installer',
+    'generates direct dependency-light %s scripts',
     (platform) => {
       process.env.CURSOR_MONITOR_HOOK_TOKEN = 'monitor-test-token';
-      process.env.VERCEL_PROTECTION_BYPASS = 'bypass-test-token';
       process.env.DEPLOYMENT_URL = 'https://monitor.example';
-      const installer = buildInstaller(platform);
-      expect(installer?.ready).toBe(true);
-      expect(installer?.content).toContain(
+      const bundle = buildHookScripts(platform);
+      expect(bundle?.ready).toBe(true);
+      expect(bundle?.scripts.map((script) => script.eventName)).toEqual([
+        'beforeSubmitPrompt',
+        'stop',
+      ]);
+      const start = getHookScript(platform, 'start');
+      const stop = getHookScript(platform, 'stop');
+      expect(start?.content).toContain('Team Hook: beforeSubmitPrompt');
+      expect(stop?.content).toContain(
         'https://monitor.example/api/hooks/events',
       );
-      expect(installer?.content).toContain('monitor-test-token');
-      expect(installer?.content).toContain('hooks.cursor-monitor.example.json');
-      expect(installer?.content).not.toMatch(/\b(jq|python|node|npm|brew)\b/i);
+      expect(stop?.content).toContain('monitor-test-token');
+      expect(stop?.content).not.toMatch(/\b(jq|python|node|npm|brew)\b/i);
+      expect(stop?.content).not.toContain('hooks.json');
+      expect(stop?.content).not.toContain('project-hook installer');
       if (platform === 'windows') {
-        expect(installer?.content).toContain('Invoke-WebRequest');
-        expect(installer?.content).toContain('UTF8Encoding($false)');
-        expect(installer?.content).toContain('cursor-monitor-stop.ps1');
+        expect(start?.filename).toBe('cursor-monitor-windows-start.ps1');
+        expect(stop?.filename).toBe('cursor-monitor-windows-stop.ps1');
+        expect(stop?.content).toContain('Invoke-WebRequest');
       } else {
-        expect(installer?.content).toContain('#!/bin/sh');
-        expect(installer?.content).toContain('cursor-monitor-stop.sh');
+        expect(start?.filename).toBe(`cursor-monitor-${platform}-start.sh`);
+        expect(stop?.filename).toBe(`cursor-monitor-${platform}-stop.sh`);
+        expect(start?.content).toContain('#!/bin/sh');
+        expect(stop?.content).toContain('#!/bin/sh');
       }
     },
   );
 
-  it('does not reuse the deployment bypass as the app token', () => {
+  it('requires a dedicated hook token before scripts are ready', () => {
     delete process.env.CURSOR_MONITOR_HOOK_TOKEN;
-    process.env.VERCEL_PROTECTION_BYPASS = 'bypass-only';
-    expect(buildInstaller('linux')?.ready).toBe(false);
+    expect(buildHookScripts('linux')?.ready).toBe(false);
   });
 
-  it('regenerates the current app endpoint without exposing database details', () => {
+  it('regenerates direct scripts without exposing database details', () => {
     process.env.CURSOR_MONITOR_HOOK_TOKEN = 'monitor-test-token';
     process.env.DATABASE_ADAPTER = 'private-backend';
     process.env.DATABASE_URL =
       'postgres://database-user:database-password@database.internal/monitor';
     process.env.CURSOR_MONITOR_PUBLIC_URL = 'https://monitor-one.example';
-    const first = buildInstaller('linux')?.content;
+    const first = getHookScript('linux', 'stop')?.content;
 
     process.env.CURSOR_MONITOR_PUBLIC_URL = 'https://monitor-two.example';
-    const second = buildInstaller('linux')?.content;
+    const second = getHookScript('linux', 'stop')?.content;
 
     expect(first).toContain('https://monitor-one.example/api/hooks/events');
     expect(second).toContain('https://monitor-two.example/api/hooks/events');
@@ -114,5 +120,10 @@ describe('platform installers', () => {
     expect(second).not.toContain('database.internal');
     expect(second).not.toContain('database-password');
     expect(second).not.toContain('private-backend');
+  });
+
+  it('rejects unsupported script requests', () => {
+    expect(getHookScript('linux', 'unknown')).toBeNull();
+    expect(getHookScript('unknown', 'stop')).toBeNull();
   });
 });

@@ -14,7 +14,7 @@ export function AppHeader() {
       </Link>
       <nav aria-label="Primary navigation">
         <Link href="/">Repositories</Link>
-        <Link href="/install">Install hooks</Link>
+        <Link href="/hooks">Team hooks</Link>
         <Link href="/settings">Operations</Link>
         <a href="/api/health">Health</a>
       </nav>
