@@ -109,6 +109,8 @@ Migrations are forward-only and applied lexically by
 an applied migration. Update the Drizzle schema and add a new SQL file together.
 
 The baseline migrations target standards-compatible PostgreSQL without
-provider-owned extensions or required roles. Migration `0003` disables the
-original deployment-specific RLS defaults; adopting organizations may add
-provider-specific access controls in their own forward migrations.
+provider-owned extensions or required roles. The initial migration's
+conditional revokes preserve the original managed deployment without requiring
+those roles to exist. Its standard PostgreSQL RLS defaults deny non-owner roles;
+adopters using a separate runtime role must add policies or deliberately disable
+RLS in their own forward migration.

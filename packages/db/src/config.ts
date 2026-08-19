@@ -6,11 +6,19 @@ const runtimeUrlKeys = [
   'DB_POSTGRES_URL',
 ] as const;
 
-const migrationUrlKeys = [
-  'MIGRATION_DATABASE_URL',
-  'DATABASE_URL_NON_POOLING',
-  'POSTGRES_URL_NON_POOLING',
-  'DB_POSTGRES_URL_NON_POOLING',
+const connectionFamilies = [
+  {
+    runtime: 'DATABASE_URL',
+    migration: 'DATABASE_URL_NON_POOLING',
+  },
+  {
+    runtime: 'POSTGRES_URL',
+    migration: 'POSTGRES_URL_NON_POOLING',
+  },
+  {
+    runtime: 'DB_POSTGRES_URL',
+    migration: 'DB_POSTGRES_URL_NON_POOLING',
+  },
 ] as const;
 
 function firstValue(
@@ -56,8 +64,25 @@ export function resolveMigrationUrl(
   const explicit = connectionUrl?.trim();
   if (explicit) return postgresUrl(explicit, 'Migration connection');
 
-  const direct = firstValue(environment, migrationUrlKeys);
-  if (direct) return postgresUrl(direct, 'Migration connection');
+  const migrationOverride = environment.MIGRATION_DATABASE_URL?.trim();
+  if (migrationOverride) {
+    return postgresUrl(migrationOverride, 'Migration connection');
+  }
+
+  for (const family of connectionFamilies) {
+    const runtime = environment[family.runtime]?.trim();
+    if (!runtime) continue;
+    const direct = environment[family.migration]?.trim();
+    return postgresUrl(direct || runtime, 'Migration connection');
+  }
+
+  const standaloneDirect = firstValue(
+    environment,
+    connectionFamilies.map(({ migration }) => migration),
+  );
+  if (standaloneDirect) {
+    return postgresUrl(standaloneDirect, 'Migration connection');
+  }
   return resolveDatabaseUrl(environment);
 }
 

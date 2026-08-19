@@ -11,7 +11,7 @@ different infrastructure. The original deployment used the existing
 internalsphere Supabase integration and treated that deployment choice as a
 product invariant. Although the runtime already used PostgreSQL through
 postgres.js and Drizzle, its environment contract, documentation, row security,
-and agent policy were branded and constrained to Supabase.
+and agent policy were described and constrained as Supabase-specific.
 
 Project hooks are HTTP clients. They should know the application endpoint and
 ingestion token, but they must never receive database credentials or depend on

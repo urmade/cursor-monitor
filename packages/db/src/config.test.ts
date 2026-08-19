@@ -44,6 +44,22 @@ describe('database configuration', () => {
     ).toBe('postgres://runtime.example/monitor');
   });
 
+  it('keeps runtime and migration URLs in the same provider family', () => {
+    expect(
+      resolveMigrationUrl(undefined, {
+        DATABASE_URL: 'postgres://new.example/monitor',
+        DB_POSTGRES_URL_NON_POOLING: 'postgres://legacy.example/monitor',
+      }),
+    ).toBe('postgres://new.example/monitor');
+    expect(
+      resolveMigrationUrl(undefined, {
+        DATABASE_URL: 'postgres://new.example/monitor',
+        DATABASE_URL_NON_POOLING: 'postgres://new-direct.example/monitor',
+        DB_POSTGRES_URL_NON_POOLING: 'postgres://legacy.example/monitor',
+      }),
+    ).toBe('postgres://new-direct.example/monitor');
+  });
+
   it('accepts an explicit migration URL over environment configuration', () => {
     expect(
       resolveMigrationUrl(' postgres://override.example/monitor ', {
@@ -90,5 +106,15 @@ describe('PostgreSQL TLS configuration', () => {
         PGSSLMODE: 'disable',
       }),
     ).toBe(false);
+    expect(
+      sslOptionForUrl('postgres://db.example/monitor', {
+        PGSSLMODE: 'verify-full',
+      }),
+    ).toBe('verify-full');
+    expect(
+      sslOptionForUrl('postgres://db.example/monitor', {
+        PGSSLMODE: 'prefer',
+      }),
+    ).toBe('prefer');
   });
 });

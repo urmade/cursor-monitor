@@ -22,17 +22,22 @@ provider names are resolved in this order:
 Set `MIGRATION_DATABASE_URL` when migrations need a direct connection instead of
 the pooled runtime URL. Migration aliases are
 `DATABASE_URL_NON_POOLING`, `POSTGRES_URL_NON_POOLING`, and
-`DB_POSTGRES_URL_NON_POOLING`; migration execution falls back to the runtime URL
-when none is configured.
+`DB_POSTGRES_URL_NON_POOLING`. Each alias is paired with its runtime family so a
+legacy provider URL cannot override a selected `DATABASE_URL`; migration
+execution falls back to the selected runtime URL when its matching direct value
+is not configured.
 
 Remote connections require TLS by default. A connection-string `sslmode` takes
-precedence; `PGSSLMODE=disable` is available for a database that explicitly does
-not support TLS. `DB_SSL=disable` remains as a legacy alias. Localhost
-connections default to TLS disabled.
+precedence. Standard `PGSSLMODE` values are supported; `verify-full` preserves
+certificate and hostname verification, while the application tightens
+`verify-ca` to `verify-full`. Use `disable` only for a database that explicitly
+does not support TLS. `DB_SSL` remains as a legacy alias. Localhost connections
+default to TLS disabled.
 
 The migration identity must be able to create and alter tables and take a
 PostgreSQL advisory lock. If a separate runtime identity is used, grant it
-read/write access to the `monitor_*` tables. The app does not require Supabase
+read/write access to the `monitor_*` tables and configure RLS policies (or
+deliberately disable RLS) for that identity. The app does not require Supabase
 roles, extensions, or APIs.
 
 ## Secrets
