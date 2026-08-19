@@ -4,6 +4,7 @@ import {
   canonicalRepository,
   NO_REPOSITORY_KEY,
   UNKNOWN_CONVERSATION_KEY,
+  type MonitorConversation,
 } from '@cursor-monitor/core';
 import { unmergeRepository } from '@/src/server/actions';
 import {
