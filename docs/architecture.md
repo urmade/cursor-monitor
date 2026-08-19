@@ -74,7 +74,7 @@ admins before changing display preferences or starting a manual sync.
 
 ### Hook event
 
-1. The installed stop hook reads Cursor JSON from stdin.
+1. The Team Hook stop script reads Cursor JSON from stdin.
 2. It enriches the payload with repository, branch, workspace, and paired start
    and finish timestamps.
 3. It sends `x-cursor-monitor-token` for app authentication.

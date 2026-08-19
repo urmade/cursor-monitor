@@ -42,7 +42,7 @@ Never bypass git hooks.
 ## Architecture at a glance
 
 ```text
-Cursor project hook ──POST──> apps/web/app/api/hooks/events
+Cursor Team Hook stop script ──POST──> apps/web/app/api/hooks/events
                                   │
                                   ▼
                          monitor_hook_events

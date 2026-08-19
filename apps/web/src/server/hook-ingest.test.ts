@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { authorizeHookRequest, parseHookEvent } from './hook-ingest';
-import { buildHookScripts, getHookScript } from './hook-scripts';
+import { buildHookScripts, getHookScript, hookScriptDownloadHeaders, resolveHookScriptDownload } from './hook-scripts';
 
 const previous = {
   token: process.env.CURSOR_MONITOR_HOOK_TOKEN,
@@ -125,5 +125,23 @@ describe('Team Hook scripts', () => {
   it('rejects unsupported script requests', () => {
     expect(getHookScript('linux', 'unknown')).toBeNull();
     expect(getHookScript('unknown', 'stop')).toBeNull();
+    expect(resolveHookScriptDownload('linux', 'unknown')).toEqual({
+      status: 'unsupported',
+    });
+  });
+
+  it('blocks download resolution until the hook token is configured', () => {
+    delete process.env.CURSOR_MONITOR_HOOK_TOKEN;
+    expect(resolveHookScriptDownload('linux', 'stop')).toMatchObject({
+      status: 'not_ready',
+    });
+    process.env.CURSOR_MONITOR_HOOK_TOKEN = 'monitor-test-token';
+    const resolved = resolveHookScriptDownload('linux', 'stop');
+    expect(resolved.status).toBe('ok');
+    if (resolved.status !== 'ok') return;
+    expect(hookScriptDownloadHeaders(resolved.artifact)).toMatchObject({
+      'Cache-Control': 'private, no-store',
+      'Content-Disposition': 'attachment; filename="cursor-monitor-linux-stop.sh"',
+    });
   });
 });

@@ -14,9 +14,9 @@ product invariant. Although the runtime already used PostgreSQL through
 postgres.js and Drizzle, its environment contract, documentation, row security,
 and agent policy were described and constrained as Supabase-specific.
 
-Project hooks are HTTP clients. They should know the application endpoint and
-ingestion token, but they must never receive database credentials or depend on
-the selected database provider.
+Team Hook stop scripts are HTTP clients. They should know the application
+endpoint and ingestion token, but they must never receive database credentials
+or depend on the selected database provider.
 
 ## Decision
 

@@ -39,7 +39,9 @@ export default async function HooksPage() {
         <p className="lede">
           Download the two scripts for the operating system used by your team,
           then upload them directly in Cursor&apos;s Team Hooks settings. Nothing
-          is installed in individual repositories or on developer machines.
+          is written to repositories or installed through an installer wrapper;
+          hooks only maintain local timing state under{' '}
+          <span className="mono">~/.cursor/cursor-monitor</span>.
         </p>
       </header>
 
@@ -47,8 +49,9 @@ export default async function HooksPage() {
         <div className="callout">
           Hook authentication is not configured. Add{' '}
           <span className="mono">CURSOR_MONITOR_HOOK_TOKEN</span>, then redeploy.
-          See <span className="mono">docs/hooks.md</span> for why this credential
-          exists.
+          Script preview, copy, and download stay disabled until the token is
+          configured. See <span className="mono">docs/hooks.md</span> for why this
+          credential exists.
         </div>
       ) : null}
 
@@ -87,21 +90,30 @@ export default async function HooksPage() {
                       {script.filename} · {script.timeout}s timeout
                     </p>
                   </div>
-                  <div className="code-actions">
-                    <CopyButton value={script.content} />
-                    <a
-                      className="button button-primary"
-                      download={script.filename}
-                      href={`/api/hooks/${key}/${script.kind}`}
-                    >
-                      Download script
-                    </a>
-                  </div>
+                  {ready ? (
+                    <div className="code-actions">
+                      <CopyButton value={script.content} />
+                      <a
+                        className="button button-primary"
+                        download={script.filename}
+                        href={`/api/hooks/${key}/${script.kind}`}
+                      >
+                        Download script
+                      </a>
+                    </div>
+                  ) : (
+                    <p className="small muted">
+                      Preview, copy, and download unlock after hook token
+                      configuration.
+                    </p>
+                  )}
                 </div>
-                <details>
-                  <summary className="small muted">Review hook script</summary>
-                  <pre>{script.content}</pre>
-                </details>
+                {ready ? (
+                  <details>
+                    <summary className="small muted">Review hook script</summary>
+                    <pre>{script.content}</pre>
+                  </details>
+                ) : null}
               </section>
             ))}
           </article>

@@ -312,3 +312,28 @@ export function getHookScript(
     null
   );
 }
+
+export type HookScriptDownloadResolution =
+  | { status: 'ok'; artifact: HookScriptArtifact }
+  | { status: 'unsupported' }
+  | { status: 'not_ready'; artifact: HookScriptArtifact };
+
+export function resolveHookScriptDownload(
+  platform: string,
+  kind: string,
+): HookScriptDownloadResolution {
+  const artifact = getHookScript(platform, kind);
+  if (!artifact) return { status: 'unsupported' };
+  if (!artifact.ready) return { status: 'not_ready', artifact };
+  return { status: 'ok', artifact };
+}
+
+export function hookScriptDownloadHeaders(
+  artifact: HookScriptArtifact,
+): HeadersInit {
+  return {
+    'Content-Type': artifact.contentType,
+    'Content-Disposition': `attachment; filename="${artifact.filename}"`,
+    'Cache-Control': 'private, no-store',
+  };
+}

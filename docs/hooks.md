@@ -3,8 +3,9 @@
 ## Intended deployment
 
 Cursor Monitor generates direct scripts for centrally managed Cursor Team Hooks.
-It does not generate installers, write `.cursor/hooks.json`, modify repositories,
-or install files on developer machines.
+It does not generate installers, write `.cursor/hooks.json`, or modify
+repositories. Hooks maintain local timing state and a delivery log under
+`~/.cursor/cursor-monitor` on each machine where Cursor runs them.
 
 The authenticated `/hooks` page provides two downloads for each operating
 system:
