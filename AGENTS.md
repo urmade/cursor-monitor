@@ -1,7 +1,7 @@
 # Cursor Monitor agent guide
 
 This repository contains one standalone product: **Cursor Monitor**. It ingests
-Cursor project-hook events, polls Cursor Team/Organization usage events, and
+Cursor Team Hook events, polls Cursor Team/Organization usage events, and
 joins both streams by normalized conversation ID.
 
 ## Hard rules
@@ -42,7 +42,7 @@ Never bypass git hooks.
 ## Architecture at a glance
 
 ```text
-Cursor project hook ──POST──> apps/web/app/api/hooks/events
+Cursor Team Hook stop script ──POST──> apps/web/app/api/hooks/events
                                   │
                                   ▼
                          monitor_hook_events
@@ -103,7 +103,7 @@ decision record before changing code.
 | Default PostgreSQL adapter | `packages/db/src/postgres-adapter.ts` |
 | PostgreSQL tables/indexes | `packages/db/src/schema/index.ts` + a migration |
 | Hook authentication/payload parsing | `apps/web/src/server/hook-ingest.ts` |
-| Linux/macOS/Windows installers | `apps/web/src/server/installers.ts` |
+| Linux/macOS/Windows Team Hook scripts | `apps/web/src/server/hook-scripts.ts` |
 | Admin mutations | `apps/web/src/server/actions.ts` |
 | Dashboard data loading | `apps/web/src/server/data.ts` |
 | UI routes | `apps/web/app/` |
@@ -153,12 +153,12 @@ The startup update script runs `pnpm install`. Standard commands live in
   DB-backed routes (`/`, `/repositories/[repository]`, `/settings`,
   `/api/hooks/events`, the cron sync) throw at request time. Unit tests and
   builds remain database-free.
-- **What works without a database**: hook-installer generation. `currentAdmin()`
-  returns a stub admin whenever `VERCEL` is unset, so `/install` and
-  `/api/install/{linux,macos,windows}` render without auth. Installers only
-  become downloadable (`ready: true`) when `CURSOR_MONITOR_HOOK_TOKEN` is
-  exported in the dev server's environment; otherwise the page shows a
-  "not configured" callout. This is the easiest end-to-end smoke test in the VM.
+- **What works without a database**: Team Hook script generation.
+  `currentAdmin()` returns a stub admin whenever `VERCEL` is unset, so `/hooks`
+  and `/api/hooks/{linux,macos,windows}/{start,stop}` render without auth.
+  Scripts only become downloadable when `CURSOR_MONITOR_HOOK_TOKEN` is exported
+  in the dev server's environment; otherwise the page shows a "not configured"
+  callout. This is the easiest end-to-end smoke test in the VM.
 - **Generated files, do not commit**: `next dev`/`next build` rewrite
   `apps/web/next-env.d.ts` (toggling `.next/dev/types` vs `.next/types`) and emit
   `apps/web/AGENTS.md` and `apps/web/CLAUDE.md` (Next 16 `agentRules`). None are

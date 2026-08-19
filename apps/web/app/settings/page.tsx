@@ -52,12 +52,12 @@ export default async function SettingsPage() {
       <section className="grid">
         <article className="panel">
           <div className="row-between">
-            <h2>{configuration.databaseAdapter} database</h2>
+            <h2>Database</h2>
             {configured(!databaseError)}
           </div>
           <p className="small muted">
-            Stores hook events, deduplicated Team usage, display preferences, and
-            sync history.
+            Active adapter: {configuration.databaseAdapter}. Stores hook events,
+            deduplicated Team usage, display preferences, and sync history.
           </p>
           {databaseError ? (
             <p className="small" style={{ color: 'var(--danger)' }}>
@@ -81,8 +81,9 @@ export default async function SettingsPage() {
             {configured(configuration.hookToken)}
           </div>
           <p className="small muted">
-            Protects <span className="mono">POST /api/hooks/events</span> and is
-            embedded only in authenticated installer downloads.
+            Protects <span className="mono">POST /api/hooks/events</span>. Team
+            Hooks cannot use Passport sessions, so this dedicated token scopes
+            ingestion only. It is embedded in authenticated stop-script downloads.
           </p>
         </article>
         <article className="panel">
@@ -92,7 +93,8 @@ export default async function SettingsPage() {
           </div>
           <p className="small muted">
             Vercel invokes <span className="mono">/api/cron/sync</span> every five
-            minutes. Poll windows overlap by one hour and deduplicate by fingerprint.
+            minutes when <span className="mono">CRON_SECRET</span> is configured.
+            Local development can use Sync now instead.
           </p>
         </article>
       </section>

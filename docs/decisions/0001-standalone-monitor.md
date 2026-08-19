@@ -5,6 +5,8 @@
 
 The database-provider constraints in this decision are superseded by
 [ADR 0002](./0002-generic-postgres-baseline.md).
+The per-repository installer decision is superseded by
+[ADR 0004](./0004-team-hook-scripts.md).
 
 ## Context
 

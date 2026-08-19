@@ -5,7 +5,7 @@ request activity by repository, branch, and conversation.
 
 It combines two independent data streams:
 
-1. **Cursor project hooks** publish a completed request immediately, including
+1. **Cursor Team Hooks** publish a completed request immediately, including
    repository, branch, user, model, status, and duration.
 2. **Cursor Team or Organization API polling** fetches authoritative usage and
    charged-cost events every five minutes.
@@ -21,7 +21,8 @@ stored when their matching hook has not arrived yet.
   rewriting raw events.
 - Repository, branch, and individual conversation display names are editable.
 - Conversation costs are computed from deduplicated Team API events.
-- Linux, macOS, and Windows hook installers are generated from the deployed app.
+- Linux, macOS, and Windows scripts are generated for direct upload to Cursor
+  Team Hooks.
 - Sync status, configuration readiness, unmatched usage, and stored hook totals
   are visible without reading server logs; client-side delivery failures remain
   in the local hook log.
@@ -54,29 +55,27 @@ Required production settings:
 
 | Setting | Purpose |
 |---|---|
-| `DATABASE_ADAPTER` | One adapter ID; defaults to `postgres` |
 | `DATABASE_URL` | Selected adapter's runtime connection |
-| `MIGRATION_DATABASE_URL` | Optional selected-adapter migration connection |
-| `CRON_SECRET` | Authenticates the five-minute Vercel cron |
-| `CURSOR_MONITOR_HOOK_TOKEN` | Authenticates incoming project-hook events |
-| `CURSOR_MONITOR_PUBLIC_URL` | Stable public URL embedded in fresh hook installers |
-| `VERCEL_PROTECTION_BYPASS` | Allows hooks through deployment protection |
-| `CURSOR_TEAM_API_KEY` | Team usage polling |
+| `MIGRATION_DATABASE_URL` | Optional direct migration connection when runtime URL is pooled |
+| `CURSOR_MONITOR_HOOK_TOKEN` | Authenticates incoming Team Hook events (see `docs/hooks.md`) |
+| `CURSOR_MONITOR_PUBLIC_URL` | Stable public URL embedded in fresh Team Hook scripts |
+| `CRON_SECRET` | Vercel cron only — authorizes scheduled `/api/cron/sync` |
+| `CURSOR_TEAM_API_KEY` | Team usage polling (single key) |
+| `CURSOR_TEAM_API_KEYS` | Team usage polling (multiple keys, comma/newline separated) |
 | `CURSOR_ORGANIZATION_API_KEY` + `CURSOR_ORGANIZATION_ID` | Preferred Organization API alternative |
 
-The hook token and Vercel bypass are deliberately separate. Possession of an
-ingestion token permits event submission but does not grant access to human
-routes, which also require a Passport identity in the application.
+The hook token is separate from Passport sign-in. Possession of an ingestion token
+permits event submission but does not grant access to human routes.
 
 ## Repository map
 
 ```text
 apps/web/                    Next.js application and API routes
-  app/                       Dashboard, repository, installer, operations pages
+  app/                       Dashboard, repository, Team Hook, operations pages
   src/server/actions.ts      Admin mutations
   src/server/data.ts         Database-to-domain adapters
   src/server/hook-ingest.ts  Hook auth and payload parsing
-  src/server/installers.ts   Linux/macOS/Windows generators
+  src/server/hook-scripts.ts Linux/macOS/Windows Team Hook generators
 
 packages/core/               Product rules and orchestration
   src/identity.ts            Stable repository/conversation keys
@@ -93,7 +92,7 @@ packages/config/             Shared TypeScript and ESLint configuration
 
 - `docs/architecture.md` — boundaries and end-to-end data flow
 - `docs/data-model.md` — tables, keys, indexes, and invariants
-- `docs/hooks.md` — platform installers and hook operations
+- `docs/hooks.md` — Team Hook scripts and operations
 - `docs/team-api-sync.md` — polling, paging, overlap, and matching
 - `docs/operations.md` — secrets, health checks, failure recovery
 - `docs/database-adapters.md` — replace the default persistence adapter
@@ -101,6 +100,7 @@ packages/config/             Shared TypeScript and ESLint configuration
 - `docs/decisions/0001-standalone-monitor.md` — architectural decision record
 - `docs/decisions/0002-generic-postgres-baseline.md` — database portability
 - `docs/decisions/0003-single-database-adapter.md` — adapter boundary
+- `docs/decisions/0004-team-hook-scripts.md` — centralized hook distribution
 
 ## Verification
 

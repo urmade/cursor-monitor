@@ -1,12 +1,23 @@
 export type HookPlatform = 'linux' | 'macos' | 'windows';
+export type HookScriptKind = 'start' | 'stop';
+export type HookEventName = 'beforeSubmitPrompt' | 'stop';
 
-export type InstallerArtifact = {
+export type HookScriptArtifact = {
   platform: HookPlatform;
+  kind: HookScriptKind;
+  eventName: HookEventName;
   filename: string;
   contentType: string;
   content: string;
   ready: boolean;
+  timeout: number;
+};
+
+export type HookScriptBundle = {
+  platform: HookPlatform;
   requirements: string;
+  scripts: readonly [HookScriptArtifact, HookScriptArtifact];
+  ready: boolean;
 };
 
 function shellQuote(value: string): string {
@@ -40,14 +51,17 @@ function values() {
   return {
     endpoint: `${publicBaseUrl()}/api/hooks/events`,
     token,
-    bypass: process.env.VERCEL_PROTECTION_BYPASS?.trim() ?? '',
   };
 }
 
-function posixInstaller(platform: 'linux' | 'macos'): InstallerArtifact {
-  const { endpoint, token, bypass } = values();
+function posixHookScripts(
+  platform: 'linux' | 'macos',
+): HookScriptBundle {
+  const { endpoint, token } = values();
+  const ready = Boolean(token);
   const startScript = [
     '#!/bin/sh',
+    `# Cursor Monitor ${platform} Team Hook: beforeSubmitPrompt`,
     'set +e',
     'STATE_DIR="${HOME:-${TMPDIR:-/tmp}}/.cursor/cursor-monitor"',
     'mkdir -p "$STATE_DIR" 2>/dev/null',
@@ -62,13 +76,12 @@ function posixInstaller(platform: 'linux' | 'macos'): InstallerArtifact {
   ].join('\n');
   const stopScript = [
     '#!/bin/sh',
+    `# Cursor Monitor ${platform} Team Hook: stop`,
     'set +e',
     `ENDPOINT_DEFAULT=${shellQuote(endpoint)}`,
     `TOKEN_DEFAULT=${shellQuote(token)}`,
-    `BYPASS_DEFAULT=${shellQuote(bypass)}`,
     'ENDPOINT="${CURSOR_MONITOR_ENDPOINT:-$ENDPOINT_DEFAULT}"',
     'TOKEN="${CURSOR_MONITOR_HOOK_TOKEN:-$TOKEN_DEFAULT}"',
-    'BYPASS="${VERCEL_PROTECTION_BYPASS:-$BYPASS_DEFAULT}"',
     'STATE_DIR="${HOME:-${TMPDIR:-/tmp}}/.cursor/cursor-monitor"',
     'LOG_FILE="$STATE_DIR/hook.log"',
     'mkdir -p "$STATE_DIR" 2>/dev/null',
@@ -133,7 +146,6 @@ function posixInstaller(platform: 'linux' | 'macos'): InstallerArtifact {
     '  -H "Accept: application/json" \\',
     '  -H "User-Agent: cursor-monitor-hook/1.0" \\',
     '  -H "x-cursor-monitor-token: $TOKEN" \\',
-    '  -H "x-vercel-protection-bypass: $BYPASS" \\',
     '  --data-binary "$BODY" -o "${TMPDIR:-/tmp}/cursor-monitor-response-$$" -w \'%{http_code}\' 2>/dev/null)',
     'if [ "$STATUS" = "200" ]; then',
     '  printf \'%s ok\\n\' "$FINISHED_AT" >>"$LOG_FILE"',
@@ -144,75 +156,44 @@ function posixInstaller(platform: 'linux' | 'macos'): InstallerArtifact {
     "printf '%s\\n' '{}'",
     'exit 0',
   ].join('\n');
-  const hooksJson = JSON.stringify(
-    {
-      version: 1,
-      hooks: {
-        beforeSubmitPrompt: [
-          {
-            command: '.cursor/hooks/cursor-monitor-start.sh',
-            timeout: 5,
-          },
-        ],
-        stop: [
-          {
-            command: '.cursor/hooks/cursor-monitor-stop.sh',
-            timeout: 15,
-          },
-        ],
-      },
-    },
-    null,
-    2,
-  );
-  const content = [
-    '#!/bin/sh',
-    `# Cursor Monitor project-hook installer for ${platform}.`,
-    '# Uses only standard OS command-line tools; no package installation.',
-    'set -eu',
-    'for command_name in curl sed tr head cut date; do',
-    '  command -v "$command_name" >/dev/null 2>&1 || { printf \'Missing required OS command: %s\\n\' "$command_name" >&2; exit 1; }',
-    'done',
-    'ROOT="${1:-$PWD}"',
-    'HOOK_DIR="$ROOT/.cursor/hooks"',
-    'mkdir -p "$HOOK_DIR"',
-    `cat >"$HOOK_DIR/cursor-monitor-start.sh" <<'CURSOR_MONITOR_START'`,
-    startScript,
-    'CURSOR_MONITOR_START',
-    `cat >"$HOOK_DIR/cursor-monitor-stop.sh" <<'CURSOR_MONITOR_STOP'`,
-    stopScript,
-    'CURSOR_MONITOR_STOP',
-    'chmod +x "$HOOK_DIR/cursor-monitor-start.sh" "$HOOK_DIR/cursor-monitor-stop.sh"',
-    'HOOKS_TARGET="$ROOT/.cursor/hooks.json"',
-    'if [ -e "$HOOKS_TARGET" ]; then',
-    '  HOOKS_TARGET="$ROOT/.cursor/hooks.cursor-monitor.example.json"',
-    'fi',
-    `cat >"$HOOKS_TARGET" <<'CURSOR_MONITOR_HOOKS'`,
-    hooksJson,
-    'CURSOR_MONITOR_HOOKS',
-    'if [ "$HOOKS_TARGET" = "$ROOT/.cursor/hooks.json" ]; then',
-    `  printf 'Cursor Monitor hooks installed in %s\\n' "$ROOT/.cursor"`,
-    'else',
-    `  printf 'Existing hooks.json kept. Merge %s into it before use.\\n' "$HOOKS_TARGET"`,
-    'fi',
-  ].join('\n');
 
   return {
     platform,
-    filename: `install-cursor-monitor-${platform}.sh`,
-    contentType: 'text/x-shellscript; charset=utf-8',
-    content,
-    ready: Boolean(token),
+    ready,
     requirements:
       platform === 'macos'
         ? 'Built-in macOS sh, curl, sed, and core command-line tools; git is optional.'
         : 'Standard distribution sh, curl, sed, and core command-line tools; git is optional.',
+    scripts: [
+      {
+        platform,
+        kind: 'start',
+        eventName: 'beforeSubmitPrompt',
+        filename: `cursor-monitor-${platform}-start.sh`,
+        contentType: 'text/x-shellscript; charset=utf-8',
+        content: startScript,
+        ready,
+        timeout: 5,
+      },
+      {
+        platform,
+        kind: 'stop',
+        eventName: 'stop',
+        filename: `cursor-monitor-${platform}-stop.sh`,
+        contentType: 'text/x-shellscript; charset=utf-8',
+        content: stopScript,
+        ready,
+        timeout: 15,
+      },
+    ],
   };
 }
 
-function windowsInstaller(): InstallerArtifact {
-  const { endpoint, token, bypass } = values();
+function windowsHookScripts(): HookScriptBundle {
+  const { endpoint, token } = values();
+  const ready = Boolean(token);
   const startScript = [
+    '# Cursor Monitor Windows Team Hook: beforeSubmitPrompt',
     "$ErrorActionPreference = 'SilentlyContinue'",
     "$stateDir = Join-Path $HOME '.cursor\\cursor-monitor'",
     'New-Item -ItemType Directory -Force -Path $stateDir | Out-Null',
@@ -230,13 +211,12 @@ function windowsInstaller(): InstallerArtifact {
     'exit 0',
   ].join('\r\n');
   const stopScript = [
+    '# Cursor Monitor Windows Team Hook: stop',
     "$ErrorActionPreference = 'SilentlyContinue'",
     `$endpointDefault = ${powershellQuote(endpoint)}`,
     `$tokenDefault = ${powershellQuote(token)}`,
-    `$bypassDefault = ${powershellQuote(bypass)}`,
     '$endpoint = if ($env:CURSOR_MONITOR_ENDPOINT) { $env:CURSOR_MONITOR_ENDPOINT } else { $endpointDefault }',
     '$token = if ($env:CURSOR_MONITOR_HOOK_TOKEN) { $env:CURSOR_MONITOR_HOOK_TOKEN } else { $tokenDefault }',
-    '$bypass = if ($env:VERCEL_PROTECTION_BYPASS) { $env:VERCEL_PROTECTION_BYPASS } else { $bypassDefault }',
     "$stateDir = Join-Path $HOME '.cursor\\cursor-monitor'",
     'New-Item -ItemType Directory -Force -Path $stateDir | Out-Null',
     "$logFile = Join-Path $stateDir 'hook.log'",
@@ -274,7 +254,7 @@ function windowsInstaller(): InstallerArtifact {
     "if ($started) { $payload | Add-Member -NotePropertyName started_at -NotePropertyValue $started -Force }",
     "$payload | Add-Member -NotePropertyName finished_at -NotePropertyValue $finished -Force",
     "$body = $payload | ConvertTo-Json -Depth 32 -Compress",
-    "$headers = @{ 'x-cursor-monitor-token' = $token; 'x-vercel-protection-bypass' = $bypass; 'User-Agent' = 'cursor-monitor-hook/1.0' }",
+    "$headers = @{ 'x-cursor-monitor-token' = $token; 'User-Agent' = 'cursor-monitor-hook/1.0' }",
     'try {',
     "  Invoke-WebRequest -UseBasicParsing -Uri $endpoint -Method Post -ContentType 'application/json' -Headers $headers -Body $body -TimeoutSec 12 | Out-Null",
     "  Add-Content -Path $logFile -Value \"$finished ok\"",
@@ -284,66 +264,76 @@ function windowsInstaller(): InstallerArtifact {
     "Write-Output '{}'",
     'exit 0',
   ].join('\r\n');
-  const hooksJson = JSON.stringify(
-    {
-      version: 1,
-      hooks: {
-        beforeSubmitPrompt: [
-          {
-            command:
-              'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .cursor/hooks/cursor-monitor-start.ps1',
-            timeout: 5,
-          },
-        ],
-        stop: [
-          {
-            command:
-              'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .cursor/hooks/cursor-monitor-stop.ps1',
-            timeout: 15,
-          },
-        ],
-      },
-    },
-    null,
-    2,
-  );
-  const content = [
-    "$ErrorActionPreference = 'Stop'",
-    '$root = if ($args[0]) { Resolve-Path $args[0] } else { Get-Location }',
-    "$hookDir = Join-Path $root '.cursor\\hooks'",
-    'New-Item -ItemType Directory -Force -Path $hookDir | Out-Null',
-    `$hooksJson = @'\r\n${hooksJson}\r\n'@`,
-    `$startScript = @'\r\n${startScript}\r\n'@`,
-    `$stopScript = @'\r\n${stopScript}\r\n'@`,
-    '$utf8NoBom = New-Object System.Text.UTF8Encoding($false)',
-    "[IO.File]::WriteAllText((Join-Path $hookDir 'cursor-monitor-start.ps1'), $startScript, $utf8NoBom)",
-    "[IO.File]::WriteAllText((Join-Path $hookDir 'cursor-monitor-stop.ps1'), $stopScript, $utf8NoBom)",
-    "$hooksTarget = Join-Path $root '.cursor\\hooks.json'",
-    'if (Test-Path $hooksTarget) {',
-    "  $hooksTarget = Join-Path $root '.cursor\\hooks.cursor-monitor.example.json'",
-    '}',
-    '[IO.File]::WriteAllText($hooksTarget, $hooksJson, $utf8NoBom)',
-    "if ($hooksTarget.EndsWith('hooks.json')) {",
-    '  Write-Host "Cursor Monitor hooks installed in $root\\.cursor"',
-    '} else {',
-    '  Write-Host "Existing hooks.json kept. Merge $hooksTarget into it before use."',
-    '}',
-  ].join('\r\n');
 
   return {
     platform: 'windows',
-    filename: 'install-cursor-monitor-windows.ps1',
-    contentType: 'text/plain; charset=utf-8',
-    content,
-    ready: Boolean(token),
+    ready,
     requirements:
       'Windows PowerShell 5.1 or PowerShell 7 and built-in .NET networking; git is optional.',
+    scripts: [
+      {
+        platform: 'windows',
+        kind: 'start',
+        eventName: 'beforeSubmitPrompt',
+        filename: 'cursor-monitor-windows-start.ps1',
+        contentType: 'text/plain; charset=utf-8',
+        content: startScript,
+        ready,
+        timeout: 5,
+      },
+      {
+        platform: 'windows',
+        kind: 'stop',
+        eventName: 'stop',
+        filename: 'cursor-monitor-windows-stop.ps1',
+        contentType: 'text/plain; charset=utf-8',
+        content: stopScript,
+        ready,
+        timeout: 15,
+      },
+    ],
   };
 }
 
-export function buildInstaller(platform: string): InstallerArtifact | null {
-  if (platform === 'linux') return posixInstaller('linux');
-  if (platform === 'macos') return posixInstaller('macos');
-  if (platform === 'windows') return windowsInstaller();
+export function buildHookScripts(platform: string): HookScriptBundle | null {
+  if (platform === 'linux') return posixHookScripts('linux');
+  if (platform === 'macos') return posixHookScripts('macos');
+  if (platform === 'windows') return windowsHookScripts();
   return null;
+}
+
+export function getHookScript(
+  platform: string,
+  kind: string,
+): HookScriptArtifact | null {
+  if (kind !== 'start' && kind !== 'stop') return null;
+  return (
+    buildHookScripts(platform)?.scripts.find((script) => script.kind === kind) ??
+    null
+  );
+}
+
+export type HookScriptDownloadResolution =
+  | { status: 'ok'; artifact: HookScriptArtifact }
+  | { status: 'unsupported' }
+  | { status: 'not_ready'; artifact: HookScriptArtifact };
+
+export function resolveHookScriptDownload(
+  platform: string,
+  kind: string,
+): HookScriptDownloadResolution {
+  const artifact = getHookScript(platform, kind);
+  if (!artifact) return { status: 'unsupported' };
+  if (!artifact.ready) return { status: 'not_ready', artifact };
+  return { status: 'ok', artifact };
+}
+
+export function hookScriptDownloadHeaders(
+  artifact: HookScriptArtifact,
+): HeadersInit {
+  return {
+    'Content-Type': artifact.contentType,
+    'Content-Disposition': `attachment; filename="${artifact.filename}"`,
+    'Cache-Control': 'private, no-store',
+  };
 }

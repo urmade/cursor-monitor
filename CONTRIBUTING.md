@@ -29,7 +29,7 @@ The pre-commit and pre-push hooks run the secrets guard. Do not bypass them.
 
 ## Code organization
 
-- `apps/web`: Next.js routes, server actions, installer generation, and UI.
+- `apps/web`: Next.js routes, server actions, Team Hook scripts, and UI.
 - `packages/core`: product invariants, aggregation, and Team API sync.
 - `packages/team-api`: isolated Cursor HTTP client and response types.
 - `packages/db`: neutral adapter contract and default PostgreSQL implementation.

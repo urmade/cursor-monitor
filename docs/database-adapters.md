@@ -100,5 +100,5 @@ application is quiesced.
 ## Hook boundary
 
 Hooks POST to the application HTTP endpoint. Database adapter IDs, URLs, driver
-options, and credentials must never appear in generated installers, hook
+options, and credentials must never appear in generated Team Hook scripts, hook
 environment variables, payloads, logs, or responses.

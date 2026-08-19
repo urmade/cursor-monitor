@@ -65,10 +65,10 @@ Supported keys:
 
 | Key | Required | Notes |
 |---|---|---|
-| `CURSOR_MONITOR_HOOK_TOKEN` | Yes | Dedicated inbound app token |
-| `VERCEL_PROTECTION_BYPASS` | Yes for protected deployments | Deployment protection only |
-| `CRON_SECRET` | Yes | Vercel cron authorization |
-| `CURSOR_TEAM_API_KEY` | One credential mode | Team filtered usage |
+| `CURSOR_MONITOR_HOOK_TOKEN` | Yes | Dedicated inbound app token; see `docs/hooks.md` |
+| `CRON_SECRET` | Vercel cron only | Authorizes scheduled `/api/cron/sync`; omit locally |
+| `CURSOR_TEAM_API_KEY` | Team mode | One Team API key |
+| `CURSOR_TEAM_API_KEYS` | Team mode | Additional comma/newline-separated Team keys |
 | `CURSOR_ORGANIZATION_API_KEY` | One credential mode | Pair with organization ID |
 | `CURSOR_ORGANIZATION_ID` | Organization mode | Required with organization key |
 | `CURSOR_API_BASE_URL` | No | Defaults to official Cursor API |
@@ -102,18 +102,21 @@ current projection.
 
 ### Hooks return 401
 
-Download a fresh installer after verifying `CURSOR_MONITOR_HOOK_TOKEN`.
-Previously generated scripts retain the old credential.
+Download and re-upload the direct stop script after verifying
+`CURSOR_MONITOR_HOOK_TOKEN`. Previously generated scripts retain the old
+credential.
 
 ### Hooks never reach the app
 
-Verify `VERCEL_PROTECTION_BYPASS`, installer endpoint, and local hook log. A
-preview installer posts to preview and therefore writes to the preview database.
+Verify the endpoint embedded in the Team Hook script and the local hook log. A
+preview script posts to preview and therefore writes to the preview database.
 
-### Cron returns 401
+### Cron returns 401 or 503
 
-Verify `CRON_SECRET` is present in the deployment. Vercel sends it as a Bearer
-token.
+`CRON_SECRET` is required only for automated Vercel cron invocations. Vercel
+sends it as a Bearer token. Local development does not need it; use Operations →
+Sync now or call the route manually with the same header. A missing secret returns
+`503 cron_not_configured`; a wrong token returns `401`.
 
 ### Team sync returns 401/403
 
@@ -139,8 +142,8 @@ details and `monitor_team_usage_events`.
 For zero-downtime hook token rotation:
 
 1. update the encrypted secret and deploy;
-2. download fresh installers;
-3. update committed/team-managed hook scripts in monitored repositories.
+2. download fresh stop scripts for the Team Hook operating systems;
+3. replace the centrally managed Team Hook scripts.
 
 Old hooks begin returning 401 after step 1. If uninterrupted ingestion is
 mandatory, add dual-token support in a reviewed change before rotation.

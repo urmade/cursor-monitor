@@ -25,7 +25,7 @@ identity invariants in `AGENTS.md`.
 | Why did polling skip/fail/duplicate? | `packages/core/src/team-sync.ts` |
 | Is the Cursor request correct? | `packages/team-api/src/client.ts` |
 | Why was a hook rejected? | `apps/web/src/server/hook-ingest.ts` |
-| How is an OS script generated? | `apps/web/src/server/installers.ts` |
+| How is a Team Hook script generated? | `apps/web/src/server/hook-scripts.ts` |
 | Where does a rename write? | `apps/web/src/server/actions.ts` |
 | How are rows loaded into the UI? | `apps/web/src/server/data.ts` |
 | What persistence operation owns a field? | `packages/db/src/adapter.ts` |
@@ -64,15 +64,21 @@ Never solve grouping by rewriting historical raw events.
 4. Map persistence in `packages/core/src/team-sync.ts`.
 5. Add a schema migration if storage changes.
 
-### Change an installer
+### Change a Team Hook script
 
-1. Change only `apps/web/src/server/installers.ts`.
+1. Change only `apps/web/src/server/hook-scripts.ts`.
 2. Keep stop-hook failures non-blocking.
 3. Keep Linux/macOS POSIX-compatible; do not introduce Bash-only arrays.
 4. Keep Windows compatible with Windows PowerShell 5.1 unless the support policy
    is deliberately changed.
 5. Do not introduce Python, Node, `jq`, package managers, or third-party modules.
-6. Update installer tests and `docs/hooks.md`.
+6. Update script tests and `docs/hooks.md`.
+
+### Replace the database adapter
+
+Follow `docs/database-adapters.md`. Keep exactly one selected backend, preserve
+all semantic operations in `DatabaseAdapter`, route migrations through
+`pnpm db:exec-migrations`, and do not expose provider code outside `packages/db`.
 
 ### Replace the database adapter
 
