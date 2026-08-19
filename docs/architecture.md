@@ -59,8 +59,10 @@ Replacement implementations remain behind this boundary. See
 ### `packages/core`
 
 Owns stable identities, merge validation, project aggregation, usage matching,
-sync windows, locks, and deduplicated persistence. It depends on `db` and
-`team-api`, never on Next.js.
+sync windows, and usage fingerprint creation. It orchestrates semantic
+persistence operations through `db`; the selected adapter owns locks,
+deduplicated writes, and transactions. Core depends on `db` and `team-api`,
+never on Next.js.
 
 ### `apps/web`
 
