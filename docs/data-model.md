@@ -1,7 +1,8 @@
 # Data model
 
-All tables use the `monitor_` prefix so the standalone product has an explicit
-schema boundary. The first schema is in
+This document defines the logical records every database adapter preserves. The
+default PostgreSQL adapter uses `monitor_`-prefixed tables for an explicit schema
+boundary; its first physical schema is in
 `packages/db/migrations/0001_cursor_monitor.sql`.
 
 ## Identity
@@ -20,7 +21,10 @@ the hook supplied while product grouping remains case-insensitive.
 `trim().toLowerCase()` of Cursor's conversation ID. Raw IDs are retained.
 Missing IDs remain `NULL` and map to `__unknown_conversation__` in memory.
 
-## Tables
+## Logical stores
+
+Names below are the default PostgreSQL table names. Replacement adapters may use
+different physical names while preserving the same fields and behavior.
 
 ### `monitor_hook_events`
 
@@ -104,13 +108,16 @@ repositories and prevents renames from breaking stable identity.
 
 ## Migration policy
 
-Migrations are forward-only and applied lexically by
-`packages/db/src/exec-migrations.ts` under a Postgres advisory lock. Never modify
-an applied migration. Update the Drizzle schema and add a new SQL file together.
+Migrations are forward-only and invoked through
+`packages/db/src/exec-migrations.ts`. Each adapter owns its migration format,
+journal, and exclusive lock. Never modify an applied migration.
 
-The baseline migrations target standards-compatible PostgreSQL without
-provider-owned extensions or required roles. The initial migration's
+The default adapter applies SQL lexically under a PostgreSQL advisory lock.
+Update its Drizzle schema and add a new SQL file together. Its migrations target
+standards-compatible PostgreSQL without provider-owned extensions or required
+roles. The initial migration's
 conditional revokes preserve the original managed deployment without requiring
 those roles to exist. Its standard PostgreSQL RLS defaults deny non-owner roles;
 adopters using a separate runtime role must add policies or deliberately disable
-RLS in their own forward migration.
+RLS in their own forward migration. Replacement adapters must preserve the
+logical fields and invariants in this document using their own physical schema.

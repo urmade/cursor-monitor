@@ -66,4 +66,5 @@ Trade-offs:
 - Copy usage cost onto each hook turn: risks double counting and makes retries
   destructive. Conversation-level joins keep source records immutable.
 - Poll without overlap: misses delayed upstream usage events.
-- Use a second database: violates platform policy and adds operational cost.
+- Run multiple database backends concurrently: unsupported because each
+  deployment selects one persistence adapter and one database.

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-19
 - Supersedes: the Supabase-only constraint in ADR 0001
+- Refined by: [ADR 0003](./0003-single-database-adapter.md)
 
 ## Context
 
@@ -19,7 +20,8 @@ the selected database provider.
 
 ## Decision
 
-- Generic PostgreSQL is the required persistence baseline.
+- Generic PostgreSQL is the default persistence adapter, not a product
+  requirement.
 - `DATABASE_URL` is the canonical runtime connection string.
 - `MIGRATION_DATABASE_URL` optionally supplies a direct migration connection;
   migrations otherwise use the runtime URL.
@@ -29,8 +31,9 @@ the selected database provider.
   libraries. Application authentication remains the data-access boundary.
 - The Supabase entry in `app-manifest.yml` remains the reference internalsphere
   deployment only and may be replaced by adopters.
-- Future database implementations belong behind `packages/db` and must preserve
-  identity, locking, transaction, and idempotency behavior.
+- Replacement database implementations belong behind `packages/db` and must
+  preserve identity, locking, transaction, and idempotency behavior. Each
+  deployment configures one adapter and one database.
 - Generated hooks derive their HTTP endpoint from the running app. Changing a
   database connection does not require hook changes, and no database value may
   be embedded in an installer.
@@ -39,12 +42,12 @@ the selected database provider.
 
 Benefits:
 
-- Any standards-compatible PostgreSQL service can run the application from a
+- Any standards-compatible PostgreSQL service can run the default adapter from a
   connection URL.
 - Existing internalsphere preview and production deployments remain compatible.
 - Provider-specific deployment choices do not leak into product or hook code.
-- Other persistence backends can be introduced behind a defined package
-  boundary.
+- Other persistence backends may replace PostgreSQL behind a defined package
+  boundary without enabling multi-database operation.
 
 Trade-offs:
 

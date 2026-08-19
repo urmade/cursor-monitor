@@ -19,17 +19,17 @@ with automated tests, build output, logs, and written verification.
 
 ### Database portability
 
-Generic PostgreSQL is the baseline database. The application must work with a
-standard `DATABASE_URL` and must not require Supabase APIs, roles, extensions,
-or client libraries. `MIGRATION_DATABASE_URL` may provide a direct migration
-connection and otherwise defaults to the runtime URL.
+PostgreSQL is the default database adapter, not a product requirement.
+Organizations may replace it with any backend that implements the semantic
+contract in `packages/db/src/adapter.ts`.
 
 The `db` Supabase integration in `app-manifest.yml` is only the reference
-internalsphere deployment. Its `DB_POSTGRES_URL` and
-`DB_POSTGRES_URL_NON_POOLING` values remain supported aliases. Organizations may
-replace the deployment or add another backend, but provider-specific behavior
-must remain behind `packages/db` and preserve product invariants. Database
-credentials are server-only and must never be added to generated hooks.
+internalsphere deployment. Deployments select exactly one adapter with
+`DATABASE_ADAPTER` (default `postgres`) and configure one database connection.
+Multi-database routing, fallback, dual reads, and dual writes are not supported.
+Provider-specific behavior must remain behind `packages/db` and preserve product
+invariants. Database credentials are server-only and must never be added to
+generated hooks. Follow `docs/database-adapters.md` for replacement steps.
 
 ### Managed platform files
 
@@ -53,6 +53,9 @@ Vercel cron ──> apps/web/app/api/cron/sync ──> Cursor Team API
                                         monitor_team_usage_events
 
 Dashboard ──> apps/web/src/server/data.ts ──> @cursor-monitor/core aggregation
+                         │
+                         ▼
+              configured database adapter
 ```
 
 Workspace packages have one-way dependencies:
@@ -96,7 +99,9 @@ decision record before changing code.
 | Merge validation | `packages/core/src/preferences.ts` |
 | Cursor usage HTTP protocol | `packages/team-api/src/client.ts` |
 | Poll cadence/window/deduplication | `packages/core/src/team-sync.ts` |
-| Tables/indexes | `packages/db/src/schema/index.ts` + a migration |
+| Database contract/selection | `packages/db/src/adapter.ts` + `runtime.ts` |
+| Default PostgreSQL adapter | `packages/db/src/postgres-adapter.ts` |
+| PostgreSQL tables/indexes | `packages/db/src/schema/index.ts` + a migration |
 | Hook authentication/payload parsing | `apps/web/src/server/hook-ingest.ts` |
 | Linux/macOS/Windows installers | `apps/web/src/server/installers.ts` |
 | Admin mutations | `apps/web/src/server/actions.ts` |
@@ -118,16 +123,17 @@ Database-backed tests must use an explicitly supplied test connection and must
 never silently target production. Unit tests must remain runnable without a
 database.
 
-CI runs migrations through `pnpm db:exec-migrations` before deploying each
-preview in the reference deployment. Other deployments must run the same
-forward-only migrations before starting the app.
+CI runs the selected adapter's migrations through `pnpm db:exec-migrations`
+before deploying each preview in the reference deployment. Replacement adapters
+must route this command to their own migration implementation.
 
 ## Making changes safely
 
 1. Read `README.md` and the relevant document under `docs/`.
 2. Preserve the identity and idempotency invariants.
 3. Add pure tests for normalization, merge, aggregation, and API page behavior.
-4. Add a forward-only SQL migration for database changes.
+4. Add a forward-only migration owned by the selected adapter for database
+   changes.
 5. Run lint, typecheck, tests, build, and manifest validation.
 6. Commit only files related to the requested change; never commit plaintext
    `.env` files or credential values.
@@ -142,8 +148,8 @@ The startup update script runs `pnpm install`. Standard commands live in
 
 - **Toolchain**: Node 22 and pnpm 10.33.3 (pinned via `packageManager`) are
   preinstalled. `pnpm dev` serves `apps/web` on port 3000 with Turbopack.
-- **No database is configured by default in the VM**: Unless `DATABASE_URL` or a
-  supported provider alias is supplied, `/api/health` returns `503` and
+- **No database is configured by default in the VM**: Unless the selected
+  adapter's connection environment is supplied, `/api/health` returns `503` and
   DB-backed routes (`/`, `/repositories/[repository]`, `/settings`,
   `/api/hooks/events`, the cron sync) throw at request time. Unit tests and
   builds remain database-free.

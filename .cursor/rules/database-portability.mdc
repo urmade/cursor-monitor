@@ -1,16 +1,21 @@
 ---
-description: Keep generic PostgreSQL as the baseline and isolate optional database providers behind the database package
+description: Keep one replaceable database adapter behind the database package
 alwaysApply: true
 ---
 
-# Database portability — hard project rule
+# Single database adapter — hard project rule
 
-Cursor Monitor must run against a standards-compatible PostgreSQL database
-without requiring Supabase APIs, roles, extensions, or client libraries.
+Cursor Monitor ships with PostgreSQL as its default database adapter, but
+organizations may replace it with any backend that satisfies the adapter
+contract.
 
 ## Connection contract
 
-- `DATABASE_URL` is the canonical runtime connection string.
+- `DATABASE_ADAPTER` selects one adapter and defaults to `postgres`.
+- Exactly one database adapter and one database connection are active per
+  deployment. Do not add fan-out, fallback, dual-read, dual-write, or per-request
+  database routing.
+- `DATABASE_URL` is the canonical runtime connection for the selected adapter.
 - `MIGRATION_DATABASE_URL` is an optional direct connection for migrations and
   defaults to the runtime URL.
 - Provider aliases such as `DB_POSTGRES_URL` and
@@ -21,21 +26,23 @@ without requiring Supabase APIs, roles, extensions, or client libraries.
 
 ## Provider boundaries
 
-- Generic PostgreSQL is the required baseline implementation.
+- PostgreSQL is the default shipped adapter, not a product requirement.
 - The Supabase integration in `app-manifest.yml` is the reference internalsphere
   deployment, not a product invariant.
-- Organizations may replace the reference deployment or add another database
-  backend. Provider-specific code belongs behind `packages/db`; it must not leak
-  into `packages/core`, hook payloads, or UI identity behavior.
-- New backends must preserve identity, idempotency, migration, locking, and
-  transaction semantics and must include backend-specific tests and operations
-  documentation.
+- Organizations may replace the default adapter or reference deployment.
+  Provider-specific clients, queries, schemas, and migrations belong behind
+  `packages/db`; they must not leak into `packages/core`, hook payloads, or UI
+  identity behavior.
+- Replacement adapters must preserve identity, idempotency, migration, locking,
+  ordering, and transaction semantics and must include adapter contract tests
+  and operations documentation.
+- Follow `docs/database-adapters.md` when replacing or adding an adapter
+  implementation.
 
 ## Schema and validation
 
-- PostgreSQL schema changes use forward-only migrations under
-  `packages/db/migrations/`.
-- Do not require provider-owned roles or extensions in the baseline schema.
+- Each adapter owns its schema and forward-only migrations. The default
+  PostgreSQL adapter uses `packages/db/migrations/`.
 - Unit tests must run without a live database. Integration tests may use an
   explicitly supplied test database and must never silently target production.
 - Never commit connection strings, passwords, plaintext `.env` files, or

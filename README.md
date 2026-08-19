@@ -35,9 +35,15 @@ DATABASE_URL=postgresql://user:password@host:5432/database pnpm dev
 ```
 
 Use a secret manager or uncommitted local environment file instead of placing a
-real connection string in source or shared shell history. `DATABASE_URL` accepts
-any standards-compatible PostgreSQL connection. If the runtime URL is pooled,
-set `MIGRATION_DATABASE_URL` to a direct connection before running migrations.
+real connection string in source or shared shell history. PostgreSQL is the
+default adapter, so an unset `DATABASE_ADAPTER` is equivalent to `postgres`.
+Its `DATABASE_URL` accepts any standards-compatible PostgreSQL connection. If
+the runtime URL is pooled, set `MIGRATION_DATABASE_URL` to a direct connection
+before running migrations.
+
+Organizations may replace PostgreSQL by implementing the semantic contract in
+`packages/db`. A deployment always selects one adapter and one database; the app
+does not query or synchronize multiple databases.
 
 The reference internalsphere deployment still provisions the `db` Supabase
 integration from `app-manifest.yml`. Its `DB_POSTGRES_URL` and
@@ -48,8 +54,9 @@ Required production settings:
 
 | Setting | Purpose |
 |---|---|
-| `DATABASE_URL` | Generic PostgreSQL runtime connection |
-| `MIGRATION_DATABASE_URL` | Optional direct migration connection |
+| `DATABASE_ADAPTER` | One adapter ID; defaults to `postgres` |
+| `DATABASE_URL` | Selected adapter's runtime connection |
+| `MIGRATION_DATABASE_URL` | Optional selected-adapter migration connection |
 | `CRON_SECRET` | Authenticates the five-minute Vercel cron |
 | `CURSOR_MONITOR_HOOK_TOKEN` | Authenticates incoming project-hook events |
 | `CURSOR_MONITOR_PUBLIC_URL` | Stable public URL embedded in fresh hook installers |
@@ -78,7 +85,7 @@ packages/core/               Product rules and orchestration
   src/team-sync.ts           Poll windows, locking, and persistence
 
 packages/team-api/           Cursor usage API HTTP client
-packages/db/                 PostgreSQL configuration, Drizzle schema, migrations
+packages/db/                 Neutral adapter contract and default PostgreSQL adapter
 packages/config/             Shared TypeScript and ESLint configuration
 ```
 
@@ -89,9 +96,11 @@ packages/config/             Shared TypeScript and ESLint configuration
 - `docs/hooks.md` — platform installers and hook operations
 - `docs/team-api-sync.md` — polling, paging, overlap, and matching
 - `docs/operations.md` — secrets, health checks, failure recovery
+- `docs/database-adapters.md` — replace the default persistence adapter
 - `docs/ai-agent-guide.md` — code exploration and common modification recipes
 - `docs/decisions/0001-standalone-monitor.md` — architectural decision record
 - `docs/decisions/0002-generic-postgres-baseline.md` — database portability
+- `docs/decisions/0003-single-database-adapter.md` — adapter boundary
 
 ## Verification
 

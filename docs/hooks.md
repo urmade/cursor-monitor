@@ -85,11 +85,11 @@ Fresh installers are generated from the running app configuration.
 fallbacks. Regenerating an installer after the public URL changes embeds the new
 endpoint automatically.
 
-Database credentials are never embedded in hooks. Replacing `DATABASE_URL` or a
-provider alias changes only the server-side persistence target and does not
-require a hook update. Already-installed hook files need regeneration only when
-the application URL or hook token changes, unless centrally managed runtime
-overrides are used.
+Database adapter IDs and credentials are never embedded in hooks. Replacing
+`DATABASE_ADAPTER`, `DATABASE_URL`, or a provider alias changes only the
+server-side persistence target and does not require a hook update.
+Already-installed hook files need regeneration only when the application URL or
+hook token changes, unless centrally managed runtime overrides are used.
 
 Installer downloads use `Cache-Control: private, no-store` and require the
 Passport-protected application. Treat generated scripts as secrets because the

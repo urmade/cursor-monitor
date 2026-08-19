@@ -3,17 +3,25 @@
 ## Deployment
 
 Every deployment must run `pnpm db:exec-migrations` before starting `apps/web`.
-The reference internalsphere deployment does this through the managed GitHub
+This command migrates the one adapter selected by `DATABASE_ADAPTER`. The
+reference internalsphere deployment does this through the managed GitHub
 workflow: a PR provisions its PostgreSQL-compatible Supabase resource, applies
 migrations, and deploys the app.
 
-Other deployments may use any standards-compatible PostgreSQL service and their
-own deployment tooling.
+Other deployments may replace the default adapter and use their own deployment
+tooling. See `docs/database-adapters.md`.
 
 ## Database configuration
 
-Set `DATABASE_URL` to the server-only PostgreSQL runtime connection. Existing
-provider names are resolved in this order:
+`DATABASE_ADAPTER` selects one adapter and defaults to `postgres`. It accepts one
+exact ID, not a list. The runtime never falls back to another adapter and rejects
+a second adapter or connection in the same process.
+
+Set `DATABASE_URL` to the selected adapter's server-only runtime connection.
+`MIGRATION_DATABASE_URL` optionally supplies its migration connection. These
+variables describe one logical database, not separate data sources.
+
+For the default PostgreSQL adapter, provider names are resolved in this order:
 
 1. `DATABASE_URL`
 2. `POSTGRES_URL`
@@ -34,11 +42,12 @@ certificate and hostname verification, while the application tightens
 does not support TLS. `DB_SSL` remains as a legacy alias. Localhost connections
 default to TLS disabled.
 
-The migration identity must be able to create and alter tables and take a
-PostgreSQL advisory lock. If a separate runtime identity is used, grant it
-read/write access to the `monitor_*` tables and configure RLS policies (or
-deliberately disable RLS) for that identity. The app does not require Supabase
-roles, extensions, or APIs.
+The default adapter's migration identity must be able to create and alter tables
+and take a PostgreSQL advisory lock. If a separate runtime identity is used,
+grant it read/write access to the `monitor_*` tables and configure RLS policies
+(or deliberately disable RLS) for that identity. The app does not require
+Supabase roles, extensions, or APIs. Replacement adapters document equivalent
+permissions and locking requirements.
 
 ## Secrets
 
@@ -65,8 +74,8 @@ Supported keys:
 | `CURSOR_API_BASE_URL` | No | Defaults to official Cursor API |
 
 In the reference deployment, `DB_*` values are injected by `integrations.db`;
-do not duplicate them as manual secrets. Other deployments should store
-`DATABASE_URL` and `MIGRATION_DATABASE_URL` in their platform secret manager.
+do not duplicate them as manual secrets. Other deployments should store the one
+selected adapter ID and its connection values in their platform secret manager.
 
 ## Health surfaces
 
@@ -115,8 +124,9 @@ on every plan.
 ### Sync always skips as running
 
 The lock expires after ten minutes. If no run is active and the row remains,
-inspect `monitor_sync_locks` in PostgreSQL and compare its `expires_at` value.
-Normal syncs delete the lease in `finally`.
+inspect the configured adapter's sync lease storage (`monitor_sync_locks` in the
+default PostgreSQL adapter) and compare its expiry. Normal syncs release the
+lease in `finally`.
 
 ### Costs appear pending
 
