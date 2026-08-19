@@ -45,7 +45,7 @@ describe('single database adapter selection', () => {
     expect(getDatabase()).toBe(getDatabase());
     process.env.DATABASE_URL = 'postgres://other.example/monitor';
     expect(() => getDatabase()).toThrow(
-      /Only one database adapter and connection/,
+      /Only one database adapter and configuration/,
     );
   });
 

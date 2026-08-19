@@ -25,8 +25,9 @@ product does not need multi-database aggregation, fallback, or routing.
   client, advisory locks, connection aliases, and SQL migrations are internal to
   `packages/db`.
 - `DATABASE_ADAPTER` selects exactly one adapter and defaults to `postgres`.
-  `DATABASE_URL` configures the selected adapter. Runtime initialization rejects
-  a second adapter or connection in the same process.
+  `DATABASE_URL` configures one logical database for the selected adapter.
+  Runtime initialization rejects a second adapter or configuration in the same
+  process.
 - The runtime and migration command use the same immutable adapter catalog.
   There is no automatic fallback when an adapter is unknown or unavailable.
 - Replacement adapters must preserve hook and usage deduplication, repository

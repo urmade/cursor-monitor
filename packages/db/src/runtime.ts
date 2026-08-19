@@ -109,7 +109,7 @@ export function getDatabase(): DatabaseAdapter {
       state.configurationFingerprint !== fingerprint
     ) {
       throw new Error(
-        'Only one database adapter and connection may be active per process',
+        'Only one database adapter and configuration may be active per process',
       );
     }
     return state.database;

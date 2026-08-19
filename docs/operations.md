@@ -15,7 +15,7 @@ tooling. See `docs/database-adapters.md`.
 
 `DATABASE_ADAPTER` selects one adapter and defaults to `postgres`. It accepts one
 exact ID, not a list. The runtime never falls back to another adapter and rejects
-a second adapter or connection in the same process.
+a second adapter or logical database configuration in the same process.
 
 Set `DATABASE_URL` to the selected adapter's server-only runtime connection.
 `MIGRATION_DATABASE_URL` optionally supplies its migration connection. These

@@ -12,9 +12,9 @@ contract.
 ## Connection contract
 
 - `DATABASE_ADAPTER` selects one adapter and defaults to `postgres`.
-- Exactly one database adapter and one database connection are active per
-  deployment. Do not add fan-out, fallback, dual-read, dual-write, or per-request
-  database routing.
+- Exactly one database adapter and one logical database configuration are active
+  per deployment. Do not add fan-out, fallback, dual-read, dual-write, or
+  per-request database routing.
 - `DATABASE_URL` is the canonical runtime connection for the selected adapter.
 - `MIGRATION_DATABASE_URL` is an optional direct connection for migrations and
   defaults to the runtime URL.

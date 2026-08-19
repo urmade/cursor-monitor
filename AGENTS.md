@@ -25,7 +25,7 @@ contract in `packages/db/src/adapter.ts`.
 
 The `db` Supabase integration in `app-manifest.yml` is only the reference
 internalsphere deployment. Deployments select exactly one adapter with
-`DATABASE_ADAPTER` (default `postgres`) and configure one database connection.
+`DATABASE_ADAPTER` (default `postgres`) and configure one logical database.
 Multi-database routing, fallback, dual reads, and dual writes are not supported.
 Provider-specific behavior must remain behind `packages/db` and preserve product
 invariants. Database credentials are server-only and must never be added to
