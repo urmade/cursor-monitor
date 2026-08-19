@@ -3,19 +3,17 @@ import { notFound, redirect } from 'next/navigation';
 import {
   canonicalRepository,
   NO_REPOSITORY_KEY,
-  type MonitorConversation,
+  UNKNOWN_CONVERSATION_KEY,
 } from '@cursor-monitor/core';
-import {
-  renameBranch,
-  renameConversation,
-  unmergeRepository,
-} from '@/src/server/actions';
+import { unmergeRepository } from '@/src/server/actions';
 import {
   loadBranchNames,
   loadRepositoryProject,
 } from '@/src/server/data';
 import { currentAdmin } from '@/src/server/identity';
+import { conversationBranchKey } from '@/src/lib/branches';
 import { formatCost, formatDate, formatDuration } from '@/src/lib/format';
+import { renamePath, repositoryPath } from '@/src/lib/paths';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,16 +29,6 @@ function statusClass(status: string | null): string {
     return 'badge badge-warning';
   }
   return 'badge';
-}
-
-function branchKey(
-  conversation: MonitorConversation,
-  repositoryCount: number,
-): string {
-  const branch = conversation.branch || 'No branch';
-  return repositoryCount > 1
-    ? `${conversation.originatingRepository}/${branch}`
-    : branch;
 }
 
 export default async function RepositoryPage({
@@ -59,7 +47,7 @@ export default async function RepositoryPage({
       candidate.sourceRepositories.includes(requested),
     );
     if (merged) {
-      redirect(`/repositories/${encodeURIComponent(merged.key)}`);
+      redirect(repositoryPath(merged.key));
     }
     notFound();
   }
@@ -76,7 +64,10 @@ export default async function RepositoryPage({
   );
   const groups = new Map<string, MonitorConversation[]>();
   for (const conversation of conversations) {
-    const key = branchKey(conversation, project.sourceRepositories.length);
+    const key = conversationBranchKey(
+      conversation,
+      project.sourceRepositories.length,
+    );
     const group = groups.get(key) ?? [];
     group.push(conversation);
     groups.set(key, group);
@@ -103,16 +94,25 @@ export default async function RepositoryPage({
         <div className="code-actions">
           <Link
             className={`button ${sort === 'cost' ? 'button-primary' : 'button-secondary'}`}
-            href={`/repositories/${encodeURIComponent(project.key)}?sort=cost`}
+            href={`${repositoryPath(project.key)}?sort=cost`}
           >
             Sort by cost
           </Link>
           <Link
             className={`button ${sort !== 'cost' ? 'button-primary' : 'button-secondary'}`}
-            href={`/repositories/${encodeURIComponent(project.key)}`}
+            href={repositoryPath(project.key)}
           >
             Sort by activity
           </Link>
+          {admin && project.key !== NO_REPOSITORY_KEY ? (
+            <Link
+              aria-label={`Rename ${project.displayName}`}
+              className="button button-secondary"
+              href={renamePath(project.key)}
+            >
+              Rename
+            </Link>
+          ) : null}
           {githubUrl ? (
             <a className="button button-secondary" href={githubUrl}>
               Open GitHub ↗
@@ -207,25 +207,13 @@ export default async function RepositoryPage({
                   {items.length} conversation{items.length === 1 ? '' : 's'}
                 </span>
                 {admin ? (
-                  <details className="manage">
-                    <summary>Rename branch</summary>
-                    <form action={renameBranch} className="form-row manage-content">
-                      <input name="repositoryKey" type="hidden" value={project.key} />
-                      <input name="branchKey" type="hidden" value={branch} />
-                      <label className="field">
-                        <span>Display name</span>
-                        <input
-                          defaultValue={label ?? ''}
-                          maxLength={120}
-                          name="displayName"
-                          placeholder={branch}
-                        />
-                      </label>
-                      <button className="button button-secondary" type="submit">
-                        Save
-                      </button>
-                    </form>
-                  </details>
+                  <Link
+                    aria-label={`Rename ${label || branch}`}
+                    className="button button-secondary"
+                    href={renamePath(project.key, { branch })}
+                  >
+                    Rename
+                  </Link>
                 ) : null}
               </div>
             </div>
@@ -256,36 +244,24 @@ export default async function RepositoryPage({
                         {conversation.model ?? 'Unknown model'} ·{' '}
                         {formatDuration(conversation.durationMs)}
                       </div>
-                      <div className="small subtle">
-                        Latest {formatDate(conversation.latestAt)}
+                      <div className="code-actions">
+                        <span className="small subtle">
+                          Latest {formatDate(conversation.latestAt)}
+                        </span>
+                        {admin &&
+                        conversation.key !== UNKNOWN_CONVERSATION_KEY ? (
+                          <Link
+                            aria-label={`Rename ${conversation.displayName}`}
+                            className="button button-secondary"
+                            href={renamePath(project.key, {
+                              conversation: conversation.key,
+                            })}
+                          >
+                            Rename
+                          </Link>
+                        ) : null}
                       </div>
                     </div>
-
-                    {admin ? (
-                      <form action={renameConversation} className="form-row">
-                        <input
-                          name="conversationKey"
-                          type="hidden"
-                          value={conversation.key}
-                        />
-                        <input
-                          name="repositoryKey"
-                          type="hidden"
-                          value={project.key}
-                        />
-                        <label className="field">
-                          <span>Conversation display name</span>
-                          <input
-                            maxLength={120}
-                            name="displayName"
-                            placeholder={conversation.displayName}
-                          />
-                        </label>
-                        <button className="button button-secondary" type="submit">
-                          Rename
-                        </button>
-                      </form>
-                    ) : null}
 
                     <div className="event-list">
                       {conversation.events.map((event) => (

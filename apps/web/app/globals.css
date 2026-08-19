@@ -362,6 +362,51 @@ h3 {
   color: var(--danger);
 }
 
+.rename-page {
+  width: 100%;
+  min-height: calc(100dvh - 172px);
+  grid-template-rows: auto auto minmax(24rem, 1fr);
+}
+
+.rename-panel {
+  width: 100%;
+  min-width: 0;
+  padding: 28px 32px;
+}
+
+.rename-form {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  width: 100%;
+}
+
+.rename-identity {
+  display: grid;
+  gap: 4px;
+}
+
+.rename-identity strong {
+  font-size: 14px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.rename-form .field {
+  width: 100%;
+}
+
+.rename-form input {
+  min-height: 48px;
+  font-size: 16px;
+}
+
+.rename-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .form-row {
   display: flex;
   align-items: end;
@@ -603,5 +648,14 @@ th {
 
   .conversation-card > summary > :nth-child(3) {
     display: none;
+  }
+
+  .rename-page {
+    min-height: calc(100dvh - 140px);
+    grid-template-rows: auto auto minmax(16rem, 1fr);
+  }
+
+  .rename-panel {
+    padding: 20px;
   }
 }
